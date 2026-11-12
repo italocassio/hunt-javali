@@ -64,3 +64,7 @@ func _ready() -> void:
 	cam.position = Vector3(0.0, 1.3, 2.2 + span * 0.62)
 	cam.look_at(Vector3(0, 0.45, 0))
 	cam.fov = 42.0
+	if OS.get_cmdline_user_args().has("--far"):
+		cam.position = Vector3(0.0, 1.65, 40.0)
+		cam.look_at(Vector3(0, 0.6, 0))
+		cam.fov = 30.0

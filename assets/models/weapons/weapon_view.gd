@@ -4,12 +4,16 @@ extends WeaponViewBase
 ## Nodes: Gun (animated) > Body, Mover (bolt / pump), RightArm, LeftArm, plus Muzzle + AdsAnchor at the root.
 
 const X: float = 0.20
+const HIP_YAW: float = 0.19   # ~11 degrees
 const PIVOT: Vector3 = Vector3(0.20, -0.22, -0.30)
 
-const WOOD: Color = Color(0.42, 0.25, 0.13)
-const WOOD_DARK: Color = Color(0.31, 0.18, 0.10)
-const METAL: Color = Color(0.13, 0.13, 0.145)
-const METAL_LIGHT: Color = Color(0.23, 0.24, 0.26)
+const WOOD: Color = Color(0.52, 0.35, 0.20)
+const WOOD_RED: Color = Color(0.58, 0.25, 0.14)
+const WOOD_LIGHT: Color = Color(0.62, 0.50, 0.34)
+const SYNTH: Color = Color(0.20, 0.21, 0.24)
+const WOOD_DARK: Color = Color(0.30, 0.20, 0.14)
+const METAL: Color = Color(0.30, 0.32, 0.36)
+const METAL_LIGHT: Color = Color(0.52, 0.54, 0.58)
 const SLEEVE: Color = Color(0.34, 0.39, 0.22)
 const SLEEVE_LIGHT: Color = Color(0.42, 0.47, 0.28)
 const SKIN: Color = Color(0.80, 0.60, 0.45)
@@ -206,88 +210,93 @@ static func _grip_box(k: MeshKit, y0: float, y1: float, z0: float, z1: float, w:
 
 
 func _carbine(body: MeshKit, mover: MeshKit) -> Dictionary:
-	_stock(body, [[-0.26, 0.022, -0.31, -0.15], [-0.40, 0.020, -0.275, -0.17], [-0.52, 0.018, -0.25, -0.178], [-0.60, 0.018, -0.24, -0.18]], WOOD)
-	_grip_box(body, -0.235, -0.165, -0.60, -0.80, 0.040, METAL)
-	_cyl_z(body, -0.19, -0.80, -1.25, 0.011, 0.010, 6, METAL, METAL_LIGHT)
-	_grip_box(body, -0.242, -0.205, -0.72, -1.02, 0.034, WOOD)
-	_grip_box(body, -0.262, -0.24, -0.58, -0.66, 0.012, METAL)
-	_grip_box(body, -0.168, -0.156, -0.74, -0.77, 0.02, METAL_LIGHT)
-	_grip_box(body, -0.182, -0.164, -1.22, -1.24, 0.008, METAL_LIGHT)
-	mover.box(Vector3(X + 0.03, -0.19, -0.68), Vector3(0.03, 0.01, 0.012), METAL_LIGHT)
-	mover.ellipsoid(Vector3(X + 0.05, -0.19, -0.68), Vector3(0.011, 0.011, 0.011), 4, 2, METAL_LIGHT)
-	return {"muzzle": Vector3(X, -0.19, -1.25), "ads": Vector3(X, -0.158, -0.75), "kind": &"carbine", "kick": 0.045, "flash": 0.0035,
-		"rhand": Vector3(X, -0.255, -0.55), "lhand": Vector3(X, -0.262, -0.90)}
+	# slim and light: pale wood, short thin barrel, open sights, no scope
+	_stock(body, [[-0.38, 0.018, -0.29, -0.17], [-0.40, 0.016, -0.265, -0.18], [-0.52, 0.015, -0.245, -0.185], [-0.60, 0.015, -0.238, -0.188]], WOOD_LIGHT)
+	_grip_box(body, -0.228, -0.172, -0.60, -0.78, 0.030, METAL)
+	_cyl_z(body, -0.195, -0.78, -1.08, 0.009, 0.008, 6, METAL, METAL_LIGHT)
+	_grip_box(body, -0.236, -0.205, -0.72, -0.98, 0.028, WOOD_LIGHT)
+	_grip_box(body, -0.256, -0.236, -0.58, -0.66, 0.010, METAL)
+	_grip_box(body, -0.166, -0.150, -0.70, -0.73, 0.022, METAL_LIGHT)      # rear sight leaf
+	_grip_box(body, -0.186, -0.162, -1.05, -1.07, 0.008, METAL_LIGHT)      # front post
+	mover.box(Vector3(X + 0.025, -0.19, -0.66), Vector3(0.025, 0.009, 0.012), METAL_LIGHT)
+	return {"muzzle": Vector3(X, -0.195, -1.08), "ads": Vector3(X, -0.155, -0.715), "kind": &"carbine", "kick": 0.04, "flash": 0.003,
+		"rhand": Vector3(X, -0.245, -0.55), "lhand": Vector3(X, -0.25, -0.86)}
 
 
 func _shotgun(body: MeshKit, mover: MeshKit) -> Dictionary:
-	_stock(body, [[-0.26, 0.026, -0.315, -0.14], [-0.40, 0.023, -0.285, -0.155], [-0.52, 0.021, -0.26, -0.168], [-0.60, 0.020, -0.25, -0.175]], WOOD)
-	_grip_box(body, -0.24, -0.155, -0.60, -0.84, 0.046, METAL)
-	_cyl_z(body, -0.185, -0.84, -1.27, 0.0165, 0.0155, 7, METAL, METAL_LIGHT)
-	_cyl_z(body, -0.225, -0.84, -1.15, 0.012, 0.012, 6, METAL_LIGHT, METAL_LIGHT)
-	_grip_box(body, -0.268, -0.245, -0.64, -0.74, 0.012, METAL)
-	_grip_box(body, -0.168, -0.155, -1.255, -1.27, 0.01, METAL_LIGHT)
-	_grip_box(body, -0.165, -0.150, -0.86, -1.02, 0.012, METAL)
-	mover.box(Vector3(X, -0.228, -0.98), Vector3(0.048, 0.052, 0.22), WOOD_DARK, WOOD)
-	mover.box(Vector3(X, -0.20, -0.98), Vector3(0.02, 0.01, 0.2), METAL)
-	return {"muzzle": Vector3(X, -0.185, -1.27), "ads": Vector3(X, -0.152, -0.9), "kind": &"pump", "kick": 0.085, "flash": 0.0055,
-		"rhand": Vector3(X, -0.255, -0.57), "lhand": Vector3(X, -0.262, -0.98)}
+	# fat barrel with a magazine tube under it and a big pump slide; no scope
+	_stock(body, [[-0.38, 0.026, -0.315, -0.14], [-0.40, 0.024, -0.285, -0.155], [-0.52, 0.022, -0.262, -0.168], [-0.60, 0.021, -0.252, -0.175]], WOOD_DARK)
+	_grip_box(body, -0.245, -0.150, -0.60, -0.86, 0.050, METAL)
+	_cyl_z(body, -0.178, -0.86, -1.30, 0.024, 0.023, 8, METAL, METAL_LIGHT)
+	_cyl_z(body, -0.228, -0.86, -1.22, 0.017, 0.017, 6, METAL_LIGHT, METAL_LIGHT)
+	_grip_box(body, -0.272, -0.245, -0.64, -0.74, 0.012, METAL)
+	_grip_box(body, -0.138, -0.124, -1.28, -1.30, 0.010, Color(0.9, 0.85, 0.6))   # bead sight
+	mover.box(Vector3(X, -0.235, -1.0), Vector3(0.070, 0.070, 0.30), WOOD, WOOD_DARK)
+	return {"muzzle": Vector3(X, -0.178, -1.30), "ads": Vector3(X, -0.142, -0.9), "kind": &"pump", "kick": 0.09, "flash": 0.0065,
+		"rhand": Vector3(X, -0.255, -0.57), "lhand": Vector3(X, -0.262, -1.0)}
 
 
 func _scope(k: MeshKit, y: float, z_eye: float, length: float, r: float, obj_r: float) -> void:
-	var tube: Color = Color(0.09, 0.09, 0.10)
-	_cyl_z(k, y, z_eye, z_eye - 0.07, r * 1.25, r * 1.1, 8, tube, tube)                     # eyepiece bell
-	_cyl_z(k, y, z_eye - 0.07, z_eye - length + 0.08, r, r, 8, METAL, METAL_LIGHT, X, false)   # tube
-	_cyl_z(k, y, z_eye - length + 0.08, z_eye - length, r * 1.1, obj_r, 8, tube, tube)       # objective bell
+	var tube: Color = Color(0.20, 0.21, 0.24)
+	_cyl_z(k, y, z_eye, z_eye - 0.07, r * 1.25, r * 1.1, 8, tube, tube)
+	_cyl_z(k, y, z_eye - 0.07, z_eye - length + 0.08, r, r, 8, METAL, METAL_LIGHT, X, false)
+	_cyl_z(k, y, z_eye - length + 0.08, z_eye - length, r * 1.1, obj_r, 8, tube, tube)
 	_grip_box(k, y - 0.04, y - 0.012, z_eye - 0.10, z_eye - 0.14, 0.018, METAL)
 	_grip_box(k, y - 0.04, y - 0.012, z_eye - length + 0.14, z_eye - length + 0.18, 0.018, METAL)
-	# turret
 	_grip_box(k, y + r * 0.8, y + r * 1.6, z_eye - length * 0.5, z_eye - length * 0.5 - 0.03, 0.02, METAL_LIGHT)
 
 
 func _rifle_308(body: MeshKit, mover: MeshKit) -> Dictionary:
-	_stock(body, [[-0.26, 0.022, -0.30, -0.14], [-0.40, 0.020, -0.28, -0.15], [-0.55, 0.018, -0.255, -0.165], [-0.64, 0.017, -0.24, -0.175]], WOOD)
+	# bolt action: medium scope, big bolt handle sticking out of the right side
+	_stock(body, [[-0.38, 0.022, -0.30, -0.14], [-0.40, 0.020, -0.28, -0.15], [-0.55, 0.018, -0.255, -0.165], [-0.64, 0.017, -0.24, -0.175]], WOOD)
 	_grip_box(body, -0.235, -0.165, -0.64, -0.88, 0.040, METAL)
 	_cyl_z(body, -0.19, -0.88, -1.35, 0.0145, 0.012, 7, METAL, METAL_LIGHT)
 	_grip_box(body, -0.246, -0.205, -0.84, -1.14, 0.038, WOOD)
 	_grip_box(body, -0.268, -0.243, -0.62, -0.70, 0.012, METAL)
-	_scope(body, -0.125, -0.54, 0.34, 0.019, 0.029)
-	mover.box(Vector3(X + 0.045, -0.19, -0.72), Vector3(0.05, 0.011, 0.012), METAL_LIGHT)
-	mover.ellipsoid(Vector3(X + 0.078, -0.19, -0.72), Vector3(0.013, 0.013, 0.013), 5, 3, METAL_LIGHT)
+	_scope(body, -0.125, -0.54, 0.44, 0.013, 0.021)
+	mover.box(Vector3(X + 0.06, -0.19, -0.72), Vector3(0.10, 0.014, 0.016), METAL_LIGHT)
+	mover.ellipsoid(Vector3(X + 0.125, -0.19, -0.72), Vector3(0.028, 0.028, 0.028), 5, 3, METAL_LIGHT)
 	return {"muzzle": Vector3(X, -0.19, -1.35), "ads": Vector3(X, -0.125, -0.52), "kind": &"bolt", "kick": 0.07, "flash": 0.0045,
 		"rhand": Vector3(X, -0.255, -0.60), "lhand": Vector3(X, -0.262, -0.98)}
 
 
 func _rifle_3006(body: MeshKit, mover: MeshKit) -> Dictionary:
-	_stock(body, [[-0.26, 0.023, -0.31, -0.145], [-0.40, 0.021, -0.285, -0.155], [-0.52, 0.019, -0.26, -0.168], [-0.62, 0.018, -0.245, -0.178]], WOOD_DARK)
-	_grip_box(body, -0.24, -0.16, -0.62, -0.88, 0.043, METAL)
-	_cyl_z(body, -0.19, -0.88, -1.33, 0.0135, 0.0115, 7, METAL, METAL_LIGHT)
-	_grip_box(body, -0.245, -0.195, -0.88, -1.18, 0.042, WOOD_DARK)
-	_cyl_z(body, -0.163, -0.92, -1.16, 0.0075, 0.0075, 5, METAL_LIGHT, METAL_LIGHT)   # gas tube
-	_grip_box(body, -0.30, -0.24, -0.74, -0.82, 0.026, METAL)                         # box magazine
+	# semi-auto: long handguard, obvious detachable magazine, short low scope
+	_stock(body, [[-0.38, 0.023, -0.31, -0.145], [-0.40, 0.021, -0.285, -0.155], [-0.52, 0.019, -0.26, -0.168], [-0.62, 0.018, -0.245, -0.178]], WOOD_RED)
+	_grip_box(body, -0.24, -0.16, -0.62, -0.90, 0.043, METAL)
+	_cyl_z(body, -0.19, -0.90, -1.36, 0.0135, 0.0115, 7, METAL, METAL_LIGHT)
+	_grip_box(body, -0.248, -0.192, -0.88, -1.27, 0.044, Color(0.42, 0.45, 0.50))
+	for zz: float in [-0.96, -1.04, -1.12, -1.20]:
+		_grip_box(body, -0.236, -0.206, zz, zz - 0.04, 0.047, Color(0.12, 0.12, 0.14))   # vent slots
+	_cyl_z(body, -0.158, -0.95, -1.22, 0.0075, 0.0075, 5, METAL_LIGHT, METAL_LIGHT)
+	_grip_box(body, -0.40, -0.24, -0.69, -0.84, 0.036, Color(0.66, 0.60, 0.40))         # detachable box magazine, hangs low
 	_grip_box(body, -0.268, -0.243, -0.64, -0.72, 0.012, METAL)
-	_scope(body, -0.122, -0.56, 0.28, 0.017, 0.025)
-	mover.box(Vector3(X + 0.028, -0.185, -0.78), Vector3(0.025, 0.012, 0.045), METAL_LIGHT)
-	return {"muzzle": Vector3(X, -0.19, -1.33), "ads": Vector3(X, -0.122, -0.54), "kind": &"semi", "kick": 0.065, "flash": 0.005,
-		"rhand": Vector3(X, -0.255, -0.60), "lhand": Vector3(X, -0.262, -1.0)}
+	_scope(body, -0.118, -0.56, 0.17, 0.017, 0.027)
+	mover.box(Vector3(X + 0.03, -0.185, -0.78), Vector3(0.028, 0.014, 0.05), METAL_LIGHT)
+	return {"muzzle": Vector3(X, -0.19, -1.36), "ads": Vector3(X, -0.118, -0.54), "kind": &"semi", "kick": 0.065, "flash": 0.005,
+		"rhand": Vector3(X, -0.255, -0.60), "lhand": Vector3(X, -0.262, -1.02)}
 
 
 func _rifle_338(body: MeshKit, mover: MeshKit) -> Dictionary:
-	_stock(body, [[-0.26, 0.026, -0.315, -0.135], [-0.40, 0.024, -0.285, -0.148], [-0.55, 0.021, -0.26, -0.162], [-0.66, 0.020, -0.245, -0.172]], WOOD_DARK)
-	_grip_box(body, -0.24, -0.16, -0.66, -0.92, 0.044, METAL)
-	_cyl_z(body, -0.19, -0.92, -1.34, 0.021, 0.0185, 8, METAL, METAL_LIGHT)
-	_grip_box(body, -0.25, -0.205, -0.88, -1.16, 0.044, WOOD_DARK)
+	# the biggest: dark synthetic stock, heavy long barrel with muzzle brake, large scope
+	_stock(body, [[-0.38, 0.030, -0.325, -0.13], [-0.40, 0.027, -0.292, -0.145], [-0.55, 0.023, -0.262, -0.160], [-0.66, 0.021, -0.246, -0.170]], SYNTH)
+	_grip_box(body, -0.245, -0.158, -0.66, -0.93, 0.048, METAL)
+	_cyl_z(body, -0.19, -0.93, -1.46, 0.029, 0.026, 8, METAL, METAL_LIGHT)
+	_cyl_z(body, -0.245, -1.00, -1.32, 0.009, 0.009, 5, METAL_LIGHT, METAL_LIGHT)       # folded bipod
+	_grip_box(body, -0.172, -0.140, -0.36, -0.62, 0.05, Color(0.30, 0.31, 0.35))          # cheek rest
+	_grip_box(body, -0.26, -0.203, -0.88, -1.20, 0.048, SYNTH)
 	k_brake(body)
-	_grip_box(body, -0.272, -0.245, -0.66, -0.74, 0.012, METAL)
-	_scope(body, -0.118, -0.56, 0.44, 0.024, 0.038)
-	mover.box(Vector3(X + 0.05, -0.19, -0.76), Vector3(0.055, 0.012, 0.014), METAL_LIGHT)
-	mover.ellipsoid(Vector3(X + 0.085, -0.19, -0.76), Vector3(0.015, 0.015, 0.015), 5, 3, METAL_LIGHT)
-	return {"muzzle": Vector3(X, -0.19, -1.42), "ads": Vector3(X, -0.118, -0.52), "kind": &"bolt", "kick": 0.11, "flash": 0.0075,
-		"rhand": Vector3(X, -0.255, -0.62), "lhand": Vector3(X, -0.268, -1.0)}
+	_grip_box(body, -0.275, -0.245, -0.66, -0.74, 0.012, METAL)
+	_scope(body, -0.098, -0.56, 0.50, 0.034, 0.052)
+	mover.box(Vector3(X + 0.055, -0.19, -0.77), Vector3(0.065, 0.014, 0.016), METAL_LIGHT)
+	mover.ellipsoid(Vector3(X + 0.10, -0.19, -0.77), Vector3(0.022, 0.022, 0.022), 5, 3, METAL_LIGHT)
+	return {"muzzle": Vector3(X, -0.19, -1.55), "ads": Vector3(X, -0.098, -0.52), "kind": &"bolt", "kick": 0.11, "flash": 0.0085,
+		"rhand": Vector3(X, -0.255, -0.62), "lhand": Vector3(X, -0.268, -1.05)}
 
 
 static func k_brake(k: MeshKit) -> void:
-	k.box(Vector3(X, -0.19, -1.38), Vector3(0.05, 0.05, 0.08), METAL_LIGHT, METAL)
-	k.box(Vector3(X, -0.19, -1.38), Vector3(0.056, 0.03, 0.03), METAL)
+	k.box(Vector3(X, -0.19, -1.50), Vector3(0.080, 0.080, 0.12), METAL_LIGHT, METAL)
+	k.box(Vector3(X, -0.19, -1.50), Vector3(0.072, 0.036, 0.04), METAL)
 
 
 # --- animation -----------------------------------------------------------------------------------
@@ -400,6 +409,9 @@ func _apply_pose(_delta: float) -> void:
 		rot.x -= 0.5 * (1.0 - e)
 		rot.z -= 0.35 * (1.0 - e)
 
+	# At the hip the gun toes in toward screen center so its left side (profile) shows; fades out when aiming.
+	var hip: float = clampf(1.0 - absf(position.x) / X, 0.0, 1.0)
+	rot.y += HIP_YAW * hip
 	var basis: Basis = Basis.from_euler(Vector3(rot.x, rot.y, rot.z))
 	var xf: Transform3D = Transform3D(Basis.IDENTITY, PIVOT + pos) * Transform3D(basis, Vector3.ZERO) * Transform3D(Basis.IDENTITY, -PIVOT)
 	_gun.transform = xf

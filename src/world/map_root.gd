@@ -134,6 +134,13 @@ func build_props_and_water() -> void:
 	var holder: Node = get_node_or_null(^"PropSpawns")
 	if holder == null:
 		return
+	# Props that repeat share one MultiMeshInstance3D (one draw call) when their mesh is a single MeshInstance3D.
+	var counts: Dictionary = {}
+	for c: Node in holder.get_children():
+		if c is PropSpawn:
+			counts[(c as PropSpawn).prop_id] = int(counts.get((c as PropSpawn).prop_id, 0)) + 1
+	var templates: Dictionary = {}   # template key -> Dictionary ({} = not groupable)
+	var groups: Dictionary = {}      # template key -> Array[Transform3D] in MapRoot space
 	for c: Node in holder.get_children():
 		var p: PropSpawn = c as PropSpawn
 		if p == null:
@@ -141,14 +148,23 @@ func build_props_and_water() -> void:
 		var gx: float = p.global_position.x
 		var gz: float = p.global_position.z
 		p.global_position = Vector3(gx, heightmap.get_height(gx, gz), gz)
-		var visual: Node = AssetLoader.instantiate(ScenePaths.prop(p.prop_id))
-		if visual == null or not visual is Node3D:
-			if visual != null:
-				visual.queue_free()
-			var size: Vector3 = p.collision_size if p.collision_size != Vector3.ZERO else Vector3.ONE
-			visual = FallbackMeshes.box(size, FALLBACK_PROP_COLORS.get(p.prop_id, FALLBACK_PROP_COLOR) as Color)
-		visual.name = "Visual"
-		p.add_child(visual)
+		var grouped: bool = false
+		if int(counts[p.prop_id]) > 1:
+			var key: String = _template_key(p, templates)
+			if not (templates[key] as Dictionary).is_empty():
+				if not groups.has(key):
+					groups[key] = [] as Array[Transform3D]
+				(groups[key] as Array[Transform3D]).append(global_transform.affine_inverse() * p.global_transform
+					* ((templates[key] as Dictionary)["xf"] as Transform3D))
+				grouped = true
+		if not grouped:
+			var visual: Node = AssetLoader.instantiate(ScenePaths.prop(p.prop_id))
+			if visual == null or not visual is Node3D:
+				if visual != null:
+					visual.queue_free()
+				visual = FallbackMeshes.box(_fallback_size(p), FALLBACK_PROP_COLORS.get(p.prop_id, FALLBACK_PROP_COLOR) as Color)
+			visual.name = "Visual"
+			p.add_child(visual)
 		if p.collision_size != Vector3.ZERO and _shapes_used < STATIC_SHAPE_BUDGET:
 			var body: StaticBody3D = StaticBody3D.new()
 			body.name = "Body"
@@ -169,6 +185,92 @@ func build_props_and_water() -> void:
 			var pt: Rect2 = Rect2(Vector2(gx, gz), Vector2.ZERO)
 			_farm_rect = _farm_rect.merge(pt) if _has_farm_rect else pt
 			_has_farm_rect = true
+	for key: String in groups.keys():
+		_build_prop_group(key, templates[key] as Dictionary, groups[key] as Array[Transform3D])
+
+
+
+func _fallback_size(p: PropSpawn) -> Vector3:
+	return p.collision_size if p.collision_size != Vector3.ZERO else Vector3.ONE
+
+
+## Returns the key of the template to use for this spawn, building it on first use. The template entry is
+## {} when the prop cannot be grouped (caller then instantiates it per spawn, as before).
+func _template_key(p: PropSpawn, templates: Dictionary) -> String:
+	var akey: String = String(p.prop_id)
+	var missing_key: String = "~missing|" + akey
+	if templates.has(akey):
+		return akey
+	if not templates.has(missing_key):
+		var visual: Node = AssetLoader.instantiate(ScenePaths.prop(p.prop_id))
+		if visual != null and visual is Node3D:
+			# The asset builds its mesh in _ready, so it must be in the tree while it is inspected.
+			add_child(visual)
+			templates[akey] = _extract_template(visual as Node3D)
+			remove_child(visual)
+			visual.free()
+			return akey
+		if visual != null:
+			visual.free()
+		templates[missing_key] = {}
+	var fkey: String = "%s|%s" % [akey, _fallback_size(p)]
+	if not templates.has(fkey):
+		var box: MeshInstance3D = FallbackMeshes.box(_fallback_size(p), FALLBACK_PROP_COLORS.get(p.prop_id, FALLBACK_PROP_COLOR) as Color)
+		templates[fkey] = _extract_template(box)
+		box.free()
+	return fkey
+
+
+## Copies mesh, materials, shadow and visibility settings of the single MeshInstance3D under `root`.
+## Local transform is relative to `root`'s parent (the PropSpawn). Empty dictionary if not a single mesh.
+func _extract_template(root: Node3D) -> Dictionary:
+	var meshes: Array[MeshInstance3D] = []
+	_collect_meshes(root, meshes)
+	if meshes.size() != 1 or meshes[0].mesh == null:
+		return {}
+	var mi: MeshInstance3D = meshes[0]
+	var xf: Transform3D = mi.transform
+	var n: Node = mi.get_parent()
+	while n != null and n != root.get_parent():
+		if not n is Node3D:
+			return {}
+		xf = (n as Node3D).transform * xf
+		n = n.get_parent()
+	return {
+		"mesh": mi.mesh, "xf": xf, "material_override": mi.material_override, "material_overlay": mi.material_overlay,
+		"cast_shadow": mi.cast_shadow, "vis_begin": mi.visibility_range_begin, "vis_end": mi.visibility_range_end,
+		"vis_begin_margin": mi.visibility_range_begin_margin, "vis_end_margin": mi.visibility_range_end_margin,
+		"vis_fade": mi.visibility_range_fade_mode, "layers": mi.layers,
+	}
+
+
+func _collect_meshes(n: Node, out: Array[MeshInstance3D]) -> void:
+	if n is MeshInstance3D:
+		out.append(n as MeshInstance3D)
+	for ch: Node in n.get_children():
+		_collect_meshes(ch, out)
+
+
+func _build_prop_group(key: String, t: Dictionary, xforms: Array[Transform3D]) -> void:
+	var mm: MultiMesh = MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = t["mesh"] as Mesh
+	mm.instance_count = xforms.size()
+	for i: int in xforms.size():
+		mm.set_instance_transform(i, xforms[i])
+	var mmi: MultiMeshInstance3D = MultiMeshInstance3D.new()
+	mmi.name = "Group_" + key.replace("|", "_").replace(" ", "").replace("(", "").replace(")", "").replace(",", "_")
+	mmi.multimesh = mm
+	mmi.material_override = t["material_override"] as Material
+	mmi.material_overlay = t["material_overlay"] as Material
+	mmi.cast_shadow = t["cast_shadow"] as GeometryInstance3D.ShadowCastingSetting
+	mmi.visibility_range_begin = t["vis_begin"] as float
+	mmi.visibility_range_end = t["vis_end"] as float
+	mmi.visibility_range_begin_margin = t["vis_begin_margin"] as float
+	mmi.visibility_range_end_margin = t["vis_end_margin"] as float
+	mmi.visibility_range_fade_mode = t["vis_fade"] as GeometryInstance3D.VisibilityRangeFadeMode
+	mmi.layers = t["layers"] as int
+	add_child(mmi)
 
 
 func build_flora(density: float) -> void:

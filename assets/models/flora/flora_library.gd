@@ -232,14 +232,14 @@ static func _soy_patch() -> Mesh:
 	var k: MeshKit = MeshKit.new()
 	var base: Color = Color(0.20, 0.42, 0.14)
 	var top: Color = Color(0.46, 0.72, 0.24)
-	# two rows of three bushy plants (6 cones x 4 tris = 24 tris); bare earth shows between rows
+	# two long low bushes, one per row (2 x 12 tris = 24): flat-topped, wider than tall, bare earth between rows
 	var i: int = 0
 	for z: float in [-0.5, 0.5]:
-		for x: float in [-0.67, 0.0, 0.67]:
-			k.set_xf(Vector3(x, 0.0, z), Vector3(0.0, 45.0 * float(i % 2) + 12.0 * float(i), 0.0))
-			k.frustum(Vector3.ZERO, 0.40, 0.0, 0.62, 4, base, top, false, false)
-			k.reset_xf()
-			i += 1
+		k.set_xf(Vector3(0.0, 0.0, z), Vector3.ZERO, Vector3(1.0, 1.0, 0.5))
+		var lean: Vector2 = Vector2(0.08 * (1.0 - 2.0 * float(i)), 0.0)
+		k.frustum(Vector3.ZERO, 0.97, 0.6, 0.56, 4, base, top, true, false, lean)
+		k.reset_xf()
+		i += 1
 	var mesh: ArrayMesh = ArrayMesh.new()
 	k.build_into(mesh, wind_material(&"crop"))
 	return mesh

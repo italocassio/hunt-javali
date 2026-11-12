@@ -112,11 +112,11 @@ static func _tusk_len(type_id: StringName, bucket: int) -> float:
 		Ids.PIGLET:
 			return 0.0
 		Ids.SOW:
-			return 0.035 + 0.01 * bucket
+			return 0.09 + 0.02 * bucket
 		Ids.ALPHA:
-			return 0.17 + 0.035 * bucket
+			return 0.34 + 0.05 * bucket
 		_:
-			return 0.10 + 0.025 * bucket
+			return 0.19 + 0.03 * bucket
 
 
 static func _mane_height(type_id: StringName) -> float:
@@ -218,11 +218,20 @@ static func get_head_mesh(type_id: StringName, bucket: int) -> ArrayMesh:
 	# tusks
 	var tl: float = _tusk_len(type_id, bucket)
 	if tl > 0.0:
-		var ivory: Color = Color(0.94, 0.90, 0.78)
-		var thick: float = 0.016 + tl * 0.07
+		var ivory: Color = Color(0.99, 0.97, 0.90)
+		var thick: float = 0.02 + tl * 0.09
 		for sx in [-1.0, 1.0]:
-			k.set_xf(Vector3(0.062 * sx, -0.10, -0.15), Vector3(-60, 0, -20.0 * sx))
-			k.frustum(Vector3.ZERO, thick, 0.0, tl, 4, MeshKit.shade(ivory, 0.8), ivory, false, false)
+			# two segments: forward and outward from the lower jaw, then curling up
+			var p0: Vector3 = Vector3(0.065 * sx, -0.085, -0.15)
+			var d1: Vector3 = Vector3(0.55 * sx, -0.05, -0.85).normalized()
+			var d2: Vector3 = Vector3(0.45 * sx, 0.85, -0.35).normalized()
+			var l1: float = tl * 0.55
+			var l2: float = tl * 0.55
+			k.xf = Transform3D(Basis(Quaternion(Vector3.UP, d1)), p0)
+			k.frustum(Vector3.ZERO, thick, thick * 0.7, l1, 4, ivory, ivory, false, false)
+			var p1: Vector3 = p0 + d1 * l1
+			k.xf = Transform3D(Basis(Quaternion(Vector3.UP, d2)), p1)
+			k.frustum(Vector3.ZERO, thick * 0.7, 0.0, l2, 4, ivory, ivory, false, false)
 			k.reset_xf()
 	var mesh: ArrayMesh = k.build()
 	_mesh_cache[key] = mesh

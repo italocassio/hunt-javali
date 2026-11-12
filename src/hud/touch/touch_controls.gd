@@ -5,7 +5,10 @@ extends CanvasLayer
 ## events are never used, so tapping to look cannot fire the weapon.
 
 const SURFACE_MARGIN_PX: float = 24.0
-const JOYSTICK_ZONE_FRAC: float = 0.4       # left 40% of the screen
+const JOYSTICK_CENTER_FROM_LEFT_PX: float = 190.0   # fixed stick centre, bottom-left corner
+const JOYSTICK_CENTER_FROM_BOTTOM_PX: float = 160.0
+## Buttons whose finger also steers the camera when dragged (shoot / aim while tracking a target).
+const LOOK_BUTTONS: Array[StringName] = [&"fire", &"aim"]
 const HIT_PADDING_PX: float = 8.0
 const SLIDER_WIDTH_PX: float = 84.0
 const SLIDER_TRACK_WIDTH_PX: float = 10.0
@@ -51,6 +54,8 @@ var _toggled: Dictionary = {}         # action -> bool
 var _slider_finger: int = 0
 var _slider_active: bool = false
 var _slot_of: Dictionary = {}         # raw platform touch id (any int, even negative) -> local slot 0..N
+var _last_pos: Dictionary = {}        # slot -> last known position (deltas are computed here, never from `relative`)
+var _max_delta_px: float = 150.0
 var _slider_rect: Rect2 = Rect2()
 var _icons: Dictionary = {}           # icon id -> Texture2D
 var _item_label: String = ""
@@ -59,6 +64,7 @@ var _ended: bool = false
 
 func _ready() -> void:
 	layer = 11
+	_max_delta_px = float(Data.get_game().get("player", {}).get("touch_max_delta_px", 150.0))
 	add_child(_surface)
 	_surface.add_child(joystick)
 	_surface.add_child(look_pad)
@@ -107,8 +113,9 @@ func get_button_diameters() -> Dictionary:
 	return out
 
 
+## Any touch outside the stick, the buttons and the slider looks, so the look zone starts at the left edge.
 func get_look_zone_start_x() -> float:
-	return _screen_size().x * JOYSTICK_ZONE_FRAC
+	return 0.0
 
 
 func get_slider_rect() -> Rect2:
@@ -129,7 +136,7 @@ func _layout() -> void:
 			c = Vector2(float(def["ox"]), float(def["oy"]))
 		_centers[def["action"]] = c
 		_radii[def["action"]] = float(def["d"]) * 0.5
-	joystick.rest_center = Vector2(190.0, s.y - 160.0)
+	joystick.rest_center = Vector2(JOYSTICK_CENTER_FROM_LEFT_PX, s.y - JOYSTICK_CENTER_FROM_BOTTOM_PX)
 	_slider_rect = Rect2(Vector2(32.0, s.y * 0.26), Vector2(SLIDER_WIDTH_PX, s.y * 0.42))
 	_surface.queue_redraw()
 
@@ -158,6 +165,8 @@ func _release_everything() -> void:
 	look_pad.end()
 	_slider_active = false
 	_slot_of.clear()
+	_last_pos.clear()
+	joystick.unlock_run()
 	for action_name: StringName in _toggled.keys():
 		if bool(_toggled[action_name]):
 			Input.action_release(action_name)
@@ -170,6 +179,10 @@ func _process(_delta: float) -> void:
 	if _player != null and bool(_toggled.get(&"aim", false)) and not _player.is_alive():
 		_toggled[&"aim"] = false
 		Input.action_release(&"aim")
+	# A locked run ends when the hunter aims, crouches, or is gone.
+	if joystick.run_locked and (_player == null or not _player.is_alive() or _player.is_aiming()
+			or _player.is_crouching() or Input.is_action_pressed(&"aim") or Input.is_action_pressed(&"crouch")):
+		joystick.unlock_run()
 	_surface.queue_redraw()
 
 
@@ -197,13 +210,16 @@ func _input(event: InputEvent) -> void:
 				return
 			if _slot_of.has(touch.index):   # repeated press without a release: free the stale finger first
 				_finger_up(int(_slot_of[touch.index]))
+				_last_pos.erase(int(_slot_of[touch.index]))
 				_slot_of.erase(touch.index)
 			var slot: int = _acquire_slot()
 			_slot_of[touch.index] = slot
+			_last_pos[slot] = touch.position
 			_finger_down(slot, touch.position)
 		elif _slot_of.has(touch.index):    # released or canceled (iOS cancels when it takes over a gesture)
 			var slot: int = int(_slot_of[touch.index])
 			_slot_of.erase(touch.index)
+			_last_pos.erase(slot)
 			_finger_up(slot)
 	elif event is InputEventScreenDrag:
 		var drag: InputEventScreenDrag = event as InputEventScreenDrag
@@ -212,9 +228,14 @@ func _input(event: InputEvent) -> void:
 				return
 			var new_slot: int = _acquire_slot()   # drag without a press (missed event): adopt the finger
 			_slot_of[drag.index] = new_slot
+			_last_pos[new_slot] = drag.position
 			_finger_down(new_slot, drag.position)
 			return
-		_finger_drag(int(_slot_of[drag.index]), drag.position, drag.relative)
+		# Never trust drag.relative: on the Web it is computed against another finger's position.
+		var drag_slot: int = int(_slot_of[drag.index])
+		var previous: Vector2 = _last_pos.get(drag_slot, drag.position)
+		_last_pos[drag_slot] = drag.position
+		_finger_drag(drag_slot, drag.position, (drag.position - previous).limit_length(_max_delta_px))
 
 
 func _acquire_slot() -> int:
@@ -237,8 +258,8 @@ func _finger_down(finger: int, pos: Vector2) -> void:
 		_slider_active = true
 		_set_slider_from(pos)
 		return
-	# 3. left zone = joystick, rest = look
-	if pos.x < _screen_size().x * JOYSTICK_ZONE_FRAC:
+	# 3. the fixed stick's active area; 4. anywhere else = look (one look finger at a time, extras ignored)
+	if joystick.contains_point(pos):
 		if not joystick.is_active():
 			joystick.begin(finger, pos)
 	elif not look_pad.is_active():
@@ -262,11 +283,16 @@ func _finger_drag(finger: int, pos: Vector2, relative: Vector2) -> void:
 		joystick.drag(pos)
 	elif look_pad.owns(finger):
 		look_pad.drag(relative)
+	elif _finger_to_action.has(finger):
+		if LOOK_BUTTONS.has(_finger_to_action[finger]):
+			_on_look(relative)   # the finger holding Fire / Aim steers the camera while it keeps pressing
 	elif _slider_active and finger == _slider_finger:
 		_set_slider_from(pos)
 
 
 func _press_button(finger: int, action_name: StringName) -> void:
+	if action_name == &"crouch" or action_name == &"aim":
+		joystick.unlock_run()   # a locked run ends when the hunter crouches or aims
 	_finger_to_action[finger] = action_name
 	_down[action_name] = true
 	var mode: String = _mode_of(action_name)

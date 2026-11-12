@@ -201,22 +201,32 @@ func test_override_getter_and_forced_off_ignores_drag() -> void:
 	_end_input_test()
 
 
+## Spot in the free area (no button, no stick, no slider) where a finger becomes the look finger.
+func _free_spot(tc: TouchControls) -> Vector2:
+	var size_px: Vector2 = tc.get_viewport().get_visible_rect().size
+	return Vector2(size_px.x * 0.6, size_px.y * 0.3)
+
+
+func _press_at(tc: TouchControls, finger: int, pos: Vector2) -> void:
+	var ev: InputEventScreenTouch = _touch_event(true, finger)
+	ev.position = pos
+	tc._input(ev)
+
+
 ## Finger ids outside the usual 0..N (WebKit sends negative or huge ids): the bug that left the hunter
 ## standing still on iPhone. TouchControls is instantiated by class and fed events directly.
+## The stick is FIXED now: presses must start near `joystick.rest_center`.
 func test_touch_controls_negative_finger_id_drives_joystick_and_look() -> void:
 	_begin_input_test("on")
 	var tc: TouchControls = TouchControls.new()
 	track(tc)
 	await frames(2)
-	var size_px: Vector2 = tc.get_viewport().get_visible_rect().size
-	var left: Vector2 = Vector2(size_px.x * 0.2, size_px.y * 0.7)
-	var right: Vector2 = Vector2(size_px.x * 0.6, size_px.y * 0.3)
+	var stick: Vector2 = tc.joystick.rest_center + Vector2(20.0, -10.0)
+	var right: Vector2 = _free_spot(tc)
 	var finger: int = -1
-	var down: InputEventScreenTouch = _touch_event(true, finger)
-	down.position = left
-	tc._input(down)
+	_press_at(tc, finger, stick)
 	ok(tc.joystick.is_active(), "dedo com index -1 ativa o joystick")
-	tc._input(_drag_event(finger, Vector2(0.0, -80.0), left + Vector2(0.0, -80.0)))
+	tc._input(_drag_event(finger, Vector2.ZERO, stick + Vector2(0.0, -80.0)))
 	await frames(2)
 	ok(Input.is_action_pressed("move_forward"), "arrastar para cima pressiona move_forward")
 	tc._input(_touch_event(false, finger))
@@ -227,27 +237,142 @@ func test_touch_controls_negative_finger_id_drives_joystick_and_look() -> void:
 	var looks: Array = []
 	tc.look_pad.look.connect(func(rel: Vector2) -> void: looks.append(rel))
 	var big: int = -2147483000
-	var d2: InputEventScreenTouch = _touch_event(true, big)
-	d2.position = right
-	tc._input(d2)
+	_press_at(tc, big, right)
 	ok(tc.look_pad.is_active(), "dedo com id gigante negativo ativa o olhar")
 	tc._input(_drag_event(big, Vector2(12.0, 3.0), right + Vector2(12.0, 3.0)))
 	eq(looks.size(), 1, "arrasto emite look uma vez")
 	if looks.size() == 1:
-		eq(looks[0], Vector2(12.0, 3.0), "delta do olhar")
+		eq(looks[0], Vector2(12.0, 3.0), "delta do olhar (calculado pela posicao)")
 	tc._input(_touch_event(false, big))
 	ok(not tc.look_pad.is_active(), "soltar libera o olhar")
 	# Two fingers at once, one negative and one positive: each widget keeps its own finger.
-	var a: InputEventScreenTouch = _touch_event(true, -7)
-	a.position = left
-	var b: InputEventScreenTouch = _touch_event(true, 3)
-	b.position = right
-	tc._input(a)
-	tc._input(b)
+	_press_at(tc, -7, stick)
+	_press_at(tc, 3, right)
 	ok(tc.joystick.is_active() and tc.look_pad.is_active(), "multitoque: joystick e olhar ao mesmo tempo")
 	tc._input(_touch_event(false, -7))
 	ok(not tc.joystick.is_active() and tc.look_pad.is_active(), "soltar o do joystick nao solta o olhar")
 	tc._input(_touch_event(false, 3))
+	_end_input_test()
+
+
+func test_touch_controls_fixed_joystick_activation_area() -> void:
+	_begin_input_test("on")
+	var tc: TouchControls = TouchControls.new()
+	track(tc)
+	await frames(2)
+	var center: Vector2 = tc.joystick.rest_center
+	var active_r: float = tc.joystick.radius_px * tc.joystick.active_mult
+	eq(center.x, TouchControls.JOYSTICK_CENTER_FROM_LEFT_PX, "centro do joystick: 190 px da esquerda")
+	near(center.y, tc.get_viewport().get_visible_rect().size.y - TouchControls.JOYSTICK_CENTER_FROM_BOTTOM_PX, 0.01, "centro do joystick: 160 px do fundo")
+	_press_at(tc, 1, center + Vector2(active_r - 6.0, 0.0))
+	ok(tc.joystick.is_active() and not tc.look_pad.is_active(), "toque logo dentro da area ativa: joystick")
+	tc._input(_touch_event(false, 1))
+	_press_at(tc, 1, center + Vector2(active_r + 6.0, 0.0))
+	ok(not tc.joystick.is_active() and tc.look_pad.is_active(), "toque logo fora da area ativa: olhar")
+	tc._input(_touch_event(false, 1))
+	# Left half, mid height, far from the stick: must look, never grab the stick.
+	var mid_left: Vector2 = Vector2(center.x - 100.0, center.y - 300.0)
+	_press_at(tc, 1, mid_left)
+	ok(not tc.joystick.is_active() and tc.look_pad.is_active(), "metade esquerda longe do centro: olhar")
+	# A second finger on the stick still works while the first one looks (one look finger at a time).
+	_press_at(tc, 2, center)
+	ok(tc.joystick.is_active(), "com um dedo olhando, o joystick ainda pega o segundo dedo")
+	_press_at(tc, 3, _free_spot(tc))
+	eq(tc.look_pad.get_finger(), tc._slot_of[1], "um dedo de olhar por vez: o terceiro dedo e ignorado")
+	tc._input(_touch_event(false, 1))
+	tc._input(_touch_event(false, 2))
+	tc._input(_touch_event(false, 3))
+	_end_input_test()
+
+
+## The reported bug: walking with one finger while turning with another made the camera jump up/down
+## because Godot Web fills ScreenDrag.relative against ANOTHER finger's last position. TouchControls must
+## derive the delta from the finger's own positions, so wrong `relative` values change nothing.
+func test_touch_look_delta_ignores_wrong_relative_with_two_fingers() -> void:
+	_begin_input_test("on")
+	var tc: TouchControls = TouchControls.new()
+	track(tc)
+	await frames(2)
+	var looks: Array = []
+	tc.look_pad.look.connect(func(rel: Vector2) -> void: looks.append(rel))
+	var stick: Vector2 = tc.joystick.rest_center + Vector2(0.0, -20.0)
+	var look_start: Vector2 = _free_spot(tc)
+	_press_at(tc, 11, stick)       # stick finger
+	_press_at(tc, 22, look_start)  # look finger
+	ok(tc.joystick.is_active() and tc.look_pad.is_active(), "pre-condicao: os dois dedos presos")
+	var sum: Vector2 = Vector2.ZERO
+	for i: int in range(1, 11):
+		# Stick finger jitters; its relative is garbage (what the other finger's move would produce).
+		tc._input(_drag_event(11, Vector2(0.0, 40.0), stick + Vector2(sin(float(i)) * 3.0, -float(i))))
+		# Look finger moves ONLY horizontally by 8 px per event, but the platform reports a wrong relative.
+		tc._input(_drag_event(22, Vector2(3.0, -35.0), look_start + Vector2(8.0 * float(i), 0.0)))
+	for rel: Vector2 in looks:
+		sum += rel
+	eq(looks.size(), 10, "um evento de olhar por arrasto do dedo de olhar (o do joystick nao olha)")
+	near(sum.x, 80.0, 0.001, "soma horizontal = distancia arrastada")
+	near(sum.y, 0.0, 0.001, "soma vertical = 0: o relative errado nao muda o pitch")
+	for rel: Vector2 in looks:
+		near(rel.y, 0.0, 0.001, "cada delta e puramente horizontal")
+	# Same dragging with the events in the opposite interleaving (look finger first).
+	looks.clear()
+	for i: int in range(11, 16):
+		tc._input(_drag_event(22, Vector2(-9.0, 50.0), look_start + Vector2(8.0 * float(i), 0.0)))
+		tc._input(_drag_event(11, Vector2(7.0, 7.0), stick))
+	near(_sum_y(looks), 0.0, 0.001, "ordem invertida: pitch continua 0")
+	tc._input(_touch_event(false, 11))
+	tc._input(_touch_event(false, 22))
+	_end_input_test()
+
+
+func _sum_y(deltas: Array) -> float:
+	var total: float = 0.0
+	for d: Vector2 in deltas:
+		total += d.y
+	return total
+
+
+func test_touch_look_delta_is_clamped_per_event() -> void:
+	_begin_input_test("on")
+	var tc: TouchControls = TouchControls.new()
+	track(tc)
+	await frames(2)
+	var looks: Array = []
+	tc.look_pad.look.connect(func(rel: Vector2) -> void: looks.append(rel))
+	var start: Vector2 = _free_spot(tc)
+	_press_at(tc, 5, start)
+	tc._input(_drag_event(5, Vector2.ZERO, start + Vector2(2000.0, 0.0)))
+	eq(looks.size(), 1, "um evento de olhar")
+	if looks.size() == 1:
+		near((looks[0] as Vector2).length(), tc._max_delta_px, 0.001, "salto de 2000 px limitado a touch_max_delta_px")
+	tc._input(_touch_event(false, 5))
+	_end_input_test()
+
+
+func test_touch_run_lock_survives_finger_lift_and_unlocks_on_touch() -> void:
+	_begin_input_test("on")
+	var tc: TouchControls = TouchControls.new()
+	track(tc)
+	await frames(2)
+	var center: Vector2 = tc.joystick.rest_center
+	var r: float = tc.joystick.radius_px
+	_press_at(tc, 1, center)
+	tc._input(_drag_event(1, Vector2.ZERO, center + Vector2(0.0, -r * 1.2)))
+	ok(not tc.joystick.run_locked, "dentro de 1,2 x raio ainda nao trava a corrida")
+	tc._input(_drag_event(1, Vector2.ZERO, center + Vector2(0.0, -r * (tc.joystick.run_lock_mult + 0.3))))
+	ok(tc.joystick.run_locked, "empurrar alem de 1,8 x raio para cima trava a corrida")
+	tc._input(_touch_event(false, 1))
+	ok(tc.joystick.run_locked, "soltar o dedo mantem a corrida travada")
+	ok(not tc.joystick.is_active(), "joystick inativo com o dedo solto")
+	ok(Input.is_action_pressed("move_forward") and Input.is_action_pressed("sprint"), "travada: anda para frente e corre sem dedo")
+	_press_at(tc, 1, center)
+	ok(not tc.joystick.run_locked, "tocar o joystick de novo destrava")
+	tc._input(_touch_event(false, 1))
+	ok(not Input.is_action_pressed("move_forward") and not Input.is_action_pressed("sprint"), "destravada e solta: para")
+	# Pushing sideways far away must NOT lock (only mostly-upward pushes do).
+	_press_at(tc, 1, center)
+	tc._input(_drag_event(1, Vector2.ZERO, center + Vector2(r * 2.5, -r * 2.0)))
+	ok(not tc.joystick.run_locked, "empurrar quase na horizontal nao trava")
+	tc._input(_touch_event(false, 1))
 	_end_input_test()
 
 

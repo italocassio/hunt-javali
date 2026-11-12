@@ -394,6 +394,11 @@ func get_world() -> HuntWorld:
 	return _world
 
 
+## Camera pitch in degrees (positive = looking up), without recoil.
+func get_pitch_deg() -> float:
+	return rad_to_deg(_pitch)
+
+
 func get_request() -> HuntRequest:
 	return _request
 
@@ -406,7 +411,8 @@ func is_bot() -> bool:
 func apply_touch_look(rel_px: Vector2) -> void:
 	if not _can_look():
 		return
-	_apply_look(rel_px * deg_to_rad(float(_cfg.get("touch_deg_per_px", 0.25))) * _touch_sens)
+	var step: Vector2 = Vector2(rel_px.x, rel_px.y * float(_cfg.get("touch_pitch_mult", 1.0)))
+	_apply_look(step * deg_to_rad(float(_cfg.get("touch_deg_per_px", 0.115))) * _touch_sens)
 
 
 func request_pause() -> void:

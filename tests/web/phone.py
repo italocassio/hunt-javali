@@ -13,6 +13,7 @@ SHOTS_DIR = r"C:\Users\adrie\AppData\Local\Temp\claude\90ca056d862530a5\5cd4ecfb
 SCRATCH = r"C:\Users\adrie\AppData\Local\Temp\claude\90ca056d862530a5\5cd4ecfb-1f57-4211-b698-70930ccb7ffe\scratchpad"
 
 WIDTH, HEIGHT, DPR = 844, 390, 3
+QUERY = "?probe=1"   # enables the game's window.huntProbe QA hook (src/hud/hud.gd)
 UA = ("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/124.0.0.0 Mobile Safari/537.36")
 
@@ -63,7 +64,10 @@ class Phone:
         c.call("Emulation.setEmitTouchEventsForMouse", {"enabled": False})
         c.call("Emulation.setUserAgentOverride", {"userAgent": UA, "platform": "Android"})
         c.call("Page.addScriptToEvaluateOnNewDocument", {"source": HOOK_JS})
-        c.call("Page.navigate", {"url": f"http://127.0.0.1:{self.server.port}/index.html"})
+        c.call("Page.navigate", {"url": self.url()})
+
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server.port}/index.html{QUERY}"
 
     def stop(self):
         try:
@@ -106,6 +110,24 @@ class Phone:
             self.js("window.__ev = []")
         return [e for e in evs if e["ph"] == phase] if phase else evs
 
+    def probe(self):
+        """Current window.huntProbe (dict) or None."""
+        raw = self.js("window.huntProbe ? JSON.stringify(window.huntProbe) : null")
+        return json.loads(raw) if raw else None
+
+    def fresh_probe(self, timeout: float = 3.0):
+        """Waits for a publish newer than the last one seen, so reads are never stale."""
+        last = getattr(self, "_last_t", -1)
+        end = time.time() + timeout
+        st = None
+        while time.time() < end:
+            st = self.probe()
+            if st and st["t_ms"] != last:
+                self._last_t = st["t_ms"]
+                return st
+            time.sleep(0.05)
+        return st
+
     def console_tail(self, n: int = 30):
         return self.cdp.console[-n:]
 
@@ -121,6 +143,11 @@ class Phone:
 
     def move(self, fid: int, x: float, y: float):
         self.fingers[fid] = (x, y)
+        self._dispatch("touchMove")
+
+    def move_many(self, targets: dict):
+        """Moves several fingers in ONE touchMove event. targets: {finger_id: (x, y)}."""
+        self.fingers.update(targets)
         self._dispatch("touchMove")
 
     def up(self, fid: int):
@@ -156,7 +183,7 @@ class Phone:
 
     def navigate(self):
         self.fingers.clear()
-        self.cdp.call("Page.navigate", {"url": f"http://127.0.0.1:{self.server.port}/index.html"})
+        self.cdp.call("Page.navigate", {"url": self.url()})
         time.sleep(2.0)
 
     def wait_game_loaded(self, timeout: float = 120.0):

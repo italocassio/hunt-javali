@@ -161,6 +161,26 @@ func _spawn_player() -> void:
 		player.bot_set_aim(true)
 	if _args.has("demo"):
 		_run_demo.call_deferred()
+	if _args.has("stick"):
+		_run_stick_demo.call_deferred()
+
+
+## Screenshot helper (--stick or --stick=lock): holds the fixed stick pushed, optionally past the lock ring.
+func _run_stick_demo() -> void:
+	await get_tree().create_timer(0.4).timeout
+	var tc: TouchControls = player.find_child("TouchControls", true, false) as TouchControls
+	if tc == null:
+		return
+	var center: Vector2 = tc.joystick.rest_center
+	var down: InputEventScreenTouch = InputEventScreenTouch.new()
+	down.index = 1
+	down.pressed = true
+	down.position = center
+	tc._input(down)
+	var move: InputEventScreenDrag = InputEventScreenDrag.new()
+	move.index = 1
+	move.position = center + (Vector2(0.0, -170.0) if String(_args["stick"]) == "lock" else Vector2(55.0, -55.0))
+	tc._input(move)
 
 
 func _run_demo() -> void:

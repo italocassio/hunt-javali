@@ -8,6 +8,7 @@ const MARGIN_PX: int = 24
 const TOUCH_TOPLEFT_MARGIN_PX: int = 100      # leaves room for the touch pause button
 const TOUCH_BOTTOM_RIGHT_MARGIN_PX: int = 530 # leaves room for the touch buttons
 const ALARM_REPEAT_S: float = 3.0
+const PROBE_INTERVAL_S: float = 0.1
 const DOG_MSG_S: float = 1.2
 const END_MSG_S: float = 5.0
 const HEAL_MSG_S: float = 1.5
@@ -39,6 +40,8 @@ var _revealed: PackedVector3Array = PackedVector3Array()
 var _bait_points: PackedVector3Array = PackedVector3Array()
 var _marked_points: PackedVector3Array = PackedVector3Array()
 var _ended: bool = false
+var _probe_enabled: bool = false   # Web build opened with ?probe=1 (QA hook, see _publish_probe)
+var _probe_t: float = 0.0
 var _thermal: bool = false
 var _last_ammo_text: String = ""
 var _last_item_text: String = ""
@@ -106,6 +109,8 @@ func _ready() -> void:
 	add_child(_pause)
 	_connect_events()
 	_apply_touch_layout(InputSetup.is_touch_mode())
+	if OS.has_feature("web"):
+		_probe_enabled = bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('probe') === '1'", true))
 
 
 func bind(player: PlayerBase, world: HuntWorld) -> void:
@@ -377,6 +382,11 @@ func _process(delta: float) -> void:
 			_alarm_t = ALARM_REPEAT_S
 			Sfx.play(&"crop_alarm")
 		_crop_alert.modulate.a = 0.55 + 0.45 * sin(Time.get_ticks_msec() * 0.001 * TAU * BLINK_HZ)
+	if _probe_enabled:
+		_probe_t -= delta
+		if _probe_t <= 0.0:
+			_probe_t = PROBE_INTERVAL_S
+			_publish_probe()
 	_poll_t -= delta
 	if _poll_t <= 0.0:
 		_poll_t = POLL_INTERVAL_S
@@ -384,6 +394,26 @@ func _process(delta: float) -> void:
 			_reveal_left = maxf(_reveal_left - POLL_INTERVAL_S, 0.0)
 		_poll_world()
 		_minimap.update_player(origin, yaw)
+
+
+## QA hook for the Web build: window.huntProbe = {x, z, yaw_deg, pitch_deg, touch_mode, ammo_mag, health,
+## joystick_active, sprinting, look_active, run_locked, t_ms}, refreshed 10 times per second.
+func _publish_probe() -> void:
+	var state: Dictionary = {
+		"x": snappedf(_player.global_position.x, 0.001),
+		"z": snappedf(_player.global_position.z, 0.001),
+		"yaw_deg": snappedf(_player.rotation_degrees.y, 0.01),
+		"pitch_deg": snappedf(_player.get_pitch_deg(), 0.01),
+		"touch_mode": InputSetup.is_touch_mode(),
+		"ammo_mag": _player.get_ammo_in_mag(),
+		"health": snappedf(_player.get_health(), 0.1),
+		"joystick_active": _touch.joystick.is_active(),
+		"sprinting": _player.is_sprinting(),
+		"look_active": _touch.look_pad.is_active(),
+		"run_locked": _touch.joystick.run_locked,
+		"t_ms": Time.get_ticks_msec(),
+	}
+	JavaScriptBridge.eval("window.huntProbe = " + JSON.stringify(state) + ";", true)
 
 
 func _update_health() -> void:

@@ -17,7 +17,8 @@ const COLOR_KNOB: Color = Color(1.0, 1.0, 1.0, 0.45)
 ## Where the stick rests (faint hint) while nobody touches it.
 var rest_center: Vector2 = Vector2(190.0, 560.0)
 
-var _finger: int = -1
+var _finger: int = 0          # which finger (any int is valid; never a sentinel)
+var _active: bool = false     # whether a finger owns the stick
 var _origin: Vector2 = Vector2.ZERO
 var _vec: Vector2 = Vector2.ZERO     # x right, y up on screen (= forward), length <= 1
 var _sprint_t: float = 0.0
@@ -38,7 +39,11 @@ func _ready() -> void:
 
 
 func is_active() -> bool:
-	return _finger != -1
+	return _active
+
+
+func owns(finger: int) -> bool:
+	return _active and _finger == finger
 
 
 func get_finger() -> int:
@@ -55,6 +60,7 @@ func is_sprinting() -> bool:
 
 func begin(finger: int, pos: Vector2) -> void:
 	_finger = finger
+	_active = true
 	var lo: float = RADIUS_PX + EDGE_MARGIN_PX
 	_origin = Vector2(maxf(pos.x, lo), minf(pos.y, size.y - lo))
 	_set_from_position(pos)
@@ -65,7 +71,8 @@ func drag(pos: Vector2) -> void:
 
 
 func end() -> void:
-	_finger = -1
+	_active = false
+	_finger = 0
 	_vec = Vector2.ZERO
 	_sprint_t = 0.0
 	_sprinting = false
@@ -79,7 +86,7 @@ func _set_from_position(pos: Vector2) -> void:
 
 
 func _process(delta: float) -> void:
-	if _finger == -1:
+	if not _active:
 		return
 	if _vec.length() >= SPRINT_THRESHOLD:
 		_sprint_t += delta
@@ -110,9 +117,9 @@ func _set_axis(action_name: StringName, strength: float) -> void:
 
 
 func _draw() -> void:
-	var center: Vector2 = _origin if _finger != -1 else rest_center
+	var center: Vector2 = _origin if _active else rest_center
 	var knob: Vector2 = center + Vector2(_vec.x, -_vec.y) * RADIUS_PX
-	var idle_mult: float = 1.0 if _finger != -1 else 0.55
+	var idle_mult: float = 1.0 if _active else 0.55
 	if _base_tex != null:
 		draw_texture_rect(_base_tex, Rect2(center - Vector2.ONE * RADIUS_PX, Vector2.ONE * RADIUS_PX * 2.0),
 			false, Color(1, 1, 1, idle_mult))

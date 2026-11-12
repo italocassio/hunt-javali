@@ -73,14 +73,36 @@ func test_forced_touch_mode_ignores_real_mouse_buttons() -> void:
 	_end_input_test()
 
 
+func _touch_event(pressed: bool, index: int = 0) -> InputEventScreenTouch:
+	var ev: InputEventScreenTouch = InputEventScreenTouch.new()
+	ev.pressed = pressed
+	ev.index = index
+	ev.position = Vector2(300.0, 300.0)
+	return ev
+
+
+func _drag_event(index: int = 0, rel: Vector2 = Vector2(5.0, 0.0), pos: Vector2 = Vector2(300.0, 300.0)) -> InputEventScreenDrag:
+	var ev: InputEventScreenDrag = InputEventScreenDrag.new()
+	ev.index = index
+	ev.relative = rel
+	ev.position = pos
+	return ev
+
+
+## Real seconds: the touch window is wall-clock based (Time.get_ticks_msec).
+func _wait_touch_window() -> void:
+	await tree().create_timer(InputSetup.TOUCH_RECENT_S + 0.1).timeout
+
+
 func test_hybrid_device_real_click_switches_to_mouse_and_fires() -> void:
-	## Hybrid device (touchscreen + mouse): in "auto" with touch mode on, a real left click without any
-	## prior mouse motion must switch to mouse mode and fire at once.
+	## Hybrid device (touchscreen + mouse): in "auto" with touch mode on and no recent touch, a real left
+	## click without any prior mouse motion switches to mouse mode and fires at once.
 	_begin_input_test("auto")
-	var touch: InputEventScreenTouch = InputEventScreenTouch.new()
-	touch.pressed = true
-	InputSetup._input(touch)
+	InputSetup._input(_touch_event(true))
+	InputSetup._input(_touch_event(false))
 	ok(InputSetup.is_touch_mode(), "pre-condicao: modo toque ligado")
+	await _wait_touch_window()
+	ok(not InputSetup.is_touch_active(), "janela de toque recente expirou")
 	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
 	ok(not InputSetup.is_touch_mode(), "clique real sai do modo toque")
@@ -88,36 +110,144 @@ func test_hybrid_device_real_click_switches_to_mouse_and_fires() -> void:
 	eq(rec["count"], 1, "touch_mode_changed emitido uma vez")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
 	ok(not Input.is_action_pressed("fire"), "soltar libera fire")
-	# The emulated mouse click that a finger tap produces must not switch modes nor fire.
-	InputSetup._input(touch)
-	ok(InputSetup.is_touch_mode(), "toque volta ao modo toque")
-	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true, InputEvent.DEVICE_ID_EMULATION))
-	ok(InputSetup.is_touch_mode(), "clique emulado nao sai do modo toque")
-	ok(not Input.is_action_pressed("fire"), "clique emulado nao dispara")
 	_end_input_test()
 
 
 func test_auto_mode_switches_with_device() -> void:
 	_begin_input_test("auto")
-	var touch: InputEventScreenTouch = InputEventScreenTouch.new()
-	touch.pressed = true
-	InputSetup._input(touch)
+	InputSetup._input(_touch_event(true))
 	ok(InputSetup.is_touch_mode(), "toque real liga o modo toque")
+	InputSetup._input(_touch_event(false))
+	await _wait_touch_window()
 	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
 	InputSetup._input(_mouse_motion(Vector2(0.5, 0.0)))
 	ok(InputSetup.is_touch_mode(), "tremida de 0,5 px nao troca para mouse")
 	InputSetup._input(_mouse_motion(Vector2(30.0, 0.0), InputEvent.DEVICE_ID_EMULATION))
 	ok(InputSetup.is_touch_mode(), "movimento emulado nao troca para mouse")
 	InputSetup._input(_mouse_motion(Vector2(30.0, 0.0)))
-	ok(not InputSetup.is_touch_mode(), "movimento real do mouse volta ao modo mouse")
+	ok(not InputSetup.is_touch_mode(), "movimento real do mouse (sem toque recente) volta ao modo mouse")
 	eq(rec["count"], 1, "touch_mode_changed emitido uma vez")
-	InputSetup._input(touch)
+	InputSetup._input(_touch_event(true))
 	ok(InputSetup.is_touch_mode(), "toque volta ao modo toque")
+	InputSetup._input(_touch_event(false))
 	var key: InputEventKey = InputEventKey.new()
 	key.physical_keycode = KEY_W
 	key.pressed = true
 	InputSetup._input(key)
 	ok(not InputSetup.is_touch_mode(), "tecla volta ao modo mouse/teclado")
+	_end_input_test()
+
+
+func test_finger_down_real_mouse_motion_does_not_leave_touch_mode() -> void:
+	## On the Web the mouse events synthesized from a finger arrive with device 0.
+	_begin_input_test("auto")
+	InputSetup._input(_touch_event(true))
+	ok(InputSetup.is_touch_active(), "dedo na tela: toque ativo")
+	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
+	InputSetup._input(_mouse_motion(Vector2(80.0, 40.0), 0))
+	ok(InputSetup.is_touch_mode(), "movimento de mouse (device 0, grande) com dedo na tela nao desliga o modo toque")
+	eq(rec["count"], 0, "touch_mode_changed nao emitido")
+	_end_input_test()
+
+
+func test_finger_down_mouse_click_does_not_fire_or_switch() -> void:
+	_begin_input_test("auto")
+	InputSetup._input(_touch_event(true))
+	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true, 0))
+	ok(not Input.is_action_pressed("fire"), "com dedo na tela, clique esquerdo (device 0) nao pressiona fire")
+	ok(InputSetup.is_touch_mode(), "com dedo na tela, clique nao troca o modo")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_RIGHT, true, 0))
+	ok(not Input.is_action_pressed("aim"), "com dedo na tela, clique direito nao mira")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_WHEEL_UP, true, 0))
+	ok(not Input.is_action_pressed("zoom_in"), "com dedo na tela, roda emulada nao da zoom")
+	# Just after lifting the finger (inside the window) the synthesized events still count as emulated.
+	InputSetup._input(_touch_event(false))
+	ok(InputSetup.is_touch_active(), "logo apos soltar o dedo o toque ainda esta ativo")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true, 0))
+	ok(not Input.is_action_pressed("fire"), "dentro da janela apos soltar: clique nao pressiona fire")
+	ok(InputSetup.is_touch_mode(), "dentro da janela apos soltar: modo toque mantido")
+	InputSetup._input(_mouse_motion(Vector2(90.0, 0.0), 0))
+	ok(InputSetup.is_touch_mode(), "dentro da janela apos soltar: movimento nao troca o modo")
+	eq(rec["count"], 0, "touch_mode_changed nao emitido")
+	# After the window the same click is a real mouse again.
+	await _wait_touch_window()
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true, 0))
+	ok(Input.is_action_pressed("fire"), "depois da janela o clique volta a valer")
+	_end_input_test()
+
+
+func test_screen_drag_alone_turns_touch_mode_on() -> void:
+	_begin_input_test("auto")
+	var key: InputEventKey = InputEventKey.new()
+	key.physical_keycode = KEY_W
+	InputSetup._input(key)
+	ok(not InputSetup.is_touch_mode(), "pre-condicao: modo mouse/teclado")
+	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
+	InputSetup._input(_drag_event())
+	ok(InputSetup.is_touch_mode(), "ScreenDrag sozinho liga o modo toque em auto")
+	ok(InputSetup.is_touch_active(), "ScreenDrag marca toque ativo")
+	eq(rec["count"], 1, "touch_mode_changed emitido uma vez")
+	_end_input_test()
+
+
+func test_override_getter_and_forced_off_ignores_drag() -> void:
+	_begin_input_test("off")
+	eq(InputSetup.get_touch_override(), "off", "get_touch_override")
+	InputSetup._input(_drag_event())
+	ok(not InputSetup.is_touch_mode(), "override 'off' nao liga com ScreenDrag")
+	InputSetup.set_touch_override("auto")
+	eq(InputSetup.get_touch_override(), "auto", "get_touch_override apos mudar")
+	_end_input_test()
+
+
+## Finger ids outside the usual 0..N (WebKit sends negative or huge ids): the bug that left the hunter
+## standing still on iPhone. TouchControls is instantiated by class and fed events directly.
+func test_touch_controls_negative_finger_id_drives_joystick_and_look() -> void:
+	_begin_input_test("on")
+	var tc: TouchControls = TouchControls.new()
+	track(tc)
+	await frames(2)
+	var size_px: Vector2 = tc.get_viewport().get_visible_rect().size
+	var left: Vector2 = Vector2(size_px.x * 0.2, size_px.y * 0.7)
+	var right: Vector2 = Vector2(size_px.x * 0.6, size_px.y * 0.3)
+	var finger: int = -1
+	var down: InputEventScreenTouch = _touch_event(true, finger)
+	down.position = left
+	tc._input(down)
+	ok(tc.joystick.is_active(), "dedo com index -1 ativa o joystick")
+	tc._input(_drag_event(finger, Vector2(0.0, -80.0), left + Vector2(0.0, -80.0)))
+	await frames(2)
+	ok(Input.is_action_pressed("move_forward"), "arrastar para cima pressiona move_forward")
+	tc._input(_touch_event(false, finger))
+	await frames(1)
+	ok(not tc.joystick.is_active(), "soltar libera o joystick")
+	ok(not Input.is_action_pressed("move_forward"), "soltar libera move_forward")
+	# Look pad with a huge negative id.
+	var looks: Array = []
+	tc.look_pad.look.connect(func(rel: Vector2) -> void: looks.append(rel))
+	var big: int = -2147483000
+	var d2: InputEventScreenTouch = _touch_event(true, big)
+	d2.position = right
+	tc._input(d2)
+	ok(tc.look_pad.is_active(), "dedo com id gigante negativo ativa o olhar")
+	tc._input(_drag_event(big, Vector2(12.0, 3.0), right + Vector2(12.0, 3.0)))
+	eq(looks.size(), 1, "arrasto emite look uma vez")
+	if looks.size() == 1:
+		eq(looks[0], Vector2(12.0, 3.0), "delta do olhar")
+	tc._input(_touch_event(false, big))
+	ok(not tc.look_pad.is_active(), "soltar libera o olhar")
+	# Two fingers at once, one negative and one positive: each widget keeps its own finger.
+	var a: InputEventScreenTouch = _touch_event(true, -7)
+	a.position = left
+	var b: InputEventScreenTouch = _touch_event(true, 3)
+	b.position = right
+	tc._input(a)
+	tc._input(b)
+	ok(tc.joystick.is_active() and tc.look_pad.is_active(), "multitoque: joystick e olhar ao mesmo tempo")
+	tc._input(_touch_event(false, -7))
+	ok(not tc.joystick.is_active() and tc.look_pad.is_active(), "soltar o do joystick nao solta o olhar")
+	tc._input(_touch_event(false, 3))
 	_end_input_test()
 
 

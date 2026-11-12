@@ -48,7 +48,9 @@ var _radii: Dictionary = {}           # action -> float
 var _finger_to_action: Dictionary = {}   # finger -> StringName
 var _down: Dictionary = {}            # action -> bool (visual state)
 var _toggled: Dictionary = {}         # action -> bool
-var _slider_finger: int = -1
+var _slider_finger: int = 0
+var _slider_active: bool = false
+var _slot_of: Dictionary = {}         # raw platform touch id (any int, even negative) -> local slot 0..N
 var _slider_rect: Rect2 = Rect2()
 var _icons: Dictionary = {}           # icon id -> Texture2D
 var _item_label: String = ""
@@ -70,6 +72,7 @@ func _ready() -> void:
 	look_pad.look.connect(_on_look)
 	get_viewport().size_changed.connect(_layout)
 	GameEvents.touch_mode_changed.connect(_on_touch_mode_changed)
+	GameEvents.hunt_paused_changed.connect(_on_paused_changed)
 	_layout()
 	_apply_visibility(InputSetup.is_touch_mode())
 
@@ -138,8 +141,9 @@ func _on_touch_mode_changed(is_touch: bool) -> void:
 
 
 func _apply_visibility(touch: bool) -> void:
+	# _input stays on even while hidden: InputSetup (autoload) sees the first touch after this node,
+	# so the press that turns touch mode on must already be tracked here.
 	visible = touch
-	set_process_input(touch)
 	set_process(touch)
 	joystick.set_process(touch)
 	_surface.queue_redraw()
@@ -152,7 +156,8 @@ func _release_everything() -> void:
 	if joystick.is_active():
 		joystick.end()
 	look_pad.end()
-	_slider_finger = -1
+	_slider_active = false
+	_slot_of.clear()
 	for action_name: StringName in _toggled.keys():
 		if bool(_toggled[action_name]):
 			Input.action_release(action_name)
@@ -168,16 +173,55 @@ func _process(_delta: float) -> void:
 	_surface.queue_redraw()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_release_everything()
+
+
+func _on_paused_changed(paused: bool) -> void:
+	if paused:
+		_release_everything()
+
+
+## Touch ids from the browser/OS are arbitrary integers (WebKit may send negative or huge values).
+## They are mapped to small local slots on press; nothing below ever treats an id as a sentinel.
+func _accepts_touch() -> bool:
+	return not _ended and InputSetup.get_touch_override() != "off"
+
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch: InputEventScreenTouch = event as InputEventScreenTouch
-		if touch.pressed:
-			_finger_down(touch.index, touch.position)
-		else:
-			_finger_up(touch.index)
+		if touch.pressed and not touch.canceled:
+			if not _accepts_touch():
+				return
+			if _slot_of.has(touch.index):   # repeated press without a release: free the stale finger first
+				_finger_up(int(_slot_of[touch.index]))
+				_slot_of.erase(touch.index)
+			var slot: int = _acquire_slot()
+			_slot_of[touch.index] = slot
+			_finger_down(slot, touch.position)
+		elif _slot_of.has(touch.index):    # released or canceled (iOS cancels when it takes over a gesture)
+			var slot: int = int(_slot_of[touch.index])
+			_slot_of.erase(touch.index)
+			_finger_up(slot)
 	elif event is InputEventScreenDrag:
 		var drag: InputEventScreenDrag = event as InputEventScreenDrag
-		_finger_drag(drag.index, drag.position, drag.relative)
+		if not _slot_of.has(drag.index):
+			if not _accepts_touch():
+				return
+			var new_slot: int = _acquire_slot()   # drag without a press (missed event): adopt the finger
+			_slot_of[drag.index] = new_slot
+			_finger_down(new_slot, drag.position)
+			return
+		_finger_drag(int(_slot_of[drag.index]), drag.position, drag.relative)
+
+
+func _acquire_slot() -> int:
+	var slot: int = 0
+	while _slot_of.values().has(slot):
+		slot += 1
+	return slot
 
 
 func _finger_down(finger: int, pos: Vector2) -> void:
@@ -190,6 +234,7 @@ func _finger_down(finger: int, pos: Vector2) -> void:
 	# 2. zoom slider (only visible when aiming with an adjustable zoom)
 	if _slider_visible() and _slider_rect.grow(HIT_PADDING_PX).has_point(pos):
 		_slider_finger = finger
+		_slider_active = true
 		_set_slider_from(pos)
 		return
 	# 3. left zone = joystick, rest = look
@@ -204,20 +249,20 @@ func _finger_up(finger: int) -> void:
 	if _finger_to_action.has(finger):
 		_release_button_finger(finger)
 		_finger_to_action.erase(finger)
-	if finger == _slider_finger:
-		_slider_finger = -1
-	if finger == joystick.get_finger():
+	if _slider_active and finger == _slider_finger:
+		_slider_active = false
+	if joystick.owns(finger):
 		joystick.end()
-	if finger == look_pad.get_finger():
+	if look_pad.owns(finger):
 		look_pad.end()
 
 
 func _finger_drag(finger: int, pos: Vector2, relative: Vector2) -> void:
-	if finger == joystick.get_finger():
+	if joystick.owns(finger):
 		joystick.drag(pos)
-	elif finger == look_pad.get_finger():
+	elif look_pad.owns(finger):
 		look_pad.drag(relative)
-	elif finger == _slider_finger:
+	elif _slider_active and finger == _slider_finger:
 		_set_slider_from(pos)
 
 

@@ -9,6 +9,10 @@ const ACTIONS: PackedStringArray = ["move_forward", "move_back", "move_left", "m
 const ACTION_DEADZONE: float = 0.2
 ## Real mouse motion longer than this (px) switches "auto" mode back to mouse/keyboard.
 const MOUSE_MOTION_SWITCH_PX: float = 2.0
+## Mouse events this soon after the last touch event are treated as synthesized from touch.
+const TOUCH_RECENT_S: float = 0.8
+## A finger that never reported its release stops blocking real mouse input after this long.
+const FINGER_STALE_S: float = 10.0
 
 # action -> physical keycodes (location-specific keys are listed in _LEFT_ONLY)
 const _KEYS: Dictionary = {
@@ -32,6 +36,8 @@ const _LEFT_ONLY: Array[int] = [KEY_SHIFT, KEY_CTRL]
 
 var _touch_mode: bool = false
 var _override: String = "auto"
+var _touching: Dictionary = {}        # raw touch ids currently on the screen
+var _last_touch_msec: int = -100000
 var _wheel_release: Dictionary = {}   # action -> process frame at which it may be released
 
 
@@ -58,6 +64,11 @@ func register_actions() -> void:
 			InputMap.action_add_event(action_name, ev)
 
 
+## Current override ('auto' | 'on' | 'off'). TouchControls needs it to track the touch that turns the mode on.
+func get_touch_override() -> String:
+	return _override
+
+
 func is_touch_mode() -> bool:
 	return _touch_mode
 
@@ -67,6 +78,8 @@ func set_touch_override(mode: String) -> void:
 		push_warning("InputSetup.set_touch_override: unknown mode '%s'" % mode)
 		return
 	_override = mode
+	_touching.clear()   # an explicit mode change starts a fresh touch-activity window
+	_last_touch_msec = -100000
 	_apply_touch_mode(_resolve_initial())
 
 
@@ -107,23 +120,51 @@ func _process(_delta: float) -> void:
 			_wheel_release.erase(action_name)
 
 
+## True while a finger is on the screen or touched it a moment ago. On the Web, the mouse events that
+## Godot synthesizes from touch (emulate_mouse_from_touch) can arrive WITHOUT DEVICE_ID_EMULATION, so the
+## device field is not trusted: any mouse event during this window is treated as emulated.
+func is_touch_active() -> bool:
+	var age_s: float = float(Time.get_ticks_msec() - _last_touch_msec) / 1000.0
+	if not _touching.is_empty():
+		return age_s < FINGER_STALE_S
+	return age_s < TOUCH_RECENT_S
+
+
 func _input(event: InputEvent) -> void:
-	if _override == "auto":
-		if event is InputEventScreenTouch:
+	if event is InputEventScreenTouch:
+		var touch: InputEventScreenTouch = event as InputEventScreenTouch
+		_last_touch_msec = Time.get_ticks_msec()
+		if touch.pressed and not touch.canceled:
+			_touching[touch.index] = true
+		else:
+			_touching.erase(touch.index)
+		if _override == "auto":
 			_apply_touch_mode(true)
-		elif event is InputEventKey:
+		return
+	if event is InputEventScreenDrag:
+		_last_touch_msec = Time.get_ticks_msec()
+		_touching[(event as InputEventScreenDrag).index] = true
+		if _override == "auto":
+			_apply_touch_mode(true)
+		return
+	if event is InputEventKey:
+		if _override == "auto":
 			_apply_touch_mode(false)
-		elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION:
-			_apply_touch_mode(false)   # hybrid laptop: a real click switches to mouse mode and still counts
-		elif event is InputEventMouseMotion and event.device != InputEvent.DEVICE_ID_EMULATION \
-				and (event as InputEventMouseMotion).relative.length() > MOUSE_MOTION_SWITCH_PX:
-			_apply_touch_mode(false)
-	if event is InputEventMouseButton:
-		_inject_mouse_button(event as InputEventMouseButton)
+		return
+	if event is InputEventMouseMotion or event is InputEventMouseButton:
+		if event.device == InputEvent.DEVICE_ID_EMULATION or is_touch_active():
+			return   # synthesized from touch
+		if _override == "auto":
+			if event is InputEventMouseButton:
+				_apply_touch_mode(false)   # hybrid laptop: a real click switches to mouse mode and still counts
+			elif (event as InputEventMouseMotion).relative.length() > MOUSE_MOTION_SWITCH_PX:
+				_apply_touch_mode(false)
+		if event is InputEventMouseButton:
+			_inject_mouse_button(event as InputEventMouseButton)
 
 
 func _inject_mouse_button(event: InputEventMouseButton) -> void:
-	if event.device == InputEvent.DEVICE_ID_EMULATION or _touch_mode:
+	if event.device == InputEvent.DEVICE_ID_EMULATION or _touch_mode or is_touch_active():
 		return
 	match event.button_index:
 		MOUSE_BUTTON_LEFT:

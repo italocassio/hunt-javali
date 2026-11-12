@@ -5,7 +5,8 @@ extends Control
 
 signal look(rel_px: Vector2)
 
-var _finger: int = -1
+var _finger: int = 0          # which finger (any int is valid; never a sentinel)
+var _active: bool = false
 
 
 func _init() -> void:
@@ -13,7 +14,11 @@ func _init() -> void:
 
 
 func is_active() -> bool:
-	return _finger != -1
+	return _active
+
+
+func owns(finger: int) -> bool:
+	return _active and _finger == finger
 
 
 func get_finger() -> int:
@@ -22,12 +27,14 @@ func get_finger() -> int:
 
 func begin(finger: int) -> void:
 	_finger = finger
+	_active = true
 
 
 func drag(rel_px: Vector2) -> void:
-	if _finger != -1:
+	if _active:
 		look.emit(rel_px)
 
 
 func end() -> void:
-	_finger = -1
+	_active = false
+	_finger = 0

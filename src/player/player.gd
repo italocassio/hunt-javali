@@ -423,13 +423,14 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
-		if motion.device == InputEvent.DEVICE_ID_EMULATION or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		if motion.device == InputEvent.DEVICE_ID_EMULATION or InputSetup.is_touch_active() \
+				or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			return
 		_apply_look(motion.relative * deg_to_rad(float(_cfg.get("mouse_deg_per_px", 0.12))) * _mouse_sens)
 	elif event is InputEventMouseButton:
 		var button: InputEventMouseButton = event as InputEventMouseButton
 		if button.pressed and button.device != InputEvent.DEVICE_ID_EMULATION \
-				and not InputSetup.is_touch_mode() and not get_tree().paused \
+				and not InputSetup.is_touch_mode() and not InputSetup.is_touch_active() and not get_tree().paused \
 				and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			_ignore_fire_until_release = true   # the capturing click must not shoot

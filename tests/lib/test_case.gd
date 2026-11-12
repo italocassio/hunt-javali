@@ -257,6 +257,11 @@ func fresh_profile() -> void:
 	Profile.reset_progress()
 
 
+## Starting money of a new profile, read from data (balance may change).
+func start_money() -> int:
+	return int(Data.get_game().get("economy", {}).get("start_money", 0))
+
+
 func cleanup_test_files() -> void:
 	for name: String in ["test_save.json", "test_save.bak.json", "test_save_alt.json", "test_save_alt.bak.json",
 			"test_io.json", "test_io.bak.json"]:

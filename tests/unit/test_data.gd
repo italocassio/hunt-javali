@@ -99,14 +99,31 @@ func test_contract_groups_rules() -> void:
 	ok(checked >= 5, "mato_grosso tem 5 contratos (%d)" % checked)
 
 
-func test_mato_grosso_totals_match_contract() -> void:
-	var expected: Array[int] = [5, 8, 11, 15, 17]
+func test_mato_grosso_structure_and_difficulty_progression() -> void:
+	## Structural rules only: balance numbers may change in data/ without breaking this test.
 	eq(Data.get_contract_count(&"mato_grosso"), 5, "5 contratos")
-	for i: int in 5:
+	var max_alive: int = int(Data.get_game().get("hunt", {}).get("max_alive_boars", 0))
+	var prev_total: int = 0
+	var prev_drain: float = 0.0
+	var prev_reward: float = 0.0
+	for i: int in Data.get_contract_count(&"mato_grosso"):
+		var c: Dictionary = Data.get_contract(&"mato_grosso", i)
+		var groups: Array = c.get("groups", [])
+		ok(groups.size() >= 1, "contrato %d tem ao menos 1 grupo" % i)
 		var total: int = 0
-		for g: Dictionary in Data.get_contract(&"mato_grosso", i).get("groups", []):
-			total += (g.get("members", []) as Array).size()
-		eq(total, expected[i], "total de javalis do contrato %d" % i)
+		for g: Dictionary in groups:
+			var n: int = (g.get("members", []) as Array).size()
+			ok(n == 1 or (n >= 3 and n <= 6), "contrato %d: grupo de %d membros (1 ou 3-6)" % [i, n])
+			total += n
+		ok(total >= 1 and total <= max_alive, "contrato %d: %d javalis (<= max_alive_boars %d)" % [i, total, max_alive])
+		var drain: float = float(c.get("crop_drain_mult", 0.0))
+		var reward: float = float(c.get("reward_mult", 0.0))
+		ok(total >= prev_total, "contrato %d: total de javalis (%d) nao decresce (anterior %d)" % [i, total, prev_total])
+		ok(drain >= prev_drain, "contrato %d: crop_drain_mult (%s) nao decresce" % [i, drain])
+		ok(reward >= prev_reward, "contrato %d: reward_mult (%s) nao decresce" % [i, reward])
+		prev_total = total
+		prev_drain = drain
+		prev_reward = reward
 
 
 func test_unavailable_maps_have_no_contracts_and_invalid_lookups_are_safe() -> void:
@@ -136,7 +153,7 @@ func test_game_quality_presets() -> void:
 	var presets: Dictionary = Data.get_game().get("quality_presets", {})
 	for q: StringName in [Ids.Q_LOW, Ids.Q_MEDIUM, Ids.Q_HIGH]:
 		ok(presets.has(String(q)), "preset de qualidade %s" % q)
-	eq(int(Data.get_game().get("economy", {}).get("start_money", -1)), 500, "start_money")
+	ok(int(Data.get_game().get("economy", {}).get("start_money", -1)) >= 0, "start_money >= 0")
 
 
 func test_pix_config_has_placeholders_flagged() -> void:

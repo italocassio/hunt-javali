@@ -106,9 +106,9 @@ func _shop_world(money: int, gold: int = 0) -> Array:
 
 
 func test_shop_insufficient_funds() -> void:
-	var wi: Array = _shop_world(100)
+	var wi: Array = _shop_world(int(Data.get_weapon(Ids.W_SHOTGUN_12)["price"]) - 1)
 	eq(Shop.buy(Ids.W_SHOTGUN_12, wi[0], wi[1]), &"insufficient_funds", "sem saldo")
-	eq(wi[0].money, 100, "saldo intacto")
+	eq(wi[0].money, int(Data.get_weapon(Ids.W_SHOTGUN_12)["price"]) - 1, "saldo intacto")
 	ok(not wi[1].owns(Ids.W_SHOTGUN_12), "item nao entregue")
 	eq(Shop.check(Ids.W_SHOTGUN_12, wi[0], wi[1]), &"insufficient_funds", "check coerente")
 
@@ -158,10 +158,12 @@ func test_shop_unknown_item() -> void:
 # --- RewardCalculator ---
 
 func test_reward_example_from_contract_1782() -> void:
-	var boar: Dictionary = Data.get_boar_type(Ids.BOAR)
-	var rules: Dictionary = Data.get_boar_rules()
-	var contract: Dictionary = Data.get_contract(&"mato_grosso", 2)
+	## Formula test with fixed inputs (the section 9.6 example); independent of data/ balance.
+	var boar: Dictionary = {"value_per_kg": 6.0}
+	var rules: Dictionary = {"reward": {"clean_zones": ["head", "vital"], "clean_kill_mult": 1.25, "one_shot_mult": 1.5}}
+	var contract: Dictionary = {"reward_mult": 1.2}
 	eq(RewardCalculator.kill_reward(boar, rules, 132.0, Ids.ZONE_VITAL, true, contract), 1782, "exemplo da secao 9.6")
+	eq(RewardCalculator.kill_reward(boar, rules, 132.0, Ids.ZONE_BODY, false, contract), int(roundf(132.0 * 6.0 * 1.2)), "sem bonus")
 
 
 func test_reward_modifiers() -> void:
@@ -260,7 +262,8 @@ func test_profile_buy_and_can_buy() -> void:
 	fresh_profile()
 	eq(Profile.can_buy(Ids.W_SHOTGUN_12), &"insufficient_funds", "can_buy sem saldo")
 	eq(Profile.buy(Ids.W_SHOTGUN_12), &"insufficient_funds", "buy sem saldo")
-	eq(Profile.get_money(), 500, "saldo intacto")
+	eq(Profile.get_money(), start_money(), "saldo intacto")
+	ok(start_money() < int(Data.get_weapon(Ids.W_SHOTGUN_12)["price"]), "pre-condicao: saldo inicial nao compra a espingarda")
 	# Price comes from data so balancing changes do not break this test.
 	var price: int = int(Data.get_weapon(Ids.W_SHOTGUN_12)["price"])
 	Profile.add_money(price)
@@ -279,7 +282,7 @@ func test_profile_buy_and_can_buy() -> void:
 func test_profile_loadout_rules() -> void:
 	fresh_profile()
 	ok(not Profile.set_loadout_weapon(1, Ids.W_SHOTGUN_12), "nao equipa arma que nao tem")
-	Profile.add_money(5000)
+	Profile.add_money(int(Data.get_weapon(Ids.W_SHOTGUN_12)["price"]))
 	Profile.buy(Ids.W_SHOTGUN_12)
 	ok(Profile.set_loadout_weapon(1, Ids.W_SHOTGUN_12), "equipa arma comprada no slot 1")
 	eq(Profile.get_loadout_weapons()[1], Ids.W_SHOTGUN_12, "slot 1")

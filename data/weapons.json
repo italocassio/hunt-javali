@@ -9,7 +9,7 @@
      "ads_zoom_min": 1.5, "ads_zoom_max": 1.5, "scoped": false, "reticle_kind": 0,
      "recoil_pitch_deg": 1.0, "recoil_recover_s": 0.15, "noise_radius_m": 60.0, "shot_sfx": "shot_22"},
     {"id": "shotgun_12", "name": "Espingarda calibre 12", "description": "Arma de curta distância: nove bagos por tiro, devastadora até uns 15 m. Passando de 30 m, quase não machuca.",
-     "price": 3200, "currency": "money", "damage": 16.0, "pellets": 9,
+     "price": 4000, "currency": "money", "damage": 16.0, "pellets": 9,
      "falloff_start_m": 14.0, "falloff_end_m": 45.0, "min_damage_mult": 0.12, "max_range_m": 70.0,
      "fire_interval_s": 0.9, "cycle_s": 0.55, "cycle_sfx": "pump_cycle", "mag_size": 5, "reserve_ammo": 40, "reload_s": 3.0,
      "hip_spread_deg": 5.0, "ads_spread_deg": 3.0, "move_spread_add_deg": 1.0, "ads_time_s": 0.2,

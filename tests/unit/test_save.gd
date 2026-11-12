@@ -12,7 +12,7 @@ func test_new_save_shape() -> void:
 	var s: Dictionary = SaveService.new_save()
 	eq(s["format"], SaveService.FORMAT_NAME, "format")
 	eq(s["version"], SaveService.CURRENT_VERSION, "version")
-	eq(s["wallet"]["money"], 500, "dinheiro inicial")
+	eq(s["wallet"]["money"], start_money(), "dinheiro inicial")
 	eq(s["wallet"]["gold"], 0, "ouro inicial")
 	eq(s["inventory"]["weapons"], ["carbine_22"], "arma inicial")
 	eq(s["loadout"]["weapons"][0], "carbine_22", "slot 0 equipado")
@@ -31,7 +31,7 @@ func test_write_read_roundtrip_and_backup() -> void:
 	ok(SaveService.write(PATH, data), "segunda escrita")
 	ok(FileAccess.file_exists(SaveService.backup_path(PATH)), "backup criado na segunda escrita")
 	eq(int(SaveService.read(PATH)["wallet"]["money"]), 777, "leitura do arquivo novo")
-	eq(int(SaveService.read(SaveService.backup_path(PATH))["wallet"]["money"]), 500, "backup guarda a versao anterior")
+	eq(int(SaveService.read(SaveService.backup_path(PATH))["wallet"]["money"]), start_money(), "backup guarda a versao anterior")
 	_clean()
 
 
@@ -88,7 +88,7 @@ func test_sanitize_wrong_types() -> void:
 		"wallet": "oops", "inventory": 5, "loadout": [], "progression": "x", "stats": null,
 		"redeemed_codes": {"a": 1}, "settings": 3, "version": "z", "saved_at_unix": "ontem",
 	})
-	eq(s["wallet"]["money"], 500, "carteira ruim -> padrao")
+	eq(s["wallet"]["money"], start_money(), "carteira ruim -> padrao")
 	eq(s["inventory"]["weapons"], ["carbine_22"], "inventario ruim -> arma inicial")
 	eq(s["loadout"]["weapons"][0], "carbine_22", "loadout ruim")
 	eq(s["redeemed_codes"], [], "codigos ruins")
@@ -180,7 +180,7 @@ func test_profile_load_corrupted_save_starts_new_profile() -> void:
 	Profile.set_save_path("user://test_save.json")
 	write_text("user://test_save.json", "{{{{ corrompido")
 	Profile.load_or_create()
-	eq(Profile.get_money(), 500, "perfil novo apos save corrompido")
+	eq(Profile.get_money(), start_money(), "perfil novo apos save corrompido")
 	ok(Profile.owns(Ids.W_CARBINE_22), "carabina inicial")
 	ok(not SaveService.read("user://test_save.json").is_empty(), "save regravado valido")
 	_clean()
@@ -192,7 +192,7 @@ func test_profile_load_empty_save() -> void:
 	Profile.set_save_path("user://test_save.json")
 	write_text("user://test_save.json", "")
 	Profile.load_or_create()
-	eq(Profile.get_money(), 500, "perfil novo apos save vazio")
+	eq(Profile.get_money(), start_money(), "perfil novo apos save vazio")
 	_clean()
 
 
@@ -200,13 +200,14 @@ func test_profile_recovers_from_backup() -> void:
 	expect_errors()
 	_clean()
 	fresh_profile()
-	Profile.add_money(1234)   # 1734
+	Profile.add_money(1234)
+	var backed_up: int = Profile.get_money()
 	Profile.save()
-	Profile.add_money(1)      # 1735, previous valid file (1734) becomes the backup
+	Profile.add_money(1)      # previous valid file becomes the backup
 	Profile.save()
 	write_text("user://test_save.json", "lixo")
 	Profile.load_or_create()
-	eq(Profile.get_money(), 1734, "restaurou do backup")
+	eq(Profile.get_money(), backed_up, "restaurou do backup")
 	_clean()
 
 

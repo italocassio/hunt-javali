@@ -63,11 +63,37 @@ func test_emulated_mouse_from_touch_does_not_fire() -> void:
 	_end_input_test()
 
 
-func test_touch_mode_ignores_real_mouse_buttons() -> void:
+func test_forced_touch_mode_ignores_real_mouse_buttons() -> void:
+	## Override "on" is an explicit user choice: real mouse buttons stay ignored.
 	_begin_input_test("on")
 	ok(InputSetup.is_touch_mode(), "modo toque ligado")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
-	ok(not Input.is_action_pressed("fire"), "em modo toque o mouse real nao dispara (suspeita: hibrido sem movimento)")
+	ok(not Input.is_action_pressed("fire"), "override 'on': mouse real nao dispara")
+	ok(InputSetup.is_touch_mode(), "override 'on': continua em modo toque")
+	_end_input_test()
+
+
+func test_hybrid_device_real_click_switches_to_mouse_and_fires() -> void:
+	## Hybrid device (touchscreen + mouse): in "auto" with touch mode on, a real left click without any
+	## prior mouse motion must switch to mouse mode and fire at once.
+	_begin_input_test("auto")
+	var touch: InputEventScreenTouch = InputEventScreenTouch.new()
+	touch.pressed = true
+	InputSetup._input(touch)
+	ok(InputSetup.is_touch_mode(), "pre-condicao: modo toque ligado")
+	var rec: Dictionary = record_signal(GameEvents.touch_mode_changed)
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
+	ok(not InputSetup.is_touch_mode(), "clique real sai do modo toque")
+	ok(Input.is_action_pressed("fire"), "o mesmo clique dispara fire")
+	eq(rec["count"], 1, "touch_mode_changed emitido uma vez")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	ok(not Input.is_action_pressed("fire"), "soltar libera fire")
+	# The emulated mouse click that a finger tap produces must not switch modes nor fire.
+	InputSetup._input(touch)
+	ok(InputSetup.is_touch_mode(), "toque volta ao modo toque")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true, InputEvent.DEVICE_ID_EMULATION))
+	ok(InputSetup.is_touch_mode(), "clique emulado nao sai do modo toque")
+	ok(not Input.is_action_pressed("fire"), "clique emulado nao dispara")
 	_end_input_test()
 
 

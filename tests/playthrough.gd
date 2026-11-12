@@ -200,9 +200,11 @@ func _scn_victory() -> void:
 	var done: bool = await bot.call("kill_all", VICTORY_TIMEOUT_S)
 	await _sleep(2.0)   # extra time: hunt_ended must not repeat
 	var total: int = _hunt.get_boars_total()
-	print("INFO victory: hunt_time=%.1f s, bot_shots=%d, reloads=%d, teleports=%d, killed=%d/%d, hits=%d" % [
+	var pl: PlayerBase = _hunt.get_player()
+	print("INFO victory: hunt_time=%.1f s, bot_shots=%d, reloads=%d, teleports=%d, killed=%d/%d, hits=%d, player_health=%.0f/%.0f, crop=%.1f%%, ammo mag=%d reserve=%d" % [
 		_hunt.get_elapsed_s(), int(bot.get("shots_fired")), int(bot.get("reloads")), int(bot.get("teleports")),
-		_hunt.get_boars_killed(), total, _hits])
+		_hunt.get_boars_killed(), total, _hits, pl.get_health(), pl.get_max_health(), _hunt.get_crop_health_pct(),
+		pl.get_ammo_in_mag(), pl.get_ammo_reserve()])
 	_t.call("ok", done and _hunt.is_hunt_over(), "bot nao terminou a caçada (killed %d/%d, ammo mag=%d reserva=%d)" % [
 		_hunt.get_boars_killed(), total, _hunt.get_player().get_ammo_in_mag(), _hunt.get_player().get_ammo_reserve()])
 	_t.call("eq", _started, 1, "hunt_started 1x")

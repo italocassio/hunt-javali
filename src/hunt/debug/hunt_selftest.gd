@@ -6,6 +6,7 @@ extends Node
 
 const WATCHDOG_REAL_S: float = 280.0
 const FAR_CORNER: Vector3 = Vector3(-118.0, 0.0, -118.0)
+const CHARGE_OVERSHOOT_M: float = 4.0   # contract 8.9: a charge stops 4 m past the locked point
 
 var _passed: int = 0
 var _failed: int = 0
@@ -147,6 +148,14 @@ func _place_player(x: float, z: float) -> void:
 	_hunt.get_player().bot_teleport(Vector3(x, _hunt.get_height(x, z) + 0.05, z))
 
 
+## Boars in a contract, summed from the data (not from the spawner), so balance changes do not break the checks.
+func _contract_total(contract_index: int) -> int:
+	var total: int = 0
+	for group: Dictionary in Data.get_contract(&"mato_grosso", contract_index).get("groups", []):
+		total += (group.get("members", []) as Array).size()
+	return total
+
+
 func _boars_in_state(state: StringName) -> int:
 	var n: int = 0
 	for id: int in _hunt.get_alive_boar_ids():
@@ -185,14 +194,15 @@ func _min_obstacle_clearance() -> float:
 func _test_flow() -> void:
 	await _open(0)
 	_check("hunt_started_once", _started == 1, "started=%d" % _started)
-	_check("counts_initial_0_5", _counts.size() >= 1 and _counts[0] == Vector2i(0, 5), str(_counts))
+	var total: int = _contract_total(0)
+	_check("counts_initial_0_total", total > 0 and _counts.size() >= 1 and _counts[0] == Vector2i(0, total), "total=%d %s" % [total, _counts])
 	_check("player_is_playerbase", _hunt.get_player() != null, str(_hunt.get_player()))
 	_check("crop_rects_2", _hunt.get_crop_rects().size() == 2, str(_hunt.get_crop_rects()))
 	_park_player()
 	var ground_err: float = 0.0
 	var inside_obstacle: bool = false
-	var ok: bool = await _wait(func() -> bool: return _hunt.get_alive_boar_ids().size() == 5, 40.0)
-	_check("all_5_spawned", ok, "alive=%d t=%.1f" % [_hunt.get_alive_boar_ids().size(), _hunt.get_elapsed_s()])
+	var ok: bool = await _wait(func() -> bool: return _hunt.get_alive_boar_ids().size() == total, 40.0)
+	_check("all_spawned", ok, "alive=%d t=%.1f" % [_hunt.get_alive_boar_ids().size(), _hunt.get_elapsed_s()])
 	# Walk to the crop and eat.
 	var t_end: float = _hunt.get_elapsed_s() + 150.0
 	while _hunt.get_elapsed_s() < t_end and _boars_in_state(Ids.BS_EAT) < 4:
@@ -237,7 +247,7 @@ func _test_flow() -> void:
 	_hunt.debug_kill_boar(ids[0])
 	_hunt.debug_kill_boar(ids[1])
 	_hunt.debug_kill_boar(ids[1])
-	_check("double_kill_counts", _hunt.get_boars_killed() == 2 and _counts[-1] == Vector2i(2, 5), str(_counts))
+	_check("double_kill_counts", _hunt.get_boars_killed() == 2 and _counts[-1] == Vector2i(2, total), str(_counts))
 	for i: int in range(2, ids.size()):
 		_hunt.debug_kill_boar(ids[i])
 	await get_tree().process_frame
@@ -246,7 +256,7 @@ func _test_flow() -> void:
 	_check("victory_once", _ended.size() == 1 and _ended[0].outcome == HuntResult.Outcome.VICTORY, "ended=%d" % _ended.size())
 	if _ended.size() >= 1:
 		var r: HuntResult = _ended[0]
-		_check("result_coherent", r.kills.size() == 5 and r.boars_total == 5 and r.total_money == r.money_from_kills + r.contract_bonus
+		_check("result_coherent", r.kills.size() == total and r.boars_total == total and r.total_money == r.money_from_kills + r.contract_bonus
 			and r.money_from_kills > 0 and r.contract_bonus > 0 and r.shots_fired == 1 and _hunt.get_result() == r,
 			JSON.stringify(r.to_dict()).left(400))
 	_check("stays_in_scene", get_tree().current_scene == self)
@@ -303,7 +313,7 @@ func _state_time(id: int, state: StringName, after: float) -> float:
 
 
 func _test_charge() -> void:
-	await _open(1)   # contract 2: lone male at 40 s
+	await _open(1)   # contract 2: a male arrives with the second group
 	_park_player()
 	var ok: bool = await _wait(func() -> bool: return _find_type(Ids.BOAR) >= 0, 60.0)
 	_check("male_spawned", ok)
@@ -334,13 +344,18 @@ func _test_charge() -> void:
 		var side: Vector3 = Vector3(-dir.z, 0.0, dir.x)
 		var pp: Vector3 = _hunt.get_player().global_position
 		var start: Vector3 = boar.position
+		# The direction is locked on the hunter's position at the end of the telegraph: that is the locked point.
+		var lock_dist: float = Vector2(pp.x - start.x, pp.z - start.z).length()
 		_place_player(pp.x + side.x * 4.0, pp.z + side.z * 4.0)
 		var t2: float = _hunt.get_elapsed_s()
 		ok = await _wait(func() -> bool: return _state_time(id, Ids.BS_RECOVER, t2) >= 0.0, 10.0)
 		var run: float = Vector2(boar.position.x - start.x, boar.position.z - start.z).length()
 		var dev: float = absf(Vector2(boar.position.x - start.x, boar.position.z - start.z).normalized().dot(Vector2(side.x, side.z)))
 		_check("dodge_no_damage", ok and _player_damage_events == 0, "damage_events=%d" % _player_damage_events)
-		_check("charge_runs_straight_past", run > 5.0 and dev < 0.05, "run=%.1f m lateral_frac=%.3f" % [run, dev])
+		# Contract 8.9: runs straight and stops CHARGE_OVERSHOOT_M past the locked point (one frame of slack).
+		var past: float = run - lock_dist
+		_check("charge_runs_straight_past", dev < 0.05 and past >= CHARGE_OVERSHOOT_M - 0.1 and past <= CHARGE_OVERSHOOT_M + 0.6,
+			"run=%.2f m locked_at=%.2f m past=%.2f m lateral_frac=%.3f" % [run, lock_dist, past, dev])
 	_park_player()
 	ok = await _wait(func() -> bool: return boar.state == Ids.BS_FLEE or boar.state == Ids.BS_TO_CROP or boar.state == Ids.BS_WANDER, 30.0)
 	_check("disengages_when_hunter_gone", ok, "state=%s" % boar.state)
@@ -349,8 +364,9 @@ func _test_charge() -> void:
 func _test_bait() -> void:
 	await _open(0)
 	_park_player()
-	var ok: bool = await _wait(func() -> bool: return _boars_in_state(Ids.BS_EAT) >= 5, 220.0)
-	_check("five_eating_crop", ok, "eating=%d" % _boars_in_state(Ids.BS_EAT))
+	var total: int = _contract_total(0)
+	var ok: bool = await _wait(func() -> bool: return _boars_in_state(Ids.BS_EAT) >= total, 220.0)
+	_check("all_eating_crop", ok, "eating=%d" % _boars_in_state(Ids.BS_EAT))
 	var eater: int = _hunt.get_alive_boar_ids()[0]
 	var bp: Vector3 = _hunt.get_boar_position(eater)
 	var bait_pos: Vector3 = Vector3(bp.x + 25.0, 0.0, bp.z + 30.0)
@@ -375,7 +391,7 @@ func _test_bait() -> void:
 		print("trace boar %d %s state=%s near_bait=%s crop_eater=%s" % [id, b.type_id, b.state, near, _hunt.crop.has_eater(id)])
 		if near and _hunt.crop.has_eater(id):
 			baited_draining += 1
-	_check("bait_eaters_do_not_drain", baited_draining == 0 and _hunt.crop.get_eater_count() <= 5 - going,
+	_check("bait_eaters_do_not_drain", baited_draining == 0 and _hunt.crop.get_eater_count() <= total - going,
 		"crop_eaters=%d" % _hunt.crop.get_eater_count())
 	var bait_node: Bait = _hunt.get_node("Baits").get_child(0) as Bait
 	_check("bait_reserved_max_4", bait_node.get_reserved_count() == going and going <= bait_node.max_boars, "reserved=%d" % bait_node.get_reserved_count())
@@ -440,15 +456,16 @@ func _test_dog() -> void:
 func _test_perf() -> void:
 	await _open(4)
 	_park_player()
-	var ok: bool = await _wait(func() -> bool: return _hunt.get_alive_boar_ids().size() == 17, 80.0)
-	_check("contract5_17_boars", ok, "alive=%d" % _hunt.get_alive_boar_ids().size())
+	var total: int = _contract_total(4)
+	var ok: bool = await _wait(func() -> bool: return _hunt.get_alive_boar_ids().size() == total, 80.0)
+	_check("contract5_all_boars", ok, "alive=%d" % _hunt.get_alive_boar_ids().size())
 	if DisplayServer.get_name() == "headless":
 		var frames: int = 600
 		var t0: int = Time.get_ticks_usec()
 		for i: int in frames:
 			await get_tree().process_frame
 		var ms: float = float(Time.get_ticks_usec() - t0) / 1000.0 / float(frames)
-		print("headless_frame_ms=%.3f (17 boars, no rendering)" % ms)
+		print("headless_frame_ms=%.3f (%d boars, no rendering)" % [ms, total])
 		_check("headless_frame_budget", ms < 4.0, "%.3f ms/frame" % ms)
 		return
 	# With a window: real frame rate and render counters from typical views.
@@ -547,7 +564,7 @@ func _test_shoot() -> void:
 		_check("kill_info", k.boar_id == sow and k.type_id == Ids.SOW and k.reward_money > 0 and not k.one_shot
 			and k.clean_kill == (k.killing_zone == Ids.ZONE_HEAD or k.killing_zone == Ids.ZONE_VITAL) and states[-1][0] == Ids.BS_DEAD,
 			JSON.stringify(k.to_dict()))
-		_check("counts_after_kill", _counts[-1] == Vector2i(1, 5) and _hunt.get_boars_killed() == 1, str(_counts))
+		_check("counts_after_kill", _counts[-1] == Vector2i(1, _contract_total(0)) and _hunt.get_boars_killed() == 1, str(_counts))
 		# A carcass ignores bullets.
 		var n_hits: int = _hits.size()
 		player.bot_look_at(_hunt.get_boar_zone_position(sow, Ids.ZONE_BODY))

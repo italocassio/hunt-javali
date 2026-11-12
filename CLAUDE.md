@@ -48,6 +48,10 @@ ou se morrer.
 - Rode só os passos que a mudança pode afetar, e sempre `check_scripts` depois de editar scripts.
 - `--headless` não renderiza nem toca som. Para ver o jogo, rode com janela e salve um screenshot (ver `tools/`).
 - Exportação Web: `tools/godot.sh --headless --path . --export-release "Web" build/web/index.html`.
+- Publicação: o código vai para a `main` e o conteúdo de `build/web` vai para o ramo `gh-pages` (GitHub Pages).
+  Antes de cada publicação, aumente `config/version` em `project.godot`: a tela inicial e o menu mostram esse
+  número, e é por ele que o dono do jogo confere se a versão nova está no ar.
+- Controles de toque: rode `python tests/web/mobile_probe.py` (build Web no Chrome emulando celular) antes de publicar mudança neles.
 
 ## Arquivos compartilhados
 - `project.godot`, `export_presets.cfg` e `CLAUDE.md` pertencem à sessão principal. Agentes não editam: relatam o que precisa mudar.

@@ -62,6 +62,22 @@ func _ready() -> void:
 	prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(prompt)
 
+	# Bottom-right corner. The number comes from application/config/version in project.godot.
+	var version: Label = Label.new()
+	version.text = "Versão %s" % String(ProjectSettings.get_setting("application/config/version", "?"))
+	version.modulate = Color(1.0, 1.0, 1.0, 0.75)
+	version.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	version.anchor_left = 1.0
+	version.anchor_top = 1.0
+	version.anchor_right = 1.0
+	version.anchor_bottom = 1.0
+	version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	version.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	version.offset_right = -20.0
+	version.offset_bottom = -12.0
+	UiKit.mark(version, self, "VersionLabel")
+	add_child(version)
+
 	var tween: Tween = create_tween().set_loops()
 	tween.tween_property(prompt, "modulate:a", 0.45, PULSE_S).set_trans(Tween.TRANS_SINE)
 	tween.tween_property(prompt, "modulate:a", 1.0, PULSE_S).set_trans(Tween.TRANS_SINE)

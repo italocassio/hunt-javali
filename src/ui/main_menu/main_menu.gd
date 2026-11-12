@@ -49,4 +49,23 @@ func _ready() -> void:
 	info.add_child(UiKit.label("Maior javali: %s kg" % UiKit.decimal(float(stats.get("heaviest_kg", 0.0)), 0)))
 	info.add_child(UiKit.label("Total ganho: %s" % UiKit.money_text(int(stats.get("money_earned_total", 0)))))
 	info.add_child(UiKit.muted("O javali é espécie invasora no Brasil. Proteja a lavoura e a fauna nativa."))
+	_add_version_label()
 	play.grab_focus()
+
+
+## Bottom-right corner. The number comes from application/config/version in project.godot.
+func _add_version_label() -> void:
+	var version: Label = Label.new()
+	version.text = "Versão %s" % String(ProjectSettings.get_setting("application/config/version", "?"))
+	version.modulate = Color(1.0, 1.0, 1.0, 0.75)
+	version.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	version.anchor_left = 1.0
+	version.anchor_top = 1.0
+	version.anchor_right = 1.0
+	version.anchor_bottom = 1.0
+	version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	version.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	version.offset_right = -20.0
+	version.offset_bottom = -12.0
+	UiKit.mark(version, self, "VersionLabel")
+	add_child(version)

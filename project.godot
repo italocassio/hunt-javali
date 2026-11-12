@@ -12,6 +12,7 @@ config_version=5
 
 config/name="Caçada ao Javali"
 config/description="Controle de javalis invasores em fazendas do Brasil."
+config/version="0.3.3"
 run/main_scene="res://src/ui/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://assets/ui/icons/app_icon.svg"

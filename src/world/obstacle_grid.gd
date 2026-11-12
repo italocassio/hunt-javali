@@ -31,9 +31,10 @@ func add_circle(x: float, z: float, radius: float) -> void:
 	for cz: int in range(r0, r1 + 1):
 		for cx: int in range(c0, c1 + 1):
 			var key: int = cz * KEY_STRIDE + cx + KEY_OFFSET
-			if not _cells.has(key):
-				_cells[key] = PackedInt32Array()
-			(_cells[key] as PackedInt32Array).append(idx)
+			# Read, append, write back: a packed array read from a Dictionary through a cast is a copy.
+			var list: PackedInt32Array = _cells.get(key, PackedInt32Array())
+			list.append(idx)
+			_cells[key] = list
 
 
 ## Lateral push away from circles ahead of the agent. Zero when the way is clear.

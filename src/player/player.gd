@@ -63,6 +63,7 @@ var _zoom_value: float = 1.0
 var _switch_left: float = 0.0
 var _fire_buffer: float = 0.0
 var _ignore_fire_until_release: bool = false
+var _fire_was_down: bool = false
 var _was_captured: bool = false
 var _knock: Vector3 = Vector3.ZERO
 var _stride: float = 0.0
@@ -393,6 +394,14 @@ func get_world() -> HuntWorld:
 	return _world
 
 
+func get_request() -> HuntRequest:
+	return _request
+
+
+func is_bot() -> bool:
+	return _bot
+
+
 ## Touch look pad feeds raw pixel deltas here.
 func apply_touch_look(rel_px: Vector2) -> void:
 	if not _can_look():
@@ -494,8 +503,10 @@ func _pump_discrete_input(delta: float) -> void:
 		_ignore_fire_until_release = false
 	if not Input.is_action_pressed(&"fire"):
 		_ignore_fire_until_release = false
-	if Input.is_action_just_pressed(&"fire") and _fire_allowed_by_input():
+	var fire_down: bool = Input.is_action_pressed(&"fire")
+	if fire_down and not _fire_was_down and _fire_allowed_by_input():   # edge detect: robust to event order
 		_fire_buffer = FIRE_BUFFER_S
+	_fire_was_down = fire_down
 	if _fire_buffer > 0.0 and _fire_allowed_by_input() and _try_fire():
 		_fire_buffer = 0.0
 	if Input.is_action_just_pressed(&"reload"):

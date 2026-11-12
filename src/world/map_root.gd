@@ -5,7 +5,7 @@ extends Node3D
 ## build_* steps one per frame.
 
 ## Hard budget of static collision shapes (terrain + walls + props + trunks).
-const STATIC_SHAPE_BUDGET: int = 200
+const STATIC_SHAPE_BUDGET: int = 400
 const TERRAIN_SHAPES: int = 5
 const CROP_FLATTEN_BLEND_M: float = 8.0
 const BUILDING_FLATTEN_BLEND_M: float = 6.0

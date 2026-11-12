@@ -4,7 +4,7 @@ extends Control
 ## boars and (only while the drone reveals them) every alive boar.
 
 const VIEW_RADIUS_M: float = 90.0
-const COLOR_BG: Color = Color(0.17, 0.14, 0.11, 0.75)
+const COLOR_BG: Color = Color(0.40, 0.36, 0.22, 0.85)
 const COLOR_FRAME: Color = Color(0.96, 0.94, 0.90, 0.8)
 const COLOR_OUTSIDE: Color = Color(0.05, 0.05, 0.05, 0.85)
 const COLOR_CROP: Color = Color(0.25, 0.55, 0.28, 0.75)

@@ -48,8 +48,8 @@ func setup(id: StringName, on_buy: Callable) -> void:
 	name_row.add_child(UiKit.label(str(def.get("name", id)), "HeaderLabel"))
 	var tag: String = kind_tag(id)
 	if tag != "":
-		var tag_label: Label = UiKit.muted(tag)
-		tag_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		var tag_label: Label = UiKit.label(tag)
+		tag_label.modulate = Color(1, 1, 1, 0.7)
 		tag_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 		name_row.add_child(tag_label)
 	info.add_child(name_row)

@@ -233,7 +233,8 @@ func _impact(vfx_parent: Node, vfx_id: StringName, sound_id: StringName, positio
 	get_tree().create_timer(life).timeout.connect(_free_vfx.bind(fx))
 
 
-static func _free_vfx(fx: Node) -> void:
+## Untyped on purpose: the effect may already be freed (scene change) when the timer fires.
+static func _free_vfx(fx: Variant) -> void:
 	_active_vfx = maxi(_active_vfx - 1, 0)
 	if is_instance_valid(fx):
-		fx.queue_free()
+		(fx as Node).queue_free()

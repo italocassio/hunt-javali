@@ -14,6 +14,7 @@ config/name="Caçada ao Javali"
 config/description="Controle de javalis invasores em fazendas do Brasil."
 run/main_scene="res://src/ui/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/ui/icons/app_icon.svg"
 
 [autoload]
 
@@ -31,6 +32,10 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=4
+
+[gui]
+
+theme/custom="res://assets/ui/theme.tres"
 
 [layer_names]
 

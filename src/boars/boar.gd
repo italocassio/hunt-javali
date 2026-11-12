@@ -121,6 +121,8 @@ var _leg_until: float = 0.0
 var _eating_here: bool = false
 var _eat_shift_time: float = 0.0
 var _bait: Bait = null
+## True while a bait slot is reserved. Never test _bait against null: a freed bait compares equal to null.
+var _using_bait: bool = false
 var _approaching: bool = false
 var _flee_resting: bool = false
 var _flee_replan_time: float = 0.0
@@ -189,6 +191,11 @@ func get_zone_position(zone: StringName) -> Vector3:
 		return Vector3.INF
 	var def: Array = BoarVisualBase.HIT_ZONES[zone] as Array
 	return to_global((def[0] as Vector3) * body_scale)
+
+
+## Standing alert (not closing in for a charge).
+func is_alerting() -> bool:
+	return state == Ids.BS_ALERT and not _approaching
 
 
 func is_one_shot() -> bool:
@@ -380,10 +387,8 @@ func _after_perception() -> void:
 		if _is_calm():
 			herd.raise_alert(self, _threat)
 			return
-	if state == Ids.BS_WANDER or state == Ids.BS_TO_CROP or (state == Ids.BS_EAT and _bait == null):
-		var bait: Bait = _world.find_bait(get_xz(), boar_id)
-		if bait != null:
-			_bait = bait
+	if state == Ids.BS_WANDER or state == Ids.BS_TO_CROP or (state == Ids.BS_EAT and not _using_bait):
+		if _try_take_bait():
 			_enter_to_bait()
 
 
@@ -456,9 +461,7 @@ func _resume() -> void:
 
 func _begin_feeding_trip() -> void:
 	_end_encounter()
-	if not _bait_valid():
-		_bait = _world.find_bait(get_xz(), boar_id)
-	if _bait != null:
+	if _bait_valid() or _try_take_bait():
 		_enter_to_bait()
 	else:
 		_enter_to_crop()
@@ -527,7 +530,7 @@ func _enter_to_bait() -> void:
 
 func _tick_to_bait(delta: float) -> void:
 	if not _bait_valid():
-		_bait = null
+		_drop_bait()
 		_begin_feeding_trip()
 		return
 	var dist: float = get_xz().distance_to(_target)
@@ -546,9 +549,9 @@ func _enter_eat() -> void:
 
 
 func _tick_eat(delta: float) -> void:
-	if _bait != null:
+	if _using_bait:
 		if not _bait_valid():
-			_bait = null
+			_drop_bait()
 			_set_eating_here(false)
 			_begin_feeding_trip()
 		return
@@ -570,7 +573,7 @@ func _tick_eat(delta: float) -> void:
 func _set_eating_here(on: bool) -> void:
 	_eating_here = on
 	_visual.set_eating(on)
-	if on and _bait == null:
+	if on and not _using_bait:
 		_world.crop.register_eater(boar_id, _drain_pct_per_s * _world.crop_drain_mult, get_xz())
 	else:
 		_world.crop.unregister_eater(boar_id)
@@ -603,6 +606,10 @@ func _tick_alert(delta: float) -> void:
 		return
 	_face(_threat, delta, 1.0)
 	if _state_time < _alert_time:
+		return
+	# The herd acts as one: members wait for the leader's verdict.
+	var leader: Boar = herd.get_leader()
+	if leader != null and leader != self and leader.is_alerting():
 		return
 	if _now() - herd.last_detect_time <= ALERT_MEMORY_S:
 		herd.raise_reaction(_threat, false)
@@ -907,13 +914,27 @@ func _now() -> float:
 
 
 func _bait_valid() -> bool:
-	return _bait != null and is_instance_valid(_bait) and _bait.active
+	return _using_bait and is_instance_valid(_bait) and _bait.active
+
+
+func _try_take_bait() -> bool:
+	var bait: Bait = _world.find_bait(get_xz(), boar_id)
+	if bait == null:
+		return false
+	_bait = bait
+	_using_bait = true
+	return true
+
+
+func _drop_bait() -> void:
+	_bait = null
+	_using_bait = false
 
 
 func _release_bait() -> void:
-	if _bait != null and is_instance_valid(_bait):
+	if _using_bait and is_instance_valid(_bait):
 		_bait.release(boar_id)
-	_bait = null
+	_drop_bait()
 
 
 ## Stops eating (head up, crop drain off). Keeps the bait reservation.

@@ -77,13 +77,14 @@ static func _grass_tuft() -> Mesh:
 	var r: RandomNumberGenerator = _rng("grass")
 	var base: Color = Color(0.52, 0.47, 0.22)
 	var tip: Color = Color(0.86, 0.76, 0.40)
-	for i in 8:
-		var a: float = TAU * float(i) / 8.0 + r.randf() * 0.3
-		var h: float = 0.24 + r.randf() * 0.18
+	# 4 double-sided blades = 8 triangles
+	for i in 4:
+		var a: float = TAU * float(i) / 4.0 + r.randf() * 0.4
+		var h: float = 0.3 + r.randf() * 0.12
 		var lean: float = 0.10 + r.randf() * 0.10
 		var rad: float = 0.03 + r.randf() * 0.04
 		var c: Vector3 = Vector3(cos(a), 0, sin(a))
-		var side: Vector3 = Vector3(-sin(a), 0, cos(a)) * 0.022
+		var side: Vector3 = Vector3(-sin(a), 0, cos(a)) * 0.04
 		var p: Vector3 = c * rad
 		k.tri_double(p - side, p + side, p + c * lean + Vector3(0, h, 0), base, base, tip)
 	var mesh: ArrayMesh = ArrayMesh.new()
@@ -231,8 +232,14 @@ static func _soy_patch() -> Mesh:
 	var k: MeshKit = MeshKit.new()
 	var base: Color = Color(0.20, 0.42, 0.14)
 	var top: Color = Color(0.46, 0.72, 0.24)
-	for z in [-0.66, 0.0, 0.66]:
-		_row(k, z, 2.0, 0.62, 0.6, base, top)
+	# two rows of three bushy plants (6 cones x 4 tris = 24 tris); bare earth shows between rows
+	var i: int = 0
+	for z: float in [-0.5, 0.5]:
+		for x: float in [-0.67, 0.0, 0.67]:
+			k.set_xf(Vector3(x, 0.0, z), Vector3(0.0, 45.0 * float(i % 2) + 12.0 * float(i), 0.0))
+			k.frustum(Vector3.ZERO, 0.40, 0.0, 0.62, 4, base, top, false, false)
+			k.reset_xf()
+			i += 1
 	var mesh: ArrayMesh = ArrayMesh.new()
 	k.build_into(mesh, wind_material(&"crop"))
 	return mesh

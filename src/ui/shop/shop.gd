@@ -29,10 +29,6 @@ func _ready() -> void:
 	var tabs: HBoxContainer = HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 8)
 	body.add_child(tabs)
-	var holder: Control = Control.new()
-	holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_child(holder)
 
 	for i: int in TABS.size():
 		var tab: Dictionary = TABS[i]
@@ -46,8 +42,7 @@ func _ready() -> void:
 
 		var scroller: Array = UiKit.scroll_list(10)
 		var scroll: Control = scroller[0]
-		scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-		holder.add_child(scroll)
+		body.add_child(scroll)
 		_tab_pages.append(scroll)
 		for id: StringName in _ids_for(str(tab["key"])):
 			var card: ItemCard = ItemCard.new()

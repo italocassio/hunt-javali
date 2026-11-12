@@ -2,7 +2,7 @@ class_name CropManager
 extends Node3D
 ## Crop health (100 -> 0) and the visible plants. Each 2x2 m patch is one MultiMesh instance.
 ## Eaters (boars) drain health; every (100 / patch_count)% drained turns the patch nearest to
-## the eater from "healthy" into "eaten" (healthy instance scaled to 0, eaten instance shown).
+## the eater from "healthy" into "eaten" (see _eat_patch).
 ## 2 MultiMeshes per 32x32 m block. Emits crop_health_changed / crop_under_attack.
 
 const PATCH_M: float = 2.0
@@ -26,9 +26,13 @@ var _fields: Array[Dictionary] = []   # {rect, cols, rows, first}
 var _patch_total: int = 0
 var _patch_eaten: PackedByteArray = PackedByteArray()
 var _patch_block: PackedInt32Array = PackedInt32Array()     # index into _blocks
-var _patch_slot: PackedInt32Array = PackedInt32Array()      # instance index inside the block
+var _patch_slot: PackedInt32Array = PackedInt32Array()      # healthy instance index inside the block
+var _slot_patch: PackedInt32Array = PackedInt32Array()      # (block first + healthy slot) -> patch
+var _block_first: PackedInt32Array = PackedInt32Array()     # block -> first index in _slot_patch
+var _block_healthy_n: PackedInt32Array = PackedInt32Array() # block -> healthy instances drawn
+var _block_eaten_n: PackedInt32Array = PackedInt32Array()   # block -> eaten instances drawn
 var _patch_xf: Array[Transform3D] = []
-var _blocks: Array[Dictionary] = []   # {healthy: MultiMesh, eaten: MultiMesh}
+var _blocks: Array[Dictionary] = []   # {healthy: MultiMesh, eaten: MultiMesh, eaten_node: MultiMeshInstance3D}
 var _eaten_count: int = 0
 
 var _eater_drain: Dictionary = {}   # boar_id -> pct per second
@@ -66,6 +70,10 @@ func get_patch_eaten() -> int:
 
 func get_eater_count() -> int:
 	return _eater_drain.size()
+
+
+func has_eater(boar_id: int) -> bool:
+	return _eater_drain.has(boar_id)
 
 
 func is_frozen() -> bool:
@@ -175,10 +183,18 @@ func _build_field(field: CropField, mesh_getter: Callable) -> void:
 		var eaten: MultiMesh = _make_mm(eaten_mesh, list.size())
 		for i: int in list.size():
 			healthy.set_instance_transform(i, list[i] as Transform3D)
-			eaten.set_instance_transform(i, _zero_xf(list[i] as Transform3D))
+			eaten.set_instance_transform(i, list[i] as Transform3D)   # keeps the AABB on the block
+		eaten.visible_instance_count = 0
 		_add_instance(healthy, "Healthy")
-		_add_instance(eaten, "Eaten")
-		_blocks.append({"healthy": healthy, "eaten": eaten})
+		var eaten_node: MultiMeshInstance3D = _add_instance(eaten, "Eaten")
+		eaten_node.visible = false
+		_blocks.append({"healthy": healthy, "eaten": eaten, "eaten_node": eaten_node})
+		_block_first.append(_slot_patch.size())
+		_slot_patch.resize(_slot_patch.size() + list.size())
+		_block_healthy_n.append(list.size())
+		_block_eaten_n.append(0)
+	for p: int in range(first, _patch_total):
+		_slot_patch[_block_first[_patch_block[p]] + _patch_slot[p]] = p
 
 
 func _make_mm(mesh: Mesh, count: int) -> MultiMesh:
@@ -189,28 +205,44 @@ func _make_mm(mesh: Mesh, count: int) -> MultiMesh:
 	return mm
 
 
-func _add_instance(mm: MultiMesh, label: String) -> void:
+func _add_instance(mm: MultiMesh, label: String) -> MultiMeshInstance3D:
 	var mmi: MultiMeshInstance3D = MultiMeshInstance3D.new()
 	mmi.name = "%s_%d" % [label, _blocks.size()]
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.visibility_range_end = VISIBILITY_END_M
 	add_child(mmi)
+	return mmi
 
 
-func _zero_xf(xf: Transform3D) -> Transform3D:
-	return Transform3D(Basis.from_scale(Vector3.ZERO), xf.origin)
-
-
+## Only live instances are drawn: healthy patches stay packed at the front of their MultiMesh and
+## eaten ones are appended to the other, so no degenerate (zero-scale) triangles are submitted.
 func _eat_patch(p: int) -> void:
 	if _patch_eaten[p] != 0:
 		return
 	_patch_eaten[p] = 1
 	_eaten_count += 1
-	var block: Dictionary = _blocks[_patch_block[p]]
-	var xf: Transform3D = _patch_xf[p]
-	(block["healthy"] as MultiMesh).set_instance_transform(_patch_slot[p], _zero_xf(xf))
-	(block["eaten"] as MultiMesh).set_instance_transform(_patch_slot[p], xf)
+	var b: int = _patch_block[p]
+	var block: Dictionary = _blocks[b]
+	var healthy: MultiMesh = block["healthy"] as MultiMesh
+	var eaten: MultiMesh = block["eaten"] as MultiMesh
+	# Healthy: move the last drawn instance into the freed slot and draw one less.
+	var first: int = _block_first[b]
+	var slot: int = _patch_slot[p]
+	var last: int = _block_healthy_n[b] - 1
+	if slot != last:
+		var moved: int = _slot_patch[first + last]
+		healthy.set_instance_transform(slot, _patch_xf[moved])
+		_slot_patch[first + slot] = moved
+		_patch_slot[moved] = slot
+	_block_healthy_n[b] = last
+	healthy.visible_instance_count = last
+	# Eaten: append.
+	var n: int = _block_eaten_n[b]
+	eaten.set_instance_transform(n, _patch_xf[p])
+	_block_eaten_n[b] = n + 1
+	eaten.visible_instance_count = n + 1
+	(block["eaten_node"] as MultiMeshInstance3D).visible = true
 
 
 ## Turns the uneaten patch nearest to pos (XZ) into an eaten one.

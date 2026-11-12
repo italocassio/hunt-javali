@@ -113,6 +113,8 @@ func _input(event: InputEvent) -> void:
 			_apply_touch_mode(true)
 		elif event is InputEventKey:
 			_apply_touch_mode(false)
+		elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION:
+			_apply_touch_mode(false)   # hybrid laptop: a real click switches to mouse mode and still counts
 		elif event is InputEventMouseMotion and event.device != InputEvent.DEVICE_ID_EMULATION \
 				and (event as InputEventMouseMotion).relative.length() > MOUSE_MOTION_SWITCH_PX:
 			_apply_touch_mode(false)

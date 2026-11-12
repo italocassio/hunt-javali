@@ -67,11 +67,19 @@ func _ready() -> void:
 			b.rotation.y = deg_to_rad(s[3])
 			if s[1] == Ids.BOAR:
 				b.set_eating(true)
+	if OS.get_cmdline_user_args().has("--top"):
+		cam_mode = "top"
+	if OS.get_cmdline_user_args().has("--walk"):
+		cam_mode = "walk"
 	var cam: Camera3D = Camera3D.new()
 	add_child(cam)
 	if cam_mode == "eye":
 		cam.position = Vector3(2.0, _h(2, 12) + 1.7, 12.0)
 		cam.look_at(Vector3(-4.0, 1.4, -10.0))
+		cam.fov = 70.0
+	elif cam_mode == "walk":
+		cam.position = Vector3(-2.0, _h(-2, 10) + 1.7, 12.0)
+		cam.look_at(Vector3(-2.0, 0.0, 0.0))
 		cam.fov = 70.0
 	else:
 		cam.position = Vector3(10, 40, 50)

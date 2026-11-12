@@ -277,6 +277,8 @@ static func next_purchase_hint() -> String:
 			if best_id == &"" or price < best_price:
 				best_id = id
 				best_price = price
+		if best_id != &"":
+			break   # weapons first, then dogs, then equipment
 	if best_id == &"":
 		return ""
 	var missing: int = best_price - Profile.get_money()

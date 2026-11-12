@@ -148,7 +148,7 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["bind(player: PlayerBase, world: HuntWorld) -> void"]},
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
 	{"name": "TouchControls", "path": "res://src/hud/touch/touch_controls.gd", "base": "CanvasLayer", "pkg": "A"},
-	{"name": "VirtualJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
+	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
 	# --- Package B ---
 	{"name": "HuntController", "path": "res://src/hunt/hunt_controller.gd", "base": "HuntWorld", "pkg": "B",
 		"props": ["route_on_finish"]},

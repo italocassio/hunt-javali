@@ -13,6 +13,7 @@ var members: Array[Boar] = []
 var anchor: Vector2 = Vector2.ZERO              # where the herd was born (wander center)
 var wander_end_time: float = 0.0                # world elapsed time when wandering ends
 var last_detect_time: float = -1000.0           # last time any member saw/heard the player
+var rest_until: float = -1000.0                 # shared end of the rest after a flight
 
 var crop_target: Vector2 = Vector2.INF
 var crop_rect: Rect2 = Rect2()

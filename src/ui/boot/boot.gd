@@ -42,22 +42,29 @@ func _ready() -> void:
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	titles.add_child(sub)
 
-	_start = UiKit.button("Toque para começar", "PrimaryButton", 96)
+	_start = UiKit.button("", "PrimaryButton", 96)
 	_start.flat = true
+	_start.theme_type_variation = ""
+	for style_name: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_start.add_theme_stylebox_override(style_name, StyleBoxEmpty.new())
 	_start.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_start.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_start.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	if not UiKit.has_global_theme():
-		_start.add_theme_font_size_override("font_size", 34)
 	UiKit.mark(_start, self, "StartButton")
 	add_child(_start)
 	_start.move_to_front()
 	_start.pressed.connect(_on_start)
 	_start.grab_focus()
+	var prompt: Label = UiKit.label("Toque para começar", "HeaderLabel")
+	prompt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	prompt.anchor_top = 0.72
+	prompt.anchor_bottom = 0.9
+	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(prompt)
 
 	var tween: Tween = create_tween().set_loops()
-	tween.tween_property(_start, "modulate:a", 0.45, PULSE_S).set_trans(Tween.TRANS_SINE)
-	tween.tween_property(_start, "modulate:a", 1.0, PULSE_S).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(prompt, "modulate:a", 0.45, PULSE_S).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(prompt, "modulate:a", 1.0, PULSE_S).set_trans(Tween.TRANS_SINE)
 
 
 func _on_start() -> void:

@@ -149,11 +149,8 @@ func _build_loadout(list: VBoxContainer) -> void:
 	for slot: int in 2:
 		var b: Button = UiKit.button("", "SecondaryButton", 72)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		UiKit.mark(b, self, "WeaponSlot%d" % slot) if false else null
-		b.name = "WeaponSlot%d" % slot
+		UiKit.mark(b, self, "WeaponSlot%d" % slot)
 		wbox.add_child(b)
-		b.owner = self
-		b.unique_name_in_owner = true
 		b.pressed.connect(_cycle_slot.bind(slot))
 		_slot_buttons.append(b)
 		var stats: Label = UiKit.muted("")
@@ -180,11 +177,8 @@ func _build_loadout(list: VBoxContainer) -> void:
 		if Profile.owns(dog_id):
 			_dog_option.add_item(UiKit.item_name(dog_id))
 			_dog_option.set_item_metadata(_dog_option.item_count - 1, dog_id)
-	UiKit.mark(_dog_option, self, "DogOption") if false else null
-	_dog_option.name = "DogOption"
+	UiKit.mark(_dog_option, self, "DogOption")
 	dbox.add_child(_dog_option)
-	_dog_option.owner = self
-	_dog_option.unique_name_in_owner = true
 	_dog_option.item_selected.connect(_on_dog_selected)
 	_dog_hint = UiKit.muted("")
 	dbox.add_child(_dog_hint)

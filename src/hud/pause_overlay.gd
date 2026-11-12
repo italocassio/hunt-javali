@@ -71,16 +71,14 @@ func _make_button(text: String, variation: StringName, handler: Callable) -> But
 	return b
 
 
-func _input(event: InputEvent) -> void:
-	if not event.is_action_pressed(&"pause") or event.is_echo():
-		return
-	if _settings != null:
+## Polled instead of _input: the touch pause button uses Input.action_press, which sends no InputEvent.
+func _process(_delta: float) -> void:
+	if not Input.is_action_just_pressed(&"pause") or _settings != null:
 		return
 	if _open:
 		close()
 	else:
 		open()
-	get_viewport().set_input_as_handled()
 
 
 func open() -> void:

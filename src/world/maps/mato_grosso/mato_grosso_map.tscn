@@ -1,0 +1,603 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://src/world/map_root.gd" id="1"]
+[ext_resource type="Script" path="res://src/world/crop_field.gd" id="2"]
+[ext_resource type="Script" path="res://src/world/prop_spawn.gd" id="3"]
+[ext_resource type="Script" path="res://src/world/water_body.gd" id="4"]
+[ext_resource type="Script" path="res://src/world/flora_zone.gd" id="5"]
+
+[node name="MatoGrossoMap" type="Node3D"]
+script = ExtResource("1")
+map_size_m = 256.0
+grid_resolution = 129
+terrain_seed = 7
+height_amplitude_m = 6.0
+base_flora = {
+"cerrado_tree": 90,
+"grass_tuft": 2500,
+"ipe": 18,
+"shrub": 250,
+"termite_mound": 30
+}
+road_points = PackedVector2Array(10, -62, 14, -50, 18, -35, 18, -15, 18, 25, 18, 55)
+road_width_m = 4.0
+
+[node name="PlayerSpawn" type="Marker3D" parent="."]
+position = Vector3(10, 0, -50)
+rotation = Vector3(0, 3.14159, 0)
+
+[node name="CropFields" type="Node3D" parent="."]
+
+[node name="Soy" type="Marker3D" parent="CropFields"]
+script = ExtResource("2")
+position = Vector3(-35, 0, 15)
+size_m = Vector2(90, 70)
+crop = &"soy"
+
+[node name="Corn" type="Marker3D" parent="CropFields"]
+script = ExtResource("2")
+position = Vector3(55, 0, 20)
+size_m = Vector2(56, 70)
+crop = &"corn"
+
+[node name="SpawnZones" type="Node3D" parent="."]
+
+[node name="Spawn0" type="Marker3D" parent="SpawnZones"]
+position = Vector3(-95, 0, 110)
+
+[node name="Spawn1" type="Marker3D" parent="SpawnZones"]
+position = Vector3(20, 0, 115)
+
+[node name="Spawn2" type="Marker3D" parent="SpawnZones"]
+position = Vector3(105, 0, 95)
+
+[node name="Spawn3" type="Marker3D" parent="SpawnZones"]
+position = Vector3(115, 0, -50)
+
+[node name="RetreatZones" type="Node3D" parent="."]
+
+[node name="Retreat0" type="Marker3D" parent="RetreatZones"]
+position = Vector3(-80, 0, 108)
+
+[node name="Retreat1" type="Marker3D" parent="RetreatZones"]
+position = Vector3(0, 0, 112)
+
+[node name="Retreat2" type="Marker3D" parent="RetreatZones"]
+position = Vector3(90, 0, 102)
+
+[node name="Retreat3" type="Marker3D" parent="RetreatZones"]
+position = Vector3(112, 0, -38)
+
+[node name="Water" type="Node3D" parent="."]
+
+[node name="Pond" type="Marker3D" parent="Water"]
+script = ExtResource("4")
+position = Vector3(-70, 0, -55)
+radius_m = 18.0
+depth_m = 1.5
+
+[node name="PropSpawns" type="Node3D" parent="."]
+
+[node name="Farmhouse" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(10, 0, -85)
+prop_id = &"farmhouse"
+collision_size = Vector3(12, 6, 8)
+footprint_radius_m = 6
+
+[node name="Barn" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(38, 0, -88)
+prop_id = &"barn"
+collision_size = Vector3(16, 7, 10)
+footprint_radius_m = 8
+
+[node name="WaterTank" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-8, 0, -92)
+prop_id = &"water_tank"
+collision_size = Vector3(3, 8, 3)
+footprint_radius_m = 1.8
+
+[node name="FeedTrough" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(25, 0, -70)
+prop_id = &"feed_trough"
+collision_size = Vector3(3, 0.6, 0.8)
+footprint_radius_m = 1.2
+
+[node name="Gate" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(10, 0, -62)
+prop_id = &"gate"
+collision_size = Vector3(0, 0, 0)
+footprint_radius_m = 0
+
+[node name="FenceN0" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-18, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS0" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-18, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN1" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-14, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS1" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-14, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN2" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-10, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS2" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-10, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN3" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-6, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS3" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-6, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN4" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-2, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS4" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-2, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN5" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(2, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS5" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(2, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN6" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(6, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS6" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(6, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN7" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(10, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN8" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(14, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS8" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(14, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN9" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(18, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS9" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(18, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN10" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(22, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS10" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(22, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN11" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(26, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS11" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(26, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN12" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(30, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS12" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(30, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN13" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(34, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS13" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(34, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN14" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(38, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS14" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(38, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN15" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(42, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS15" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(42, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN16" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(46, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS16" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(46, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN17" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(50, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS17" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(50, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceN18" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(54, 0, -110)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceS18" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(54, 0, -62)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW0" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -108)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE0" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -108)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW1" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -104)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE1" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -104)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW2" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -100)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE2" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -100)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW3" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -96)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE3" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -96)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW4" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -92)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE4" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -92)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW5" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -88)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE5" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -88)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW6" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -84)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE6" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -84)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW7" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -80)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE7" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -80)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW8" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -76)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE8" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -76)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW9" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -72)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE9" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -72)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW10" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -68)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE10" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -68)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceW11" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(-20, 0, -64)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FenceE11" type="Marker3D" parent="PropSpawns"]
+script = ExtResource("3")
+position = Vector3(55, 0, -64)
+rotation = Vector3(0, 1.5708, 0)
+prop_id = &"fence_segment"
+collision_size = Vector3(4, 1.3, 0.15)
+footprint_radius_m = 0
+
+[node name="FloraZones" type="Node3D" parent="."]
+
+[node name="PondPalms" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(-70, 0, -55)
+radius_m = 30
+counts = {"buriti": 12, "shrub": 20}
+
+[node name="ForestSW" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(-90, 0, 105)
+radius_m = 30
+counts = {"cerrado_tree": 25, "buriti": 6, "ipe": 3, "shrub": 30}
+
+[node name="ForestS1" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(-30, 0, 110)
+radius_m = 30
+counts = {"cerrado_tree": 25, "buriti": 6, "ipe": 3, "shrub": 30}
+
+[node name="ForestS2" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(30, 0, 108)
+radius_m = 30
+counts = {"cerrado_tree": 25, "buriti": 6, "ipe": 3, "shrub": 30}
+
+[node name="ForestSE" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(95, 0, 100)
+radius_m = 30
+counts = {"cerrado_tree": 25, "buriti": 6, "ipe": 3, "shrub": 30}
+
+[node name="ForestE" type="Marker3D" parent="FloraZones"]
+script = ExtResource("5")
+position = Vector3(112, 0, -40)
+radius_m = 22
+counts = {"cerrado_tree": 18, "buriti": 4, "ipe": 2, "shrub": 24}

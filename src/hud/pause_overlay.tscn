@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/hud/pause_overlay.gd" id="1_pause"]
+
+[node name="PauseOverlay" type="CanvasLayer"]
+layer = 20
+process_mode = 3
+visible = false
+script = ExtResource("1_pause")

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "gateway": "offline",
+  "pix_key": "SUA-CHAVE-PIX-AQUI",
+  "merchant_name": "CACADA AO JAVALI",
+  "merchant_city": "CUIABA",
+  "description": "Apoio Cacada ao Javali",
+  "txid": "***",
+  "redeem_secret": "TROQUE-ESTE-SEGREDO-ANTES-DE-PUBLICAR",
+  "support_text": "Depois de doar, envie o comprovante para receber seu código de resgate."
+}

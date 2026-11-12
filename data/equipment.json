@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "items": [
+    {"id": "binoculars", "name": "Binóculo", "description": "Zoom de 6x para achar o bando sem espantá-lo.",
+     "kind": "active", "price": 600, "currency": "money", "max_per_hunt": 1, "effect": {"zoom": 6.0}},
+    {"id": "leather_vest", "name": "Colete de couro", "description": "Reduz o dano das presas em 35%.",
+     "kind": "passive", "price": 2500, "currency": "money", "max_per_hunt": 1, "effect": {"damage_reduction": 0.35}},
+    {"id": "medkit", "name": "Kit de primeiros socorros", "description": "Recupera 50 de vida. Consumível.",
+     "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5}},
+    {"id": "corn_bait", "name": "Ceva de milho", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
+     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 2,
+     "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4}},
+    {"id": "extra_ammo", "name": "Munição extra", "description": "Dobra a munição de reserva de todas as armas.",
+     "kind": "passive", "price": 800, "currency": "money", "max_per_hunt": 1, "effect": {"reserve_mult": 2.0}},
+    {"id": "thermal_scope", "name": "Mira térmica", "description": "Ao mirar, destaca javalis até 150 m.",
+     "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
+    {"id": "scout_drone", "name": "Drone batedor", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
+     "kind": "consumable", "price": 30, "currency": "gold", "max_per_hunt": 2, "effect": {"reveal_s": 10.0}}
+  ]
+}

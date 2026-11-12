@@ -1,0 +1,53 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Caçada ao Javali"
+config/description="Controle de javalis invasores em fazendas do Brasil."
+run/main_scene="res://src/ui/boot/boot.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+GameEvents="*res://src/core/game_events.gd"
+Data="*res://src/systems/data_registry.gd"
+Profile="*res://src/systems/profile.gd"
+InputSetup="*res://src/input/input_setup.gd"
+Sfx="*res://assets/audio/sfx_library.gd"
+Router="*res://src/systems/router.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[layer_names]
+
+3d_physics/layer_1="terrain"
+3d_physics/layer_2="static"
+3d_physics/layer_3="player"
+3d_physics/layer_4="boar_hitzone"
+
+[physics]
+
+common/max_physics_steps_per_frame=4
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/size=2048
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=0
+environment/defaults/default_clear_color=Color(0.55, 0.72, 0.86, 1)

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "packages": [
+    {"id": "gold_50",  "name": "Punhado de ouro", "price_brl": 5.0,  "gold": 50},
+    {"id": "gold_110", "name": "Bolsa de ouro",   "price_brl": 10.0, "gold": 110},
+    {"id": "gold_300", "name": "Saco de ouro",    "price_brl": 25.0, "gold": 300},
+    {"id": "gold_650", "name": "Baú de ouro",     "price_brl": 50.0, "gold": 650}
+  ]
+}

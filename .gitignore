@@ -20,6 +20,7 @@ data_*/
 mono_crash.*.json
 
 # Export outputs
+build/
 *.exe
 # Uncomment if your project does not version PCK files as runtime dependencies.
 # *.pck

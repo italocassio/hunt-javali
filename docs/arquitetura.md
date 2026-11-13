@@ -43,7 +43,7 @@ Ouro (premium) só via doação Pix + código de resgate (validação offline, *
 **Arsenal:** Carabina .22 (inicial), Espingarda 12 (bagos), Rifle .308 (luneta 4x), Rifle .30-06 semi,
 [Ouro] Rifle .338 (luneta 8x). Hitscan com queda de dano por distância.
 **Equipamentos:** binóculo, colete de couro, kit de primeiros socorros, ceva de milho, munição extra,
-[Ouro] mira térmica, [Ouro] drone batedor. **Cães:** Vira-lata Caramelo (aponta), Foxhound (acua),
+[Ouro] mira térmica, drone batedor. **Cães:** Vira-lata Caramelo (aponta), Foxhound (acua),
 [Ouro] Dogo Argentino (agarra). Cão obedece "Pega!"/"Volta!", recua ferido, nunca morre.
 
 **Tecnologia:** tudo procedural (malhas, texturas, sons). Javalis e cães **não usam física**: movimento
@@ -394,7 +394,7 @@ func get_item_category(id: StringName) -> StringName  # &"weapon" | &"equipment"
 ### 6.3 Autoload `Profile` — `res://src/systems/profile.gd` — dono: game-systems
 Fachada do meta-jogo: carteira, inventário, loadout, progressão, settings, regras de economia, save.
 ```gdscript
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 const DEFAULT_SAVE_PATH: String = "user://save.json"
 
 func set_save_path(path: String) -> void        # tests usam "user://test_save.json"; não carrega sozinho
@@ -1035,7 +1035,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
     "start_money": 500,
     "start_gold": 0,
     "start_weapons": ["carbine_22"],
-    "start_items": {"medkit": 1}
+    "start_items": {"medkit": 1, "scout_drone": 3}
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
@@ -1138,7 +1138,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
     {"id": "thermal_scope", "name": "Mira térmica", "description": "Ao mirar, destaca javalis até 150 m.",
      "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
     {"id": "scout_drone", "name": "Drone batedor", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
-     "kind": "consumable", "price": 30, "currency": "gold", "max_per_hunt": 2, "effect": {"reveal_s": 10.0}}
+     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0}}
   ]
 }
 ```
@@ -1375,19 +1375,24 @@ O desenvolvedor gera códigos com `RedeemCode.generate` (ex.: uma cena de ferram
 - Quando salvar: compra, alteração de loadout, `apply_hunt_result`, resgate de ouro, `set_setting`,
   `reset_progress`. Não salvar por frame.
 
-Esquema (versão 1):
+Migração 1 → 2: o drone batedor virou item básico; todo save v1 recebe uma vez `economy.start_items.scout_drone`
+unidades somadas ao que já tinha (se `inventory.items` for um objeto) e o drone entra no loadout se houver slot
+livre. Sem `inventory.items` válido a migração não cria nada e o `sanitize` aplica `start_items`. A versão
+gravada passa a 2, então a concessão não se repete; `Profile.load_or_create` grava o save migrado na hora.
+
+Esquema (versão 2):
 ```json
 {
   "format": "cacada-ao-javali-save",
-  "version": 1,
+  "version": 2,
   "saved_at_unix": 1762790000,
   "wallet": {"money": 500, "gold": 0},
   "inventory": {
     "weapons": ["carbine_22"],
     "dogs": [],
-    "items": {"medkit": 1}
+    "items": {"medkit": 1, "scout_drone": 3}
   },
-  "loadout": {"weapons": ["carbine_22", ""], "dog": "", "items": ["medkit"]},
+  "loadout": {"weapons": ["carbine_22", ""], "dog": "", "items": ["medkit", "scout_drone"]},
   "progression": {
     "mato_grosso": {"unlocked": 1, "best_crop_pct": [-1.0, -1.0, -1.0, -1.0, -1.0]}
   },

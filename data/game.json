@@ -44,7 +44,7 @@
     "start_money": 500,
     "start_gold": 0,
     "start_weapons": ["carbine_22"],
-    "start_items": {"medkit": 1}
+    "start_items": {"medkit": 1, "scout_drone": 3}
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},

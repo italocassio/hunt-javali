@@ -44,7 +44,13 @@ func load_or_create() -> void:
 			if existed:
 				push_warning("Profile: save corrupted and no backup, starting a new profile.")
 			data = SaveService.new_save()
-	_apply_dict(SaveService.sanitize(SaveService.migrate(data)))
+	var migrated: Dictionary = SaveService.migrate(data)
+	# The stored version may be missing or of any type in a damaged save: never convert it blindly.
+	var raw_version: Variant = data.get("version")
+	var loaded_version: int = int(raw_version) if (raw_version is int or raw_version is float) and is_finite(float(raw_version)) else 0
+	if int(migrated["version"]) != loaded_version:
+		needs_save = true   # persist the migrated save right away
+	_apply_dict(SaveService.sanitize(migrated))
 	if needs_save:
 		save()
 

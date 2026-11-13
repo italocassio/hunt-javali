@@ -240,7 +240,7 @@ func _check_autoload_signatures() -> void:
 		for c: String in Sigs.PROFILE_CONSTANTS:
 			_t.call("ok", c in profile.get_script().get_script_constant_map(), "Profile.%s ausente" % c)
 		var consts: Dictionary = profile.get_script().get_script_constant_map()
-		_t.call("eq", consts.get("SAVE_VERSION", -1), 1, "Profile.SAVE_VERSION")
+		_t.call("eq", consts.get("SAVE_VERSION", -1), 2, "Profile.SAVE_VERSION")
 		_t.call("eq", consts.get("DEFAULT_SAVE_PATH", ""), "user://save.json", "Profile.DEFAULT_SAVE_PATH")
 	var input_setup: Node = get_tree().root.get_node_or_null("InputSetup")
 	if input_setup != null:

@@ -4,7 +4,8 @@ extends RefCounted
 ## besides read-only Data lookups. Never throws on bad input.
 
 const FORMAT_NAME: String = "cacada-ao-javali-save"
-const CURRENT_VERSION: int = 1
+const CURRENT_VERSION: int = 2
+const DRONE_ID: String = "scout_drone"   # item granted by the v1 -> v2 migration (amount comes from economy.start_items)
 const MAX_CODES: int = 500
 
 const DEFAULT_SETTINGS: Dictionary = {
@@ -217,9 +218,30 @@ static func sanitize_setting(key: String, value: Variant) -> Variant:
 	return default_value
 
 
-static func _migrate_step(data: Dictionary, _from_version: int) -> Dictionary:
-	# No migrations yet: version 1 is the first schema. Add `match _from_version` branches here.
+static func _migrate_step(data: Dictionary, from_version: int) -> Dictionary:
+	match from_version:
+		1:
+			_migrate_v1_to_v2(data)
 	return data
+
+
+## v1 -> v2: the scout drone became a basic item; every existing player gets the free starting drones once.
+## Without an inventory.items dictionary nothing is created, so sanitize applies economy.start_items as usual.
+static func _migrate_v1_to_v2(data: Dictionary) -> void:
+	var economy: Dictionary = _dict(Data.get_game().get("economy"))
+	var grant: int = maxi(0, _int(_dict(economy.get("start_items")).get(DRONE_ID), 0))
+	if grant <= 0:
+		return
+	var inv: Variant = data.get("inventory")
+	if inv is Dictionary and (inv as Dictionary).get("items") is Dictionary:
+		var items: Dictionary = (inv as Dictionary)["items"]
+		items[DRONE_ID] = clampi(maxi(0, _int(items.get(DRONE_ID), 0)) + grant, 0, Wallet.MAX_BALANCE)
+	var load_block: Variant = data.get("loadout")
+	if load_block is Dictionary and (load_block as Dictionary).get("items") is Array:
+		var equipped: Array = (load_block as Dictionary)["items"]
+		var item_slots: int = maxi(0, int(Data.get_game().get("loadout", {}).get("item_slots", 3)))
+		if not equipped.has(DRONE_ID) and equipped.size() < item_slots:
+			equipped.append(DRONE_ID)
 
 
 static func _dict(v: Variant) -> Dictionary:

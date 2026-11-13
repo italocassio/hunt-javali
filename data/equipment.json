@@ -15,6 +15,6 @@
     {"id": "thermal_scope", "name": "Mira térmica", "description": "Ao mirar, destaca javalis até 150 m.",
      "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
     {"id": "scout_drone", "name": "Drone batedor", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
-     "kind": "consumable", "price": 30, "currency": "gold", "max_per_hunt": 2, "effect": {"reveal_s": 10.0}}
+     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0}}
   ]
 }

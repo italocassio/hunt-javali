@@ -71,16 +71,109 @@ func test_corrupted_save_does_not_wipe_a_good_backup() -> void:
 
 
 func test_migrate() -> void:
-	eq(SaveService.migrate({})["version"], 1, "sem versao -> 1")
-	eq(SaveService.migrate({"version": 0})["version"], 1, "versao 0 -> 1")
-	eq(SaveService.migrate({"version": -7})["version"], 1, "versao negativa -> 1")
-	eq(SaveService.migrate({"version": "abc"})["version"], 1, "versao string -> 1")
+	var cur: int = SaveService.CURRENT_VERSION
+	eq(SaveService.migrate({})["version"], cur, "sem versao -> atual")
+	eq(SaveService.migrate({"version": 0})["version"], cur, "versao 0 -> atual")
+	eq(SaveService.migrate({"version": -7})["version"], cur, "versao negativa -> atual")
+	eq(SaveService.migrate({"version": "abc"})["version"], cur, "versao string -> atual")
 	eq(SaveService.migrate({"version": 99})["version"], 99, "versao futura mantida")
-	eq(SaveService.migrate({"version": NAN})["version"], 1, "versao NaN -> 1")
+	eq(SaveService.migrate({"version": NAN})["version"], cur, "versao NaN -> atual")
 	var original: Dictionary = {"version": 1, "x": [1]}
 	var out: Dictionary = SaveService.migrate(original)
 	(out["x"] as Array).append(2)
 	eq((original["x"] as Array).size(), 1, "migrate nao altera a entrada")
+
+
+func _drone_grant() -> int:
+	return int(Data.get_game()["economy"]["start_items"]["scout_drone"])
+
+
+func test_new_save_has_drones_equipped() -> void:
+	var s: Dictionary = SaveService.new_save()
+	eq(s["inventory"]["items"].get("scout_drone", 0), _drone_grant(), "drones iniciais")
+	eq(s["inventory"]["items"].get("medkit", 0), 1, "medkit iniciais")
+	ok((s["loadout"]["items"] as Array).has("scout_drone"), "drone equipado")
+	ok((s["loadout"]["items"] as Array).has("medkit"), "medkit equipado")
+
+
+func test_migrate_v1_grants_drones() -> void:
+	var grant: int = _drone_grant()
+	var s: Dictionary = SaveService.sanitize(SaveService.migrate({
+		"version": 1, "inventory": {"items": {"medkit": 2}}, "loadout": {"items": ["medkit"]}}))
+	eq(s["version"], 2, "versao 2")
+	eq(s["inventory"]["items"]["scout_drone"], grant, "drones concedidos")
+	eq(s["inventory"]["items"]["medkit"], 2, "medkit preservado")
+	eq(s["loadout"]["items"], ["medkit", "scout_drone"], "drone equipado")
+	# already owned drones are added to
+	var t: Dictionary = SaveService.sanitize(SaveService.migrate({
+		"version": 1, "inventory": {"items": {"scout_drone": 2}}, "loadout": {"items": []}}))
+	eq(t["inventory"]["items"]["scout_drone"], 2 + grant, "soma ao que ja tinha")
+	# all item slots taken: inventory grows, loadout unchanged
+	var slots: int = int(Data.get_game()["loadout"]["item_slots"])
+	var full: Array = ["medkit", "corn_bait", "binoculars", "leather_vest", "extra_ammo"].slice(0, slots)
+	var inv_items: Dictionary = {}
+	for id: String in full:
+		inv_items[id] = 1
+	var u: Dictionary = SaveService.sanitize(SaveService.migrate({
+		"version": 1, "inventory": {"items": inv_items}, "loadout": {"items": full}}))
+	eq(u["inventory"]["items"]["scout_drone"], grant, "drones no inventario com slots cheios")
+	eq(u["loadout"]["items"], full, "loadout inalterado")
+
+
+func test_migrate_v1_is_not_repeated() -> void:
+	var grant: int = _drone_grant()
+	var once: Dictionary = SaveService.migrate({"version": 1, "inventory": {"items": {"medkit": 1}}, "loadout": {"items": ["medkit"]}})
+	var twice: Dictionary = SaveService.migrate(once)
+	eq(twice["inventory"]["items"]["scout_drone"], grant, "migrar de novo nao concede")
+	var v2: Dictionary = SaveService.migrate({"version": 2, "inventory": {"items": {"medkit": 1}}, "loadout": {"items": ["medkit"]}})
+	ok(not v2["inventory"]["items"].has("scout_drone"), "save v2 nao recebe drones")
+
+
+func test_migrate_malformed_does_not_break() -> void:
+	var cases: Array = [
+		{"version": 1}, {"version": 1, "inventory": 5, "loadout": "x"},
+		{"version": 1, "inventory": {"items": [1, 2]}, "loadout": {"items": {"a": 1}}},
+		{"version": 1, "inventory": {"items": {"scout_drone": "muitos"}}, "loadout": {"items": [null, 3]}},
+		{"version": 1, "inventory": {"items": {"scout_drone": NAN}}},
+	]
+	for c: Dictionary in cases:
+		var m: Dictionary = SaveService.migrate(c)
+		eq(m["version"], 2, "versao 2 em %s" % str(c))
+		var s: Dictionary = SaveService.sanitize(m)
+		ok(s["inventory"]["items"] is Dictionary, "sanitize ok")
+	var s0: Dictionary = SaveService.sanitize(SaveService.migrate({}))
+	eq(s0["inventory"]["items"].get("medkit", 0), 1, "migrate({}) mantem medkit")
+	eq(s0["inventory"]["items"].get("scout_drone", 0), _drone_grant(), "migrate({}) da drones")
+	var s1: Dictionary = SaveService.sanitize(SaveService.migrate({"version": 1, "wallet": {"money": 5}}))
+	eq(s1["inventory"]["items"].get("medkit", 0), 1, "sem inventario -> medkit inicial")
+	eq(s1["inventory"]["items"].get("scout_drone", 0), _drone_grant(), "sem inventario -> drones iniciais")
+	var m1: Dictionary = SaveService.migrate({"version": 1, "inventory": {"items": 7}})
+	ok(not (m1["inventory"] as Dictionary).get("items") is Dictionary, "migracao nao cria items em bloco mal tipado")
+
+
+func test_profile_migrates_and_persists_v1_save() -> void:
+	_clean()
+	Profile.set_save_path("user://test_save.json")
+	write_text("user://test_save.json", JSON.stringify({
+		"version": 1, "inventory": {"weapons": ["carbine_22"], "dogs": [], "items": {"medkit": 2}},
+		"loadout": {"weapons": ["carbine_22", ""], "dog": "", "items": ["medkit"]}}))
+	Profile.load_or_create()
+	eq(Profile.get_item_count(&"scout_drone"), _drone_grant(), "drones no perfil")
+	eq(int(SaveService.read("user://test_save.json")["version"]), 2, "save migrado gravado")
+	_clean()
+
+
+func test_profile_loads_save_with_malformed_version() -> void:
+	for bad: Variant in [null, "abc", [1], {"v": 1}, true]:
+		_clean()
+		Profile.set_save_path("user://test_save.json")
+		write_text("user://test_save.json", JSON.stringify({
+			"version": bad, "inventory": {"weapons": ["carbine_22"], "dogs": [], "items": {"medkit": 2}},
+			"loadout": {"weapons": ["carbine_22", ""], "dog": "", "items": ["medkit"]}}))
+		Profile.load_or_create()
+		eq(Profile.get_item_count(&"medkit"), 2, "perfil carregado com versao %s" % str(bad))
+		eq(int(SaveService.read("user://test_save.json")["version"]), SaveService.CURRENT_VERSION, "versao %s regravada" % str(bad))
+	_clean()
 
 
 func test_sanitize_wrong_types() -> void:
@@ -94,7 +187,7 @@ func test_sanitize_wrong_types() -> void:
 	eq(s["redeemed_codes"], [], "codigos ruins")
 	eq(s["settings"], SaveService.default_settings(), "settings ruins")
 	eq(s["stats"]["hunts_played"], 0, "stats ruins")
-	eq(s["version"], 1, "versao ruim")
+	eq(s["version"], SaveService.CURRENT_VERSION, "versao ruim")
 
 
 func test_sanitize_wallet_bounds() -> void:

@@ -424,6 +424,23 @@ func test_sfx_library() -> void:
 			eq(AudioServer.get_bus_effect_count(idx), 0, "%s sem efeitos de barramento (Web)" % bus_name)
 
 
+func test_sfx_uses_recorded_files_and_falls_back_to_synthesis() -> void:
+	# Every id has a recorded file: the autoload uses it and does not run the synthesis at startup.
+	for id: StringName in SFX_IDS:
+		var path: String = "res://assets/audio/sfx/%s.mp3" % id
+		ok(ResourceLoader.exists(path), "arquivo gravado existe: %s" % path)
+		ok(Sfx.get(&"_streams").get(id) is AudioStreamMP3, "%s usa o MP3 gravado" % id)
+	ok(Sfx.synth_ms < 5.0, "sintese nao roda no _ready quando todos os arquivos existem (%.1f ms)" % Sfx.synth_ms)
+	# No recorded files (folder that does not exist): every id still has a sound, synthesized.
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	for id: StringName in SFX_IDS:
+		ok(fb.call(&"has_sound", id), "fallback: has_sound(%s)" % id)
+		ok(fb.call(&"_get_stream", id) is AudioStreamWAV, "fallback: %s sintetizado" % id)
+	await frames(2)
+
+
 func test_sfx_calls_do_not_error() -> void:
 	expect_errors()   # the unknown id is allowed to warn once
 	var mark: int = error_mark()

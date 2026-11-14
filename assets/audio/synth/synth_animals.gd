@@ -1,6 +1,10 @@
 class_name SynthAnimals
 extends RefCounted
-## Boar and dog voices.
+## Procedural fallback for boar and dog voices (used only when the recorded file is missing, see Sfx).
+
+## Ids written by build().
+const IDS: Array[StringName] = [&"boar_grunt", &"boar_squeal", &"boar_snort_alert", &"boar_scrape",
+	&"boar_charge_roar", &"boar_eat", &"boar_death", &"dog_bark", &"dog_growl", &"dog_yelp", &"dog_whine"]
 
 
 static func build(out: Dictionary) -> void:

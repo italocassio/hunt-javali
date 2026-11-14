@@ -840,8 +840,14 @@ Shader de vento (vértice) permitido em grama, arbusto, lavoura e copas. Fallbac
 - Fallback: `MapEnvironmentBase.create_fallback()`.
 
 ### 7.8 Biblioteca de sons — autoload `Sfx` (`res://assets/audio/sfx_library.gd`)
-Sintetiza `AudioStreamWAV` (22050 Hz, mono, 16 bits) em `_ready()`; orçamento total ≤ 400 ms de CPU em
-desktop e ≤ 4 MB de amostras. Cria em código os barramentos `SFX`, `Ambience`, `UI` (filhos de `Master`).
+Toca os MP3 gravados em `res://assets/audio/sfx/<id>.mp3` (um por id; gerados com ElevenLabs a partir de
+`assets/audio/sfx_prompts.json`; carregados no `_ready()`, ~35 ms em desktop, ~2,2 MB). Para cada id sem
+arquivo, cai na síntese procedural (`AudioStreamWAV` 22050 Hz, mono, 16 bits; só roda se faltar arquivo;
+≤ 400 ms de CPU em desktop). Os ids com loop (`amb_cerrado_loop`, `amb_wind_loop`) tocam com
+`AudioStreamMP3.loop = true`. Exceção explícita à regra de arte 100% procedural: estes MP3 são os únicos
+binários de áudio permitidos (`check_scripts` os isenta). Os barramentos `SFX`, `Ambience`, `UI` (filhos de `Master`) são declarados em
+`res://default_bus_layout.tres`: na Web (modo "sample"), barramento criado em código com `AudioServer.add_bus`
+não chega ao `Master` e o som some. O `Sfx` só os cria em código se faltarem (rede de segurança).
 **Sem efeitos de barramento** (na Web o modo "sample" os ignora). Pool: 12 `AudioStreamPlayer3D`
 (`unit_size = 8`, `max_distance = 250`) + 6 `AudioStreamPlayer`; ao esgotar, rouba o mais antigo.
 ```gdscript
@@ -854,7 +860,7 @@ func stop_all_loops() -> void
 func unlock_audio() -> void            # chamado pelo boot no 1º gesto; toca amostra silenciosa
 func set_bus_volume(bus: StringName, linear: float) -> void       # &"Master" | &"SFX" | &"Ambience" | &"UI"
 ```
-Id desconhecido: um `push_warning` por id, sem som. Volumes iniciais e mudanças: lê `Profile.get_setting`
+`has_sound` é verdadeiro apenas para os ids da tabela abaixo. Id desconhecido: um `push_warning` por id, sem som. Volumes iniciais e mudanças: lê `Profile.get_setting`
 e escuta `GameEvents.settings_changed` (`volume_master`, `volume_sfx`, `volume_ambience`; UI usa SFX).
 
 Ids (quem toca entre parênteses):
@@ -1995,7 +2001,7 @@ Critérios de aceite:
 - Cada asset no caminho exato, raiz estendendo a base correta, filhos obrigatórios presentes, toda a API
   chamável sem erro em headless, orçamento de triângulos/instâncias respeitado (teste de contrato estrito).
 - Javalis de 25, 100 e 260 kg com `scale_for_weight` cabem nas `HIT_ZONES` (screenshot lado a lado).
-- Todos os ids de som da §7.8 existem (`has_sound`); síntese ≤ 400 ms em desktop (medido e relatado).
+- Todos os ids de som da §7.8 existem (`has_sound`); carga dos sons ≤ 400 ms em desktop (35 ms medidos com os 47 MP3; 233 ms só na síntese de fallback).
 - Screenshots de: mapa com ambiente, cada arma em quadril e mira, javalis dos 4 tipos, 3 cães, ícones.
 - Nenhum corpo físico, `AnimationPlayer` importado, esqueleto, luz extra ou arquivo binário baixado.
 

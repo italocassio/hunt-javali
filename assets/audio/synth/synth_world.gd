@@ -1,8 +1,12 @@
 class_name SynthWorld
 extends RefCounted
-## World ambience, stings and UI sounds. Loops are built lazily (see Sfx.LAZY_IDS).
+## Procedural fallback for world ambience, stings and UI sounds (used only when the recorded file is missing,
+## see Sfx). Loops are built lazily (LAZY_IDS).
 
 const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop"]
+## Ids written by build().
+const IDS: Array[StringName] = [&"bait_drop", &"victory_sting", &"defeat_sting", &"ui_click", &"ui_buy",
+	&"ui_error", &"ui_coin"]
 
 
 static func build(out: Dictionary) -> void:

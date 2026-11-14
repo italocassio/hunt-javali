@@ -1,6 +1,7 @@
 extends Node
-## Autoload "Sfx". Synthesizes every sound at startup (loops lazily on first use), owns the audio
-## buses SFX / Ambience / UI and a small player pool. See docs/arquitetura.md section 7.8.
+## Autoload "Sfx". Plays the recorded sounds in res://assets/audio/sfx/<id>.mp3 and falls back to the
+## procedural synthesis (assets/audio/synth/) for any id whose file is missing. Owns the audio buses
+## SFX / Ambience / UI and a small player pool. See docs/arquitetura.md section 7.8.
 ## No bus effects (the Web "sample" playback mode ignores them).
 
 const POOL_3D: int = 12
@@ -9,23 +10,37 @@ const BUS_SFX: StringName = &"SFX"
 const BUS_AMBIENCE: StringName = &"Ambience"
 const BUS_UI: StringName = &"UI"
 const UI_PREFIX: String = "ui_"
+const SFX_DIR: String = "res://assets/audio/sfx/"
+const SFX_EXT: String = ".mp3"
 
+## Folder of the recorded files; only tests change it (before adding the node to the tree).
+var sfx_dir: String = SFX_DIR
 var _streams: Dictionary = {}
+var _known: Dictionary = {}   # every id of section 7.8 -> true
+var _no_file: Dictionary = {}   # ids confirmed to have no recorded file
 var _warned: Dictionary = {}
 var _pool_3d: Array[AudioStreamPlayer3D] = []
 var _pool_2d: Array[AudioStreamPlayer] = []
 var _next_3d: int = 0
 var _next_2d: int = 0
 var _loops: Dictionary = {}
-var synth_ms: float = 0.0
+var synth_ms: float = 0.0   # time spent synthesizing fallback sounds (0 when every file exists)
+var load_ms: float = 0.0   # time spent loading the recorded files at startup
 var _animals_built: bool = false
 
 
 func _ready() -> void:
 	_ensure_buses()
+	for list: Array[StringName] in [SynthWeapons.SHOT_IDS, SynthWeapons.IDS, SynthAnimals.IDS, SynthWorld.LAZY_IDS, SynthWorld.IDS]:
+		for id: StringName in list:
+			_known[id] = true
 	var t0: int = Time.get_ticks_usec()
-	SynthWeapons.build(_streams)
-	SynthWorld.build(_streams)
+	for id: StringName in _known:
+		_load_file(id)
+	load_ms = float(Time.get_ticks_usec() - t0) / 1000.0
+	t0 = Time.get_ticks_usec()
+	_synth_missing(SynthWeapons.IDS, SynthWeapons.build)
+	_synth_missing(SynthWorld.IDS, SynthWorld.build)
 	synth_ms = float(Time.get_ticks_usec() - t0) / 1000.0
 	for i in POOL_3D:
 		var p: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
@@ -43,13 +58,46 @@ func _ready() -> void:
 	_build_animals.call_deferred()
 
 
-## Animal voices are built one frame after startup to keep _ready short.
+## Runs a synth group only if some of its ids have no recorded file, and keeps only those ids.
+func _synth_missing(ids: Array[StringName], builder: Callable) -> void:
+	var missing: bool = false
+	for id: StringName in ids:
+		if not _streams.has(id):
+			missing = true
+			break
+	if not missing:
+		return
+	var built: Dictionary = {}
+	builder.call(built)
+	for id: StringName in ids:
+		if not _streams.has(id) and built.has(id):
+			_streams[id] = built[id]
+
+
+## Loads and caches res://assets/audio/sfx/<id>.mp3. ResourceLoader.exists (not FileAccess) because an
+## exported build only ships the imported .mp3str behind the remap. Returns null when there is no file.
+func _load_file(id: StringName) -> AudioStream:
+	if _streams.has(id):
+		return _streams[id] as AudioStream
+	if _no_file.has(id) or not _known.has(id):
+		return null
+	var path: String = sfx_dir + String(id) + SFX_EXT
+	if ResourceLoader.exists(path):
+		var s: AudioStream = load(path) as AudioStream
+		if s != null:
+			_streams[id] = s
+			return s
+	_no_file[id] = true
+	return null
+
+
+## Animal voices (fallback only) are synthesized one frame after startup to keep _ready short.
 func _build_animals() -> void:
 	if _animals_built:
 		return
 	_animals_built = true
 	var t0: int = Time.get_ticks_usec()
-	SynthAnimals.build(_streams)
+	_synth_missing(SynthAnimals.IDS, SynthAnimals.build)
 	synth_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
 
@@ -83,9 +131,12 @@ func _apply_setting(key: String, value: Variant) -> void:
 		"volume_ambience": set_bus_volume(BUS_AMBIENCE, float(value))
 
 
-func _get_stream(id: StringName) -> AudioStreamWAV:
+func _get_stream(id: StringName) -> AudioStream:
 	if _streams.has(id):
 		return _streams[id]
+	var file_stream: AudioStream = _load_file(id)
+	if file_stream != null:
+		return file_stream
 	if SynthWeapons.SHOT_IDS.has(id):
 		_streams[id] = SynthWeapons.build_shot(id)
 		return _streams[id]
@@ -104,11 +155,11 @@ func _get_stream(id: StringName) -> AudioStreamWAV:
 
 
 func has_sound(id: StringName) -> bool:
-	return _streams.has(id) or SynthWorld.LAZY_IDS.has(id) or SynthWeapons.SHOT_IDS.has(id) or String(id).begins_with("boar_") or String(id).begins_with("dog_")
+	return _streams.has(id) or _known.has(id)
 
 
 func play(id: StringName, volume_db: float = 0.0, pitch: float = 1.0) -> void:
-	var s: AudioStreamWAV = _get_stream(id)
+	var s: AudioStream = _get_stream(id)
 	if s == null:
 		return
 	var p: AudioStreamPlayer = _pool_2d[_next_2d]
@@ -122,7 +173,7 @@ func play(id: StringName, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 
 
 func play_3d(id: StringName, position: Vector3, volume_db: float = 0.0, pitch: float = 1.0) -> void:
-	var s: AudioStreamWAV = _get_stream(id)
+	var s: AudioStream = _get_stream(id)
 	if s == null:
 		return
 	var p: AudioStreamPlayer3D = _pool_3d[_next_3d]
@@ -136,9 +187,11 @@ func play_3d(id: StringName, position: Vector3, volume_db: float = 0.0, pitch: f
 
 
 func play_loop(id: StringName, volume_db: float = 0.0) -> void:
-	var s: AudioStreamWAV = _get_stream(id)
+	var s: AudioStream = _get_stream(id)
 	if s == null:
 		return
+	if s is AudioStreamMP3:
+		(s as AudioStreamMP3).loop = true   # recorded ambience loops; synthesized ones are already looped
 	var p: AudioStreamPlayer = _loops.get(id)
 	if p == null:
 		p = AudioStreamPlayer.new()

@@ -3,6 +3,26 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.1 — 14/11/2026
+
+**Sons de verdade: tiros, javalis, cães, passos, ambiente e interface.**
+
+O que mudou para o jogador:
+
+- Os 47 efeitos sonoros passam a ser gravações realistas (tiros de cada calibre, recarga, passos, javali,
+  cães, vento, cerrado, sons de interface e as vinhetas de vitória e derrota), no lugar dos sons sintéticos.
+- O grunhido de ataque e o som de morte do javali foram refeitos para soar mais como um animal de verdade.
+
+O que mudou no projeto:
+
+- Sons gerados com ElevenLabs a partir de `assets/audio/sfx_prompts.json` e guardados em
+  `assets/audio/sfx/<id>.mp3`. São a única exceção à regra de arte 100% procedural.
+- `Sfx` carrega os MP3 no `_ready` (~35 ms em desktop, 2,2 MB). A síntese procedural continua como
+  reserva para qualquer id sem arquivo. API e ids não mudaram.
+- `default_bus_layout.tres` declara os barramentos `SFX`, `Ambience` e `UI`, para o som não sumir na Web.
+- `check_scripts` isenta `res://assets/audio/sfx/` da proibição de binários. Contrato na §7.8 de
+  `docs/arquitetura.md`.
+
 ## 0.4.0 — 14/11/2026
 
 **Jogar com amigos (beta): caçada cooperativa de 2 a 4 jogadores.**

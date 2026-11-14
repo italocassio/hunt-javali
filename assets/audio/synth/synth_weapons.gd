@@ -1,9 +1,15 @@
 class_name SynthWeapons
 extends RefCounted
-## Gunshots, mechanics, impacts, player and HUD sounds.
+## Procedural fallback for gunshots, mechanics, impacts, player and HUD sounds (used only when the recorded
+## file assets/audio/sfx/<id>.mp3 is missing, see Sfx).
 
 
 const SHOT_IDS: Array[StringName] = [&"shot_22", &"shot_12", &"shot_308", &"shot_3006", &"shot_338"]
+## Ids written by build() (the shots are built lazily, see SHOT_IDS).
+const IDS: Array[StringName] = [&"dry_fire", &"reload_start", &"reload_end", &"bolt_cycle", &"pump_cycle",
+	&"weapon_swap", &"scope_in", &"scope_out", &"impact_dirt", &"impact_wood", &"impact_flesh", &"step_grass",
+	&"step_dirt", &"player_hurt", &"player_heal", &"player_death", &"heartbeat", &"binocular_in", &"hit_marker",
+	&"kill_confirm", &"crop_alarm", &"drone_buzz"]
 
 
 ## Gunshots are the most expensive sounds: built on first use, not at startup.

@@ -3,6 +3,26 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.3 — 14/11/2026
+
+**Música orquestral no menu e no lobby.**
+
+O que mudou para o jogador:
+
+- Uma música orquestral heroica e tensa (cordas graves, caixa de marcha, tambores e metais) toca no menu
+  principal e no lobby do "Jogar com amigos". Ela segue sem reiniciar de uma tela para a outra e some com
+  um fade ao sair, por exemplo ao escolher o mapa ou entrar na caçada.
+- O volume da música acompanha o volume de ambiente nas configurações.
+
+O que mudou no projeto:
+
+- Faixa `assets/audio/music/music_menu.mp3` (90 s, instrumental, gerada com ElevenLabs). `Sfx` ganhou
+  `play_music`, `stop_music` e `is_music_playing` (tocador próprio, fora do pool de efeitos, no barramento
+  `Ambience`, carga sob demanda, loop).
+- O `Router.goto` decide onde toca, a partir do bloco novo `music` de `data/game.json` (faixa, cenas,
+  volume e fades). Novo `Router.scene_has_music`. Contrato na §7.8, §6.6 e §9.1 de `docs/arquitetura.md`.
+- `check_scripts` isenta também `assets/audio/music/`. Teste novo em `tests/unit/test_music.gd`.
+
 ## 0.4.2 — 14/11/2026
 
 **Javali mais realista: guincho, morte e bufada de alerta.**

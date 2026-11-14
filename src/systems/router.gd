@@ -26,7 +26,24 @@ func goto(scene_path: String) -> void:
 	if not ResourceLoader.exists(scene_path):
 		push_error("Router.goto: scene not found: %s" % scene_path)
 		return
+	_update_music(scene_path)
 	get_tree().change_scene_to_file.call_deferred(scene_path)
+
+
+## True when game.json "music.scenes" lists this scene (menu music keeps playing there).
+func scene_has_music(scene_path: String) -> bool:
+	var scenes: Array = Data.get_game().get("music", {}).get("scenes", [])
+	return scenes.has(scene_path)
+
+
+## Plays the configured track on music scenes (no restart if already playing), fades it out elsewhere.
+func _update_music(scene_path: String) -> void:
+	var cfg: Dictionary = Data.get_game().get("music", {})
+	var track: StringName = StringName(str(cfg.get("track", "")))
+	if track != &"" and scene_has_music(scene_path):
+		Sfx.play_music(track, float(cfg.get("volume_db", 0.0)), float(cfg.get("fade_in_s", 1.0)))
+	else:
+		Sfx.stop_music(float(cfg.get("fade_out_s", 1.0)))
 
 
 func get_current_scene_path() -> String:

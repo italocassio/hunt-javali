@@ -212,6 +212,7 @@ func _validate() -> void:
 	for needed: String in ["economy", "loadout", "shop", "hunt", "player", "quality_presets", "coop"]:
 		if not _raw["game"].has(needed):
 			_errors.append("Data: game.json lacks '%s'" % needed)
+	_require_fields(_raw["game"].get("music", {}), ["track", "scenes", "volume_db", "fade_in_s", "fade_out_s"], "game.music")
 	for wid: Variant in _raw["game"].get("economy", {}).get("start_weapons", []):
 		if not _index.get("weapons", {}).has(str(wid)):
 			_errors.append("Data: economy.start_weapons has unknown weapon '%s'" % wid)

@@ -160,11 +160,15 @@ const SFX_METHODS: Array[String] = [
 	"stop_all_loops() -> void",
 	"unlock_audio() -> void",
 	"set_bus_volume(bus: StringName, linear: float) -> void",
+	"play_music(id: StringName, volume_db: float = 0.0, fade_s: float = 1.0) -> void",
+	"stop_music(fade_s: float = 1.0) -> void",
+	"is_music_playing(id: StringName = &\"\") -> bool",
 ]
 
 const ROUTER_METHODS: Array[String] = [
 	"goto(scene_path: String) -> void",
 	"get_current_scene_path() -> String",
+	"scene_has_music(scene_path: String) -> bool",
 	"set_pending_request(request: HuntRequest) -> void",
 	"get_pending_request() -> HuntRequest",
 	"start_hunt(request: HuntRequest) -> void",

@@ -46,6 +46,16 @@
     "start_weapons": ["carbine_22"],
     "start_items": {"medkit": 1, "scout_drone": 3}
   },
+  "music": {
+    "track": "music_menu",
+    "scenes": [
+      "res://src/ui/main_menu/main_menu.tscn",
+      "res://src/ui/lobby/lobby.tscn"
+    ],
+    "volume_db": -6.0,
+    "fade_in_s": 1.5,
+    "fade_out_s": 1.0
+  },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
   "coop": {

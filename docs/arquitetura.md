@@ -487,8 +487,9 @@ var selected_map_id: StringName = &"mato_grosso"
 var selected_contract_index: int = 0
 var last_result: HuntResult = null
 
-func goto(scene_path: String) -> void                 # despausa a árvore, release_all_actions, change_scene_to_file deferred
+func goto(scene_path: String) -> void                 # despausa a árvore, release_all_actions, música (Sfx.play_music se a cena está em game.music.scenes, senão Sfx.stop_music com game.music.fade_out_s), change_scene_to_file deferred
 func get_current_scene_path() -> String
+func scene_has_music(scene_path: String) -> bool      # true se game.json "music.scenes" lista a cena
 func set_pending_request(request: HuntRequest) -> void
 func get_pending_request() -> HuntRequest             # null se não houver; NÃO consome
 func start_hunt(request: HuntRequest) -> void         # set_pending_request + goto(ScenePaths.HUNT)
@@ -859,8 +860,22 @@ func stop_loop(id: StringName) -> void
 func stop_all_loops() -> void
 func unlock_audio() -> void            # chamado pelo boot no 1º gesto; toca amostra silenciosa
 func set_bus_volume(bus: StringName, linear: float) -> void       # &"Master" | &"SFX" | &"Ambience" | &"UI"
+func play_music(id: StringName, volume_db: float = 0.0, fade_s: float = 1.0) -> void   # música em loop; idempotente
+func stop_music(fade_s: float = 1.0) -> void
+func is_music_playing(id: StringName = &"") -> bool    # true se há música pedida (qualquer uma, ou exatamente esse id)
 ```
-`has_sound` é verdadeiro apenas para os ids da tabela abaixo. Id desconhecido: um `push_warning` por id, sem som. Volumes iniciais e mudanças: lê `Profile.get_setting`
+**Música:** `res://assets/audio/music/<id>.mp3` (um arquivo por id de música, gerados com ElevenLabs;
+instrumental, 90 s, termina em cordas suaves para repetir) toca num único `AudioStreamPlayer` (2D, não
+posicional) dedicado, **fora do pool de efeitos**, no barramento `Ambience` (obedece `volume_ambience`; não há
+barramento novo, e continua sem efeitos de barramento). A stream é carregada sob demanda no primeiro
+`play_music` (não no `_ready`) e fica em cache, com `AudioStreamMP3.loop = true`. `play_music` é idempotente:
+o mesmo id já tocando não reinicia, só ajusta o volume; outro id faz fade-out da atual (metade de `fade_s`) e
+fade-in da nova (outra metade), via Tween. `stop_music` faz fade-out e para. Id sem arquivo: um `push_warning`
+por id e nada muda (não há fallback sintético para música). `stop_all_loops()` não para a música. Na Web,
+`play_music` chamado antes de `unlock_audio()` fica pendente e começa a tocar quando o áudio é desbloqueado.
+`has_sound` não inclui ids de música. Os mp3 de `music/` também são isentos do `check_scripts`. Ids de
+música: `music_menu` (menu principal e lobby; quem decide onde toca é o `Router`, ver §6.6 e §9.1).
+`has_sound` é verdadeiro apenas para os ids de efeito da tabela abaixo (não para música). Id desconhecido: um `push_warning` por id, sem som. Volumes iniciais e mudanças: lê `Profile.get_setting`
 e escuta `GameEvents.settings_changed` (`volume_master`, `volume_sfx`, `volume_ambience`; UI usa SFX).
 
 Ids (quem toca entre parênteses):
@@ -1264,6 +1279,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `loadout.weapon_slots/item_slots` | int | — | preparação |
 | `shop.max_consumable_owned` | int | — | loja |
 | `coop.*` | número/lista | m, s | modo cooperativo (B, A) |
+| `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca; só MAIN_MENU e LOBBY), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
 ```json
 {
@@ -1307,6 +1323,13 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
     "start_gold": 0,
     "start_weapons": ["carbine_22"],
     "start_items": {"medkit": 1, "scout_drone": 3}
+  },
+  "music": {
+    "track": "music_menu",
+    "scenes": ["res://src/ui/main_menu/main_menu.tscn", "res://src/ui/lobby/lobby.tscn"],
+    "volume_db": -6.0,
+    "fade_in_s": 1.5,
+    "fade_out_s": 1.0
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
@@ -1760,6 +1783,10 @@ Cena principal: `res://src/ui/boot/boot.tscn`. Troca **sempre** por `Router.goto
 | `SETTINGS` | `src/ui/settings/settings.tscn` | systems | contém `settings_panel.tscn`; `%BackButton` → `MAIN_MENU` |
 | `SETTINGS_PANEL` | `src/ui/settings/settings_panel.tscn` | systems | raiz `Control` com `signal closed`; `%CloseButton` emite `closed`; reutilizado na pausa |
 | `LOBBY` | `src/ui/lobby/lobby.tscn` | systems | estados Entrada / Conectando / Sala (abaixo); sai por `%BackButton` → `MAIN_MENU` e `%LeaveButton` (ambos chamam `Net.leave_room()`) |
+
+Música: `music_menu` toca em `MAIN_MENU` e `LOBBY`, continua sem reiniciar entre as duas e para com fade-out
+em qualquer outra tela. A regra vive no `Router.goto` (§6.6) e na configuração `game.music` (§9.1); as telas
+não tocam música.
 
 `LOBBY` (nós; `%` = nome único):
 

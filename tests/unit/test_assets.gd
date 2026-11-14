@@ -462,6 +462,49 @@ func test_sfx_calls_do_not_error() -> void:
 	eq(errors_since(mark).size(), 0, "Sfx nao gera erros: %s" % str(errors_since(mark)))
 
 
+func test_sfx_music() -> void:
+	expect_errors()   # the missing music id warns once
+	var mark: int = error_mark()
+	ok(ResourceLoader.exists("res://assets/audio/music/music_menu.mp3"), "music_menu.mp3 existe")
+	ok(not Sfx.has_sound(&"music_menu"), "has_sound nao inclui ids de musica")
+	ok(not Sfx.is_music_playing(), "sem musica no inicio")
+	Sfx.play_music(&"music_menu", -6.0, 0.0)
+	ok(Sfx.is_music_playing(&"music_menu"), "play_music toca music_menu")
+	ok(Sfx.is_music_playing(), "is_music_playing() sem id")
+	ok(not Sfx.is_music_playing(&"outra"), "outro id nao toca")
+	var player: AudioStreamPlayer = Sfx.get(&"_music_player")
+	ok(player != null and player.playing, "player de musica esta tocando")
+	eq(player.bus, &"Ambience", "musica usa o barramento Ambience")
+	var stream: AudioStreamMP3 = player.stream as AudioStreamMP3
+	ok(stream != null and stream.loop, "musica em loop")
+	var pool_ok: bool = true
+	for p: Node in Sfx.get(&"_pool_2d"):
+		pool_ok = pool_ok and p != player
+	ok(pool_ok, "musica fora do pool de efeitos")
+	# Idempotent: same id does not restart the stream; only the volume changes.
+	await frames(3)
+	var pos: float = player.get_playback_position()
+	Sfx.play_music(&"music_menu", -3.0, 0.0)
+	ok(player.playing and player.get_playback_position() >= pos, "mesmo id nao reinicia")
+	near(player.volume_db, -3.0, 0.01, "mesmo id ajusta o volume")
+	Sfx.stop_all_loops()
+	ok(Sfx.is_music_playing(&"music_menu") and player.playing, "stop_all_loops nao para a musica")
+	# Missing id: no error beyond the warning, current music is untouched.
+	Sfx.play_music(&"musica_inexistente")
+	Sfx.play_music(&"musica_inexistente")
+	ok(Sfx.is_music_playing(&"music_menu"), "id inexistente nao troca a musica")
+	# Fade out then stop.
+	Sfx.stop_music(0.1)
+	ok(not Sfx.is_music_playing(), "stop_music limpa o estado na hora")
+	await frames(20)
+	ok(not player.playing, "stop_music para o player depois do fade")
+	Sfx.play_music(&"music_menu", 0.0, 0.0)
+	Sfx.stop_music(0.0)
+	ok(not player.playing and not Sfx.is_music_playing(), "stop_music sem fade para na hora")
+	Sfx.stop_music()
+	eq(errors_since(mark).size(), 0, "musica nao gera erros: %s" % str(errors_since(mark)))
+
+
 # --------------------------------------------------------------------------------------------
 # UI assets
 # --------------------------------------------------------------------------------------------

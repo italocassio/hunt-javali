@@ -12,7 +12,7 @@ const WATCHDOG_S: float = 60.0
 const SCAN_ROOTS: Array[String] = ["res://src", "res://assets", "res://tests"]
 const BINARY_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp", "bmp", "tga", "exr", "hdr", "wav", "ogg",
 	"mp3", "glb", "gltf", "fbx", "obj", "blend", "dae", "ttf", "otf", "woff", "woff2", "mp4", "webm"]
-const RECORDED_SFX_DIR: String = "res://assets/audio/sfx/"
+const RECORDED_AUDIO_DIRS: Array[String] = ["res://assets/audio/sfx/", "res://assets/audio/music/"]
 const PHYSICS_FORBIDDEN_IN_ASSETS: Array[String] = ["PhysicsBody3D", "Area3D", "CollisionShape3D",
 	"CollisionPolygon3D", "Skeleton3D", "AnimationPlayer", "OmniLight3D", "SpotLight3D"]
 
@@ -568,7 +568,7 @@ func _check_ext_resources() -> void:
 func _check_no_binaries() -> void:
 	for path: String in _files(["res://assets", "res://src"], BINARY_EXTENSIONS):
 		# Explicit exception: the recorded sound effects (docs/arquitetura.md 7.8).
-		if path.begins_with(RECORDED_SFX_DIR) and path.get_extension() == "mp3":
+		if path.get_extension() == "mp3" and RECORDED_AUDIO_DIRS.any(func(d: String) -> bool: return path.begins_with(d)):
 			continue
 		_t.call("fail", "%s: arquivo binario/baixado proibido (tudo e procedural; SVG escrito a mao e permitido)" % path)
 	# physics / skeleton / lights are forbidden inside asset scenes: checked here textually,

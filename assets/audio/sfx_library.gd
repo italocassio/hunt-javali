@@ -12,6 +12,11 @@ const BUS_UI: StringName = &"UI"
 const UI_PREFIX: String = "ui_"
 const SFX_DIR: String = "res://assets/audio/sfx/"
 const SFX_EXT: String = ".mp3"
+const MUSIC_DIR: String = "res://assets/audio/music/"
+const MUSIC_EXT: String = ".mp3"
+const MUSIC_SILENT_DB: float = -80.0
+const MUSIC_CROSSFADE_SPLIT: float = 0.5   # share of fade_s spent fading the old track out (the rest fades the new one in)
+const WEB_FEATURE: String = "web"
 
 ## Folder of the recorded files; only tests change it (before adding the node to the tree).
 var sfx_dir: String = SFX_DIR
@@ -27,6 +32,15 @@ var _loops: Dictionary = {}
 var synth_ms: float = 0.0   # time spent synthesizing fallback sounds (0 when every file exists)
 var load_ms: float = 0.0   # time spent loading the recorded files at startup
 var _animals_built: bool = false
+# Music: one dedicated player (outside the effect pool), streams loaded on first use.
+var music_dir: String = MUSIC_DIR   # only tests change it
+var _music_player: AudioStreamPlayer = null
+var _music_streams: Dictionary = {}   # id -> AudioStream
+var _music_id: StringName = &""   # requested track (&"" = none); kept even while waiting for the Web unlock
+var _music_volume_db: float = 0.0
+var _music_fade_s: float = 0.0
+var _music_tween: Tween = null
+var _audio_unlocked: bool = false
 
 
 func _ready() -> void:
@@ -54,6 +68,9 @@ func _ready() -> void:
 		q.bus = BUS_SFX
 		add_child(q)
 		_pool_2d.append(q)
+	_music_player = AudioStreamPlayer.new()
+	_music_player.bus = BUS_AMBIENCE
+	add_child(_music_player)
 	_connect_settings.call_deferred()
 	_build_animals.call_deferred()
 
@@ -216,18 +233,125 @@ func stop_all_loops() -> void:
 
 
 func unlock_audio() -> void:
+	_audio_unlocked = true
 	var p: AudioStreamPlayer = _pool_2d[0] if not _pool_2d.is_empty() else null
-	if p == null:
+	if p != null:
+		var s: AudioStreamWAV = AudioStreamWAV.new()
+		s.format = AudioStreamWAV.FORMAT_16_BITS
+		s.mix_rate = SynthDsp.RATE
+		var bytes: PackedByteArray = PackedByteArray()
+		bytes.resize(2 * 441)
+		s.data = bytes
+		p.stream = s
+		p.volume_db = MUSIC_SILENT_DB
+		p.play()
+	# Music requested before the first gesture (Web) starts now.
+	if _music_id != &"" and _music_player != null and not _music_player.playing:
+		_start_music_track(_music_fade_s)
+
+
+## Starts looping music res://assets/audio/music/<id>.mp3 on the Ambience bus. Idempotent: the same id keeps
+## playing (only the volume is adjusted). Another id fades the old track out and the new one in over fade_s.
+## Loaded on first use. Missing file: one push_warning per id and nothing changes. On the Web, a call made
+## before unlock_audio() is remembered and starts when the audio is unlocked.
+func play_music(id: StringName, volume_db: float = 0.0, fade_s: float = 1.0) -> void:
+	if id == &"" or _music_player == null:
 		return
-	var s: AudioStreamWAV = AudioStreamWAV.new()
-	s.format = AudioStreamWAV.FORMAT_16_BITS
-	s.mix_rate = SynthDsp.RATE
-	var bytes: PackedByteArray = PackedByteArray()
-	bytes.resize(2 * 441)
-	s.data = bytes
-	p.stream = s
-	p.volume_db = -80.0
-	p.play()
+	var s: AudioStream = _load_music(id)
+	if s == null:
+		return
+	if id == _music_id:
+		_music_volume_db = volume_db
+		if _music_player.playing:
+			_fade_music_to(volume_db, fade_s)
+		return
+	_music_id = id
+	_music_volume_db = volume_db
+	_music_fade_s = fade_s
+	if not _can_play_now():
+		_kill_music_tween()
+		_music_player.stop()
+		return
+	if not _music_player.playing:
+		_start_music_track(fade_s)
+		return
+	# Another track is playing: fade it out, swap, fade the new one in.
+	_kill_music_tween()
+	var out_s: float = maxf(fade_s, 0.0) * MUSIC_CROSSFADE_SPLIT
+	_music_tween = create_tween()
+	_music_tween.tween_property(_music_player, "volume_db", MUSIC_SILENT_DB, out_s)
+	_music_tween.tween_callback(_start_music_track.bind(maxf(fade_s, 0.0) - out_s))
+
+
+func stop_music(fade_s: float = 1.0) -> void:
+	_music_id = &""
+	if _music_player == null:
+		return
+	_kill_music_tween()
+	if fade_s <= 0.0 or not _music_player.playing:
+		_music_player.stop()
+		return
+	_music_tween = create_tween()
+	_music_tween.tween_property(_music_player, "volume_db", MUSIC_SILENT_DB, fade_s)
+	_music_tween.tween_callback(_music_player.stop)
+
+
+## True when music is requested: any track with the default id, or that exact id.
+func is_music_playing(id: StringName = &"") -> bool:
+	if _music_id == &"":
+		return false
+	return id == &"" or id == _music_id
+
+
+func _can_play_now() -> bool:
+	return _audio_unlocked or not OS.has_feature(WEB_FEATURE)
+
+
+func _kill_music_tween() -> void:
+	if _music_tween != null:
+		_music_tween.kill()
+		_music_tween = null
+
+
+func _fade_music_to(target_db: float, fade_s: float) -> void:
+	_kill_music_tween()
+	if fade_s <= 0.0:
+		_music_player.volume_db = target_db
+		return
+	_music_tween = create_tween()
+	_music_tween.tween_property(_music_player, "volume_db", target_db, fade_s)
+
+
+## Plays the requested track from the start and fades it in to the requested volume.
+func _start_music_track(fade_in_s: float) -> void:
+	var s: AudioStream = _music_streams.get(_music_id)
+	if s == null:
+		return
+	_kill_music_tween()
+	_music_player.stream = s
+	_music_player.volume_db = MUSIC_SILENT_DB if fade_in_s > 0.0 else _music_volume_db
+	_music_player.play()
+	if fade_in_s > 0.0:
+		_fade_music_to(_music_volume_db, fade_in_s)
+
+
+## Loads and caches res://assets/audio/music/<id>.mp3 with loop on. Null (and one warning) when missing.
+func _load_music(id: StringName) -> AudioStream:
+	if _music_streams.has(id):
+		return _music_streams[id] as AudioStream
+	var path: String = music_dir + String(id) + MUSIC_EXT
+	if ResourceLoader.exists(path):
+		var s: AudioStream = load(path) as AudioStream
+		if s != null:
+			if s is AudioStreamMP3:
+				(s as AudioStreamMP3).loop = true
+			_music_streams[id] = s
+			return s
+	var warn_key: StringName = StringName("music:" + String(id))
+	if not _warned.has(warn_key):
+		_warned[warn_key] = true
+		push_warning("Sfx: no music file for id '%s'" % id)
+	return null
 
 
 func set_bus_volume(bus: StringName, linear: float) -> void:

@@ -3,6 +3,20 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.5 — 14/11/2026
+
+**Som do cerrado mais baixo na caçada.**
+
+O que mudou para o jogador:
+
+- O som ambiente do cerrado (cigarras, pássaros e brisa) ficou bem mais baixo durante a caçada, para não
+  irritar. O som do vento continua como estava.
+
+O que mudou no projeto:
+
+- `src/hunt/hunt_controller.gd`: constante nova `AMBIENCE_DB_BY_ID` com o volume de `amb_cerrado_loop`
+  (-15 dB, antes -6 dB como o vento). Para ajustar, basta mudar esse número.
+
 ## 0.4.4 — 14/11/2026
 
 **A música continua tocando em todas as telas de menu até a caçada começar.**

@@ -50,6 +50,11 @@
     "track": "music_menu",
     "scenes": [
       "res://src/ui/main_menu/main_menu.tscn",
+      "res://src/ui/map_select/map_select.tscn",
+      "res://src/ui/preparation/preparation.tscn",
+      "res://src/ui/shop/shop.tscn",
+      "res://src/ui/donate/donate.tscn",
+      "res://src/ui/settings/settings.tscn",
       "res://src/ui/lobby/lobby.tscn"
     ],
     "volume_db": -6.0,

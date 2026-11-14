@@ -14,9 +14,11 @@ func test_music_config_is_complete() -> void:
 
 
 func test_music_scenes() -> void:
-	ok(Router.scene_has_music(ScenePaths.MAIN_MENU), "menu principal tem musica")
-	ok(Router.scene_has_music(ScenePaths.LOBBY), "sala (jogar com amigos) tem musica")
-	for path: String in [ScenePaths.BOOT, ScenePaths.MAP_SELECT, ScenePaths.PREPARATION, ScenePaths.SHOP,
-			ScenePaths.RESULT, ScenePaths.DONATE, ScenePaths.SETTINGS, ScenePaths.HUNT]:
+	# Every menu screen keeps the music going until the hunt starts.
+	for path: String in [ScenePaths.MAIN_MENU, ScenePaths.MAP_SELECT, ScenePaths.PREPARATION, ScenePaths.SHOP,
+			ScenePaths.DONATE, ScenePaths.SETTINGS, ScenePaths.LOBBY]:
+		ok(Router.scene_has_music(path), "tem musica: %s" % path)
+	# BOOT has nothing to play yet; HUNT stops it; RESULT stays quiet so the victory/defeat sting is heard.
+	for path: String in [ScenePaths.BOOT, ScenePaths.RESULT, ScenePaths.HUNT]:
 		ok(not Router.scene_has_music(path), "sem musica: %s" % path)
 	ok(not Router.scene_has_music(""), "caminho vazio sem musica")

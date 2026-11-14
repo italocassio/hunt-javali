@@ -874,7 +874,7 @@ fade-in da nova (outra metade), via Tween. `stop_music` faz fade-out e para. Id 
 por id e nada muda (não há fallback sintético para música). `stop_all_loops()` não para a música. Na Web,
 `play_music` chamado antes de `unlock_audio()` fica pendente e começa a tocar quando o áudio é desbloqueado.
 `has_sound` não inclui ids de música. Os mp3 de `music/` também são isentos do `check_scripts`. Ids de
-música: `music_menu` (menu principal e lobby; quem decide onde toca é o `Router`, ver §6.6 e §9.1).
+música: `music_menu` (todas as telas de menu até a caçada começar; quem decide onde toca é o `Router`, ver §6.6 e §9.1).
 `has_sound` é verdadeiro apenas para os ids de efeito da tabela abaixo (não para música). Id desconhecido: um `push_warning` por id, sem som. Volumes iniciais e mudanças: lê `Profile.get_setting`
 e escuta `GameEvents.settings_changed` (`volume_master`, `volume_sfx`, `volume_ambience`; UI usa SFX).
 
@@ -1279,7 +1279,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `loadout.weapon_slots/item_slots` | int | — | preparação |
 | `shop.max_consumable_owned` | int | — | loja |
 | `coop.*` | número/lista | m, s | modo cooperativo (B, A) |
-| `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca; só MAIN_MENU e LOBBY), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
+| `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca: as telas de menu, exceto BOOT e RESULT; nunca HUNT), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
 ```json
 {
@@ -1326,7 +1326,12 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
   },
   "music": {
     "track": "music_menu",
-    "scenes": ["res://src/ui/main_menu/main_menu.tscn", "res://src/ui/lobby/lobby.tscn"],
+    "scenes": [
+      "res://src/ui/main_menu/main_menu.tscn", "res://src/ui/map_select/map_select.tscn",
+      "res://src/ui/preparation/preparation.tscn", "res://src/ui/shop/shop.tscn",
+      "res://src/ui/donate/donate.tscn", "res://src/ui/settings/settings.tscn",
+      "res://src/ui/lobby/lobby.tscn"
+    ],
     "volume_db": -6.0,
     "fade_in_s": 1.5,
     "fade_out_s": 1.0
@@ -1784,9 +1789,10 @@ Cena principal: `res://src/ui/boot/boot.tscn`. Troca **sempre** por `Router.goto
 | `SETTINGS_PANEL` | `src/ui/settings/settings_panel.tscn` | systems | raiz `Control` com `signal closed`; `%CloseButton` emite `closed`; reutilizado na pausa |
 | `LOBBY` | `src/ui/lobby/lobby.tscn` | systems | estados Entrada / Conectando / Sala (abaixo); sai por `%BackButton` → `MAIN_MENU` e `%LeaveButton` (ambos chamam `Net.leave_room()`) |
 
-Música: `music_menu` toca em `MAIN_MENU` e `LOBBY`, continua sem reiniciar entre as duas e para com fade-out
-em qualquer outra tela. A regra vive no `Router.goto` (§6.6) e na configuração `game.music` (§9.1); as telas
-não tocam música.
+Música: `music_menu` toca em todas as telas de menu (`MAIN_MENU`, `MAP_SELECT`, `PREPARATION`, `SHOP`,
+`DONATE`, `SETTINGS`, `LOBBY`), continua sem reiniciar ao ir de uma para outra e para com fade-out em `HUNT`.
+`BOOT` ainda não toca nada e `RESULT` fica sem música para a vinheta de vitória/derrota ser ouvida. A regra
+vive no `Router.goto` (§6.6) e na configuração `game.music` (§9.1); as telas não tocam música.
 
 `LOBBY` (nós; `%` = nome único):
 

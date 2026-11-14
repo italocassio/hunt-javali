@@ -3,6 +3,21 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.4 — 14/11/2026
+
+**A música continua tocando em todas as telas de menu até a caçada começar.**
+
+O que mudou para o jogador:
+
+- A música orquestral agora toca também no mapa, na preparação, na loja, na doação e nas configurações,
+  além do menu e do lobby. Ela não reinicia ao trocar de tela e some com um fade ao começar a caçada.
+- A tela de resultado fica sem música, para a vinheta de vitória ou derrota ser ouvida.
+
+O que mudou no projeto:
+
+- Só dados e teste: `music.scenes` em `data/game.json` ganhou as telas de menu; `tests/unit/test_music.gd` e
+  a §7.8, §9.1 e a regra de telas de `docs/arquitetura.md` acompanham. Nenhum código mudou.
+
 ## 0.4.3 — 14/11/2026
 
 **Música orquestral no menu e no lobby.**

@@ -3,6 +3,22 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.2 — 14/11/2026
+
+**Javali mais realista: guincho, morte e bufada de alerta.**
+
+O que mudou para o jogador:
+
+- Novos sons do javali: o guincho ao ser atingido, o som da morte e a bufada de alerta foram refeitos
+  para soar como um javali selvagem de verdade (e não como um porco doméstico). A morte agora é um
+  grunhido fraco e uma expiração que some, sem grito dramático.
+
+O que mudou no projeto:
+
+- Só arquivos de som: `boar_squeal`, `boar_death` e `boar_snort_alert` em `assets/audio/sfx/`, com os
+  prompts novos em `assets/audio/sfx_prompts.json`. `boar_snort_alert` passou de 0,7 s para 1,0 s.
+  Nenhum código nem contrato mudou.
+
 ## 0.4.1 — 14/11/2026
 
 **Sons de verdade: tiros, javalis, cães, passos, ambiente e interface.**

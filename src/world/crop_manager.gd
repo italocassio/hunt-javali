@@ -4,6 +4,12 @@ extends Node3D
 ## Eaters (boars) drain health; every (100 / patch_count)% drained turns the patch nearest to
 ## the eater from "healthy" into "eaten" (see _eat_patch).
 ## 2 MultiMeshes per 32x32 m block. Emits crop_health_changed / crop_under_attack.
+## Network (docs/multiplayer.md section 6.4): the host's patches go out by index (patch_eaten); a client's
+## manager has no eaters and mirrors the host with apply_eaten / set_replicated_health /
+## set_replicated_attack. Patch indices are the same on every peer (grid built from the map's fields).
+
+## A patch turned from healthy into eaten (any cause). The network host replicates the index.
+signal patch_eaten(index: int)
 
 const PATCH_M: float = 2.0
 const BLOCK_M: float = 32.0
@@ -110,6 +116,39 @@ func set_health(pct: float) -> void:
 		if _patch_eaten[p] == 0:
 			_eat_patch(p)
 	_emit_health(true)
+
+
+## Network client: eats exactly these patches (EV_CROP_EATEN). Unknown or already eaten indices are ignored.
+func apply_eaten(indices: PackedInt32Array) -> void:
+	for p: int in indices:
+		if p >= 0 and p < _patch_total:
+			_eat_patch(p)
+
+
+## Network client: the host's crop health (H_SNAPSHOT). Same signal step as the solo drain.
+func set_replicated_health(pct: float) -> void:
+	_health_pct = clampf(pct, 0.0, 100.0)
+	_emit_health(false)
+
+
+## Network client: "boars at the crop" (H_SNAPSHOT flags b0). Emits crop_under_attack only on change.
+func set_replicated_attack(on: bool) -> void:
+	if on != _under_attack:
+		_under_attack = on
+		GameEvents.crop_under_attack.emit(on)
+
+
+func is_under_attack() -> bool:
+	return _under_attack
+
+
+## Indices of every eaten patch, ascending (tests compare peers with it).
+func get_eaten_indices() -> PackedInt32Array:
+	var out: PackedInt32Array = PackedInt32Array()
+	for p: int in _patch_total:
+		if _patch_eaten[p] != 0:
+			out.append(p)
+	return out
 
 
 func _process(delta: float) -> void:
@@ -243,6 +282,7 @@ func _eat_patch(p: int) -> void:
 	_block_eaten_n[b] = n + 1
 	eaten.visible_instance_count = n + 1
 	(block["eaten_node"] as MultiMeshInstance3D).visible = true
+	patch_eaten.emit(p)
 
 
 ## Turns the uneaten patch nearest to pos (XZ) into an eaten one.

@@ -1,7 +1,7 @@
 extends Control
 ## Preview: global theme variations + every icon in a grid.
 
-const ICONS: Array[String] = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338", "binoculars", "leather_vest", "medkit", "corn_bait", "extra_ammo", "thermal_scope", "scout_drone", "caramelo", "foxhound", "dogo", "money", "gold", "boar", "crop", "health", "ammo", "lock", "dog_paw", "app_icon", "map_mato_grosso", "map_pantanal", "map_campanha_gaucha", "map_triangulo_mineiro", "btn_fire", "btn_aim", "btn_reload", "btn_swap", "btn_dog", "btn_item", "btn_crouch", "btn_pause", "joystick_base", "joystick_knob"]
+const ICONS: Array[String] = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338", "binoculars", "leather_vest", "medkit", "corn_bait", "extra_ammo", "thermal_scope", "scout_drone", "caramelo", "foxhound", "dogo", "money", "gold", "boar", "crop", "health", "ammo", "lock", "dog_paw", "friends", "host", "ready", "link", "link_direct", "link_relay", "app_icon", "map_mato_grosso", "map_pantanal", "map_campanha_gaucha", "map_triangulo_mineiro", "btn_fire", "btn_aim", "btn_reload", "btn_swap", "btn_dog", "btn_item", "btn_crouch", "btn_pause", "joystick_base", "joystick_knob"]
 
 
 func _ready() -> void:

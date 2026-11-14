@@ -90,6 +90,22 @@ func get_player() -> PlayerBase:
 	return null
 
 
+func get_hunters() -> Array[PlayerBase]:      # every hunter in the world, local first. Solo: [get_player()]
+	var out: Array[PlayerBase] = []
+	var p: PlayerBase = get_player()
+	if p != null:
+		out.append(p)
+	return out
+
+
+func get_hunter(_slot: int) -> PlayerBase:    # null if that slot is not in the hunt
+	return get_player()
+
+
+func get_local_slot() -> int:
+	return 0
+
+
 func get_elapsed_s() -> float:
 	return 0.0
 
@@ -112,4 +128,37 @@ func debug_set_crop_health(_pct: float) -> void:
 
 
 func debug_force_end(_outcome: HuntResult.Outcome) -> void:
+	pass
+
+
+# --- Net seam: bodies are record payloads of docs/multiplayer.md section 4 ---
+func net_write_snapshot(_out: StreamPeerBuffer) -> void:      # host: body of H_SNAPSHOT
+	pass
+
+
+func net_apply_snapshot(_inp: StreamPeerBuffer) -> void:      # client
+	pass
+
+
+func net_take_events(_out: StreamPeerBuffer) -> void:         # host: appends queued EV_* records (type, len, body)
+	pass
+
+
+func net_apply_event(_type: int, _inp: StreamPeerBuffer, _length: int) -> void:   # client
+	pass
+
+
+func net_take_claims(_out: StreamPeerBuffer) -> void:         # client: appends queued C_* event records
+	pass
+
+
+func net_apply_claim(_slot: int, _type: int, _inp: StreamPeerBuffer, _length: int) -> void:   # host
+	pass
+
+
+func net_peer_left(_slot: int) -> void:                       # that hunter (and its dog) leaves the world
+	pass
+
+
+func net_connection_lost() -> void:                           # client: ends DISCONNECTED; host: every remote leaves
 	pass

@@ -57,11 +57,12 @@ func _ready() -> void:
 	body.add_child(_message)
 
 	var footer: HBoxContainer = page["footer"]
-	var back: Button = UiKit.button("Menu", "SecondaryButton")
+	var in_room: bool = Net.is_in_room()
+	var back: Button = UiKit.button("Voltar à sala" if in_room else "Menu", "SecondaryButton")
 	back.custom_minimum_size.x = 200
 	UiKit.mark(back, self, "BackButton")
 	footer.add_child(back)
-	back.pressed.connect(func() -> void: Router.goto(ScenePaths.MAIN_MENU))
+	back.pressed.connect(func() -> void: Router.goto(ScenePaths.LOBBY if in_room else ScenePaths.MAIN_MENU))
 	var donate: Button = UiKit.button("Ouro", "SecondaryButton")
 	donate.custom_minimum_size.x = 200
 	UiKit.mark(donate, self, "DonateButton")
@@ -73,6 +74,7 @@ func _ready() -> void:
 	UiKit.mark(next, self, "NextHuntButton")
 	footer.add_child(next)
 	next.pressed.connect(func() -> void: Router.goto(ScenePaths.PREPARATION))
+	next.visible = not in_room
 
 	GameEvents.wallet_changed.connect(_on_wallet_changed)
 	_show_tab(0)

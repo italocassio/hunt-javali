@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste do servidor de salas</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; background: #1d1a14; color: #f0e6d2; }
+  input, button { font-size: 16px; padding: 8px; width: 100%; box-sizing: border-box; margin: 4px 0; }
+  #out { font-size: 22px; margin-top: 16px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Servidor de salas</h1>
+<input id="url" value="wss://javali-salas.acpw01.workers.dev/ws" aria-label="Endereço do servidor">
+<button id="go">Criar sala</button>
+<div id="out">Toque em "Criar sala".</div>
+<script>
+const out = document.getElementById("out");
+const urlInput = document.getElementById("url");
+const fromQuery = new URLSearchParams(location.search).get("server");
+if (fromQuery) urlInput.value = fromQuery;
+
+document.getElementById("go").onclick = () => {
+  out.textContent = "Conectando...";
+  let ws;
+  let done = false;
+  try {
+    ws = new WebSocket(urlInput.value + "?t=create&v=wscheck&proto=1&name=Teste");
+  } catch (e) {
+    out.textContent = "Endereço inválido.";
+    return;
+  }
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    done = true;
+    if (msg.t === "created") out.textContent = "Sala criada: " + msg.code;
+    else if (msg.t === "error") out.textContent = "Erro do servidor: " + msg.code;
+    setTimeout(() => ws.close(), 500);
+  };
+  ws.onerror = () => {
+    if (!done) out.textContent = "Não foi possível conectar (servidor fora do ar ou origem não permitida).";
+  };
+};
+</script>
+</body>
+</html>

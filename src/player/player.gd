@@ -29,6 +29,9 @@ const DEATH_FALL_S: float = 0.8
 const DEATH_EYE_HEIGHT_M: float = 0.3
 const DEATH_ROLL_DEG: float = 70.0
 const BOT_AIM_TIME_FALLBACK_S: float = 0.2
+const SPEED_QUANT_MPS: float = 0.05           # wire: speed u8 in steps of 0.05 m/s (docs/multiplayer.md 4.5)
+const NO_WEAPON_INDEX: int = 255
+const DEFAULT_MAP_RECT: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0)   # only if no world was given
 
 @onready var _head: Node3D = $Head
 @onready var _camera: Camera3D = $Head/Camera3D
@@ -40,6 +43,7 @@ var _request: HuntRequest = null
 var _world: HuntWorld = null
 var _items: ItemBelt = null
 var _hud: Node = null
+var _spectator: SpectatorCamera = null
 var _weapons: Array[Weapon] = []
 var _slot: int = 0
 
@@ -75,6 +79,8 @@ var _touch_sens: float = 1.0
 var _invert_y: bool = false
 var _speed_h: float = 0.0
 var _gravity: float = 9.8
+var _net_shot_seq: int = 0                    # wraps at 256; remote machines play the shot when it changes
+var _weapon_ids: Array[StringName] = []       # Data order: wire index of a weapon
 
 var _bot: bool = false
 var _bot_move: Vector2 = Vector2.ZERO
@@ -93,6 +99,7 @@ func _ready() -> void:
 	_shape_node.shape = _shape_node.shape.duplicate()
 	_apply_capsule(float(_cfg.get("capsule_height_m", 1.8)))
 	floor_snap_length = 0.4
+	_weapon_ids = Data.get_weapon_ids()
 	_read_settings()
 	GameEvents.settings_changed.connect(_on_settings_changed)
 
@@ -110,6 +117,7 @@ func _exit_tree() -> void:
 func setup(request: HuntRequest, world: HuntWorld) -> void:
 	_request = request
 	_world = world
+	slot = Net.get_local_slot()
 	_set_up = true
 	_items = ItemBelt.new()
 	_items.name = "ItemBelt"
@@ -150,6 +158,8 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		_hud.call("bind", self, world)
 	if not GameEvents.hunt_ended.is_connected(_on_hunt_ended):
 		GameEvents.hunt_ended.connect(_on_hunt_ended)
+	if not GameEvents.player_died.is_connected(_on_local_died):
+		GameEvents.player_died.connect(_on_local_died)
 
 
 func _resolve_view_distance(request: HuntRequest) -> float:
@@ -251,6 +261,40 @@ func get_noise_radius() -> float:
 	if _sprinting:
 		return float(_cfg.get("noise_radius_sprint_m", 0.0))
 	return float(_cfg.get("noise_radius_walk_m", 0.0))
+
+
+func get_display_name() -> String:
+	var name_setting: Variant = Profile.get_setting("player_name")
+	return String(name_setting) if name_setting != null else ""
+
+
+## Writes exactly NetCodec.HUNTER_STATE_BYTES (docs/multiplayer.md 4.5, HUNTER_STATE).
+func net_write_state(out: StreamPeerBuffer) -> void:
+	var rect: Rect2 = _world.get_map_rect() if _world != null else DEFAULT_MAP_RECT
+	NetCodec.put_xz(out, rect, global_position.x, global_position.z)
+	out.put_16(clampi(roundi(global_position.y * 100.0), -32768, 32767))
+	out.put_u16(NetCodec.angle_to_u16(rotation.y))
+	out.put_8(clampi(roundi(get_pitch_deg()), -127, 127))
+	out.put_u8(clampi(roundi(_speed_h / SPEED_QUANT_MPS), 0, 255))
+	var flags: int = 0
+	if _crouching:
+		flags |= NetCodec.HF_CROUCH
+	if _aim_active:
+		flags |= NetCodec.HF_AIM
+	if _sprinting:
+		flags |= NetCodec.HF_SPRINT
+	if _alive:
+		flags |= NetCodec.HF_ALIVE
+	if is_reloading():
+		flags |= NetCodec.HF_RELOAD
+	if is_binocular_view() or _items_busy():
+		flags |= NetCodec.HF_UNARMED
+	out.put_u8(flags)
+	var w: Weapon = _weapon()
+	var index: int = _weapon_ids.find(w.weapon_id) if w != null else -1
+	out.put_u8(index if index >= 0 else NO_WEAPON_INDEX)
+	out.put_u8(clampi(ceili(_health), 0, 255))
+	out.put_u8(_net_shot_seq & 0xFF)
 
 
 func set_input_enabled(enabled: bool) -> void:
@@ -751,6 +795,7 @@ func _use_selected_item() -> void:
 func _on_weapon_fired(_shot_id: int, weapon: Weapon) -> void:
 	if weapon != _weapon():
 		return
+	_net_shot_seq = (_net_shot_seq + 1) & 0xFF
 	var recoil_deg: float = weapon.get_def_float("recoil_pitch_deg")
 	_holder.play_fire(recoil_deg)
 	_recoil_pitch += deg_to_rad(recoil_deg)
@@ -829,6 +874,28 @@ func _die() -> void:
 	InputSetup.release_all_actions()
 	Sfx.play(&"player_death")
 	GameEvents.player_died.emit()
+
+
+## Online with an ally still standing, the fall hands the view to a SpectatorCamera (docs/multiplayer.md 6.8) after
+## coop.spectate_delay_s. Solo has no ally, so nothing is created there.
+func _on_local_died() -> void:
+	if _alive or _spectator != null or _world == null:
+		return
+	for hunter: PlayerBase in _world.get_hunters():
+		if hunter != self and not hunter.is_local() and hunter.is_alive() and hunter.is_present():
+			_spectator = SpectatorCamera.new()
+			_spectator.name = "SpectatorCamera"
+			add_child(_spectator)
+			_spectator.begin(self, _world, _camera)
+			return
+
+
+func get_spectator() -> SpectatorCamera:
+	return _spectator
+
+
+func is_spectating() -> bool:
+	return _spectator != null and _spectator.is_active()
 
 
 func _update_death(delta: float) -> void:

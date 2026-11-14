@@ -12,3 +12,4 @@ var direction: Vector3 = Vector3.FORWARD
 var distance_m: float = 0.0
 var zone: StringName = &""
 var target_id: int = -1
+var shooter_slot: int = 0

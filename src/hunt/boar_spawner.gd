@@ -5,6 +5,8 @@ extends Node
 
 signal boar_died(boar: Boar)
 signal group_entered(leader_type: StringName, count: int)
+## A boar entered the world (placed and registered). The network host replicates it.
+signal boar_added(boar: Boar)
 
 const SPAWN_TRIES: int = 12
 const THERMAL_REFRESH_S: float = 0.25
@@ -58,6 +60,49 @@ func setup(world: HuntController, parent: Node3D, contract: Dictionary, spawn_zo
 		GameEvents.shot_fired.connect(_on_shot_fired)
 	if not GameEvents.thermal_vision_changed.is_connected(_on_thermal_changed):
 		GameEvents.thermal_vision_changed.connect(_on_thermal_changed)
+
+
+## Network: more boars for more hunters (docs/multiplayer.md section 6.10). Pure function.
+## target = round(base_total x coop.boar_count_mult_by_players[n - 1]). Whole groups are cloned in order
+## (groups led by or containing an alpha are skipped), each clone in spawn_zone + 1 + lap and delayed by
+## max contract delay + coop.extra_group_delay_s x (clone order, from 1); the last clone loses members
+## from the end (never the leader) so the total lands on the target. Solo / no growth: a deep copy.
+static func scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array:
+	var out: Array = groups.duplicate(true)
+	var mults: Array = coop.get("boar_count_mult_by_players", [])
+	if player_count <= 1 or mults.is_empty():
+		return out
+	var mult: float = float(mults[clampi(player_count - 1, 0, mults.size() - 1)])
+	var base: int = 0
+	var max_delay: float = 0.0
+	var sources: Array[Dictionary] = []
+	for g: Variant in groups:
+		var def: Dictionary = g as Dictionary
+		var members: Array = def.get("members", [])
+		base += members.size()
+		max_delay = maxf(max_delay, float(def.get("delay_s", 0.0)))
+		if not members.is_empty() and not members.has(String(Ids.ALPHA)) and not members.has(Ids.ALPHA):
+			sources.append(def)
+	var target: int = roundi(float(base) * mult)
+	if target <= base or sources.is_empty():
+		return out
+	var extra_delay: float = float(coop.get("extra_group_delay_s", 0.0))
+	var count: int = base
+	var order: int = 0
+	while count < target:
+		var src: Dictionary = sources[order % sources.size()]
+		var lap: int = order / sources.size()
+		var clone: Dictionary = src.duplicate(true)
+		var members: Array = clone["members"]
+		var need: int = target - count
+		if members.size() > need:
+			members.resize(need)   # need >= 1: the leader (index 0) always stays
+		clone["spawn_zone"] = int(src.get("spawn_zone", 0)) + 1 + lap
+		clone["delay_s"] = max_delay + extra_delay * float(order + 1)
+		out.append(clone)
+		count += members.size()
+		order += 1
+	return out
 
 
 func begin() -> void:
@@ -156,6 +201,7 @@ func _spawn_boar(type_id: StringName, herd: BoarHerd) -> void:
 	_by_id[id] = boar
 	_alive.append(boar)
 	_alive_ids.append(id)
+	boar_added.emit(boar)
 	GameEvents.boar_spawned.emit(id, type_id, weight)
 
 
@@ -167,8 +213,13 @@ func _on_boar_died(boar: Boar) -> void:
 	boar_died.emit(boar)
 
 
-## A gunshot heard by any member makes the whole herd react at once.
 func _on_shot_fired(_weapon_id: StringName, origin: Vector3, _direction: Vector3, noise_radius_m: float) -> void:
+	notify_shot(origin, noise_radius_m)
+
+
+## A gunshot heard by any member makes the whole herd react at once. Local shots come from
+## GameEvents.shot_fired; a remote hunter's shots come from HuntHostSync (C_SHOT).
+func notify_shot(origin: Vector3, noise_radius_m: float) -> void:
 	if not _active:
 		return
 	var src: Vector2 = Vector2(origin.x, origin.z)

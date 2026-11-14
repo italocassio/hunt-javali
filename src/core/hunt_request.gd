@@ -10,6 +10,7 @@ var item_ids: Array[StringName] = []                  # equipped equipment ids (
 var item_counts: Dictionary = {}                      # StringName -> int (consumables: carried; others: 1)
 var quality: StringName = &""                         # &"" = resolve from settings
 var rng_seed: int = 0                                 # 0 = randomize
+var player_count: int = 1
 
 
 static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0) -> HuntRequest:

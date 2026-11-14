@@ -1,10 +1,12 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.0** · Godot **4.7.2** · GDScript tipado · Renderer **Compatibility** · Web sem threads.
+Versão do contrato: **1.1** · Godot **4.7.2** · GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
 estiver errado ou faltando, **faça o mínimo, não invente API, e relate** ao coordenador. Mudanças de
-contrato passam pelo `game-architect`.
+contrato passam pelo `game-architect`. O detalhe do protocolo de rede do modo cooperativo (formatos de
+registro, sinalização, limites do servidor, fases) está em `docs/multiplayer.md`; este documento guarda só o
+contrato que os pacotes precisam para se encaixar.
 
 Convenções gerais:
 - Identificadores, arquivos e comentários em inglês; todo texto visível ao jogador em PT-BR.
@@ -27,7 +29,7 @@ até 2 armas, até 3 equipamentos, 0–1 cão) → Caçada → Resultado → Loj
 
 **Caçada:** todos os javalis do contrato entram no mapa (em grupos com atraso), saem da mata e vão comer a
 lavoura, drenando a **saúde da lavoura** (100% → 0%). **Vitória:** todos abatidos. **Derrota:** lavoura em 0%
-ou caçador morto. Sem cronômetro. Desistir pelo menu de pausa = derrota (ABANDONED).
+ou todos os caçadores mortos. Sem cronômetro. Desistir pelo menu de pausa = derrota (ABANDONED).
 
 **Javalis:** Leitão (25–45 kg, sempre foge), Fêmea (60–110 kg, foge; em bando e acuada, defende), Macho
 (90–160 kg, investe se o jogador chega perto ou se for ferido), Cachaço alfa (180–260 kg, sempre investe,
@@ -50,6 +52,17 @@ Ouro (premium) só via doação Pix + código de resgate (validação offline, *
 cinemático por steering sobre o heightmap. Só o jogador é `CharacterBody3D`. Tiro por raycast contra
 `HitZone` (Area3D). Dados de balanceamento em JSON em `data/`. Save JSON em `user://`.
 
+**Cooperativo (beta):** opção nova no menu, "Jogar com amigos (beta)". 2 a 4 caçadores no mesmo contrato,
+sala privada por código de 5 caracteres ou link `?sala=CODIGO`. Sem PvP, sem fogo amigo, sem busca de partida
+pública. Um jogador é o **anfitrião**: o jogo dele simula javalis, cães e lavoura exatamente como no solo; os
+outros veem réplicas interpoladas e controlam só o próprio caçador. Quem atira decide o acerto na própria
+tela; quem é investido decide o dano na própria tela. Dinheiro do abate para quem matou; bônus do contrato
+inteiro para cada um; consumíveis de cada um. Caçador morto vira espectador. Anfitrião caiu: a caçada acaba e
+cada um recebe os abates que já tinha feito. Conexão: WebRTC direto entre cada cliente e o anfitrião; se o
+WebRTC não fechar (NAT de 4G), o par usa o servidor de salas (Cloudflare Workers + Durable Objects, plano
+gratuito) como ponte. O solo não muda: sem sala ativa nenhum código de rede executa. Detalhe em
+`docs/multiplayer.md`.
+
 ---
 
 ## 2. Árvore de pastas e donos
@@ -58,14 +71,17 @@ Regra de dependência (vale para compilação e para validação isolada):
 
 | Quem | Pode referenciar por tipo/`class_name` | Pode carregar por caminho (com fallback) |
 |---|---|---|
-| Pacote A (`src/input`, `src/player`, `src/weapons`, `src/hud`) | `src/core/*`, autoloads | `assets/*`, `ScenePaths.SETTINGS_PANEL` |
-| Pacote B (`src/hunt`, `src/world`, `src/boars`, `src/dogs`) | `src/core/*`, autoloads | `assets/*`, `ScenePaths.PLAYER` |
+| Pacote A (`src/input`, `src/player`, `src/weapons`, `src/hud`) | `src/core/*`, autoloads (inclui `Net`) | `assets/*`, `ScenePaths.SETTINGS_PANEL` |
+| Pacote B (`src/hunt`, `src/world`, `src/boars`, `src/dogs`) | `src/core/*`, autoloads (inclui `Net`) | `assets/*`, `ScenePaths.PLAYER`, `ScenePaths.REMOTE_HUNTER` |
+| Pacote N (`src/net`) | `src/core/*`, autoloads | nada (troca de cena só via `Router`) |
 | game-systems (`src/systems`, `src/ui`, `data`) | `src/core/*`, autoloads, suas classes | `ScenePaths.*` via Router |
 | art-director (`assets`) | `src/core/*` (bases de visão), autoload `Profile` (só leitura de settings) | — |
 | qa-tester (`tests`) | tudo | tudo |
+| coordenação (`src/core`, `server/`, `project.godot`, `export_presets.cfg`) | — | — |
 
 **Proibido:** A referenciar classes de B e vice-versa; A/B referenciarem classes de `src/systems`/`src/ui`
-(use os autoloads); qualquer `.tscn` fora de `assets/` ter `ext_resource` apontando para `assets/` (assets
+(use os autoloads); N referenciar classes de A, B ou systems; A, B, systems ou assets referenciarem classes de
+N (usam o autoload `Net` e os tipos de `src/core`; `check_scripts` confere a regra); qualquer `.tscn` fora de `assets/` ter `ext_resource` apontando para `assets/` (assets
 são carregados em código via `AssetLoader`, com fallback); assets conterem corpos físicos.
 
 ```
@@ -74,7 +90,9 @@ hunt-javali/
 ├── export_presets.cfg            coordenador
 ├── CLAUDE.md                     coordenador
 ├── docs/                         game-architect
-│   └── arquitetura.md
+│   ├── arquitetura.md
+│   └── multiplayer.md            detalhe do protocolo do modo cooperativo
+├── server/                       coordenador (servidor de salas; JavaScript, fora do Godot)
 ├── tools/                        coordenador (godot.sh / godot.ps1)
 ├── data/                         game-systems  (seed inicial copiado da §9 pelo coordenador na Fase 0)
 │   ├── game.json
@@ -84,7 +102,8 @@ hunt-javali/
 │   ├── boars.json
 │   ├── maps.json
 │   ├── gold_packages.json
-│   └── pix_config.json
+│   ├── pix_config.json
+│   └── net.json
 ├── src/
 │   ├── core/                     coordenador (copiado VERBATIM do Apêndice A; ninguém mais edita)
 │   │   ├── game_events.gd        autoload GameEvents
@@ -101,6 +120,9 @@ hunt-javali/
 │   │   ├── hunt_world.gd         class HuntWorld
 │   │   ├── boar_visual_base.gd   class BoarVisualBase
 │   │   ├── dog_visual_base.gd    class DogVisualBase
+│   │   ├── hunter_visual_base.gd class HunterVisualBase
+│   │   ├── net_codec.gd          class NetCodec
+│   │   ├── net_peer_info.gd      class NetPeerInfo
 │   │   ├── weapon_view_base.gd   class WeaponViewBase
 │   │   └── map_environment_base.gd class MapEnvironmentBase
 │   ├── input/                    game-developer Pacote A
@@ -115,15 +137,16 @@ hunt-javali/
 │   │   └── maps/mato_grosso/
 │   ├── boars/                    game-developer Pacote B
 │   ├── dogs/                     game-developer Pacote B
+│   ├── net/                      game-developer Pacote N (autoload Net e enlaces; ver §6.11)
 │   ├── systems/                  game-systems
 │   │   └── pix/
 │   └── ui/                       game-systems
 │       ├── boot/  main_menu/  map_select/  preparation/  shop/
-│       ├── result/  donate/  settings/  common/
+│       ├── result/  donate/  settings/  common/  lobby/
 ├── assets/                       art-director
 │   ├── audio/                    (autoload Sfx + sintetizadores)
 │   ├── models/
-│   │   ├── boar/  dog/  weapons/  props/  flora/
+│   │   ├── boar/  dog/  hunter/  weapons/  props/  flora/
 │   ├── materials/
 │   ├── shaders/
 │   ├── env/
@@ -132,8 +155,8 @@ hunt-javali/
 │   │   └── icons/
 │   └── preview/                  (cenas de screenshot do art-director; não usadas pelo jogo)
 └── tests/                        qa-tester
-    ├── lib/  unit/  bot/
-    ├── check_scripts.tscn  unit_tests.tscn  flow_test.tscn  playthrough.tscn
+    ├── lib/  unit/  bot/  net/  web/
+    ├── check_scripts.tscn  unit_tests.tscn  flow_test.tscn  playthrough.tscn  net_test.tscn
 ```
 
 Lista completa de arquivos por dono: §14.
@@ -163,6 +186,7 @@ Profile="*res://src/systems/profile.gd"
 InputSetup="*res://src/input/input_setup.gd"
 Sfx="*res://assets/audio/sfx_library.gd"
 Router="*res://src/systems/router.gd"
+Net="*res://src/net/net.gd"
 
 [display]
 
@@ -202,7 +226,7 @@ anti_aliasing/quality/msaa_3d=0
 Notas:
 - **Ordem dos autoloads** importa: `GameEvents` (todos conectam nele) → `Data` (Profile precisa dos dados para
   defaults) → `Profile` (carrega save e settings) → `InputSetup` (lê settings de toque) → `Sfx` (lê volumes)
-  → `Router` (último; usa todos).
+  → `Router` (usa todos os anteriores) → `Net` (último; usa `Data`, `Profile`, `Router`; offline não processa).
 - `physics/3d/physics_engine`: **não escrever** (usar o padrão do 4.7). O contrato não depende do motor; o
   único ponto sensível (raycast contra `Area3D`) tem teste e plano B (§13, risco R2).
 - `window/handheld/orientation=4` = sensor landscape (só vale em export nativo; na Web o `Router` mostra o
@@ -236,7 +260,8 @@ Consultas (não são corpos):
 | Sonda de chão do bot/teleporte | A/tests | 1 | não | sim |
 
 Javalis e cães **não** têm corpos: colidem com obstáculos por steering (§8.6) e não bloqueiam o jogador.
-Bagos/balas atravessam o cão (sem fogo amigo).
+Bagos/balas atravessam o cão (sem fogo amigo). Caçador remoto (`RemoteHunter`) não ocupa camada: sem corpo e
+sem forma.
 
 ### 3.2 `export_presets.cfg` (coordenador) — preset "Web"
 
@@ -342,6 +367,15 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 | `progression_changed()` | `Profile` | menus | contrato vencido/desbloqueado |
 | `settings_changed(key: String, value: Variant)` | `Profile` | `InputSetup`, `Sfx`, A `Player` (sensibilidade), B (qualidade só na próxima caçada) | `Profile.set_setting` |
 | `touch_mode_changed(is_touch: bool)` | `InputSetup` | A `Hud`, menus | mudou o modo de input |
+| `hunter_joined(slot: int, display_name: String)` | B `HuntController` | A `Hud` | caçador remoto criado na montagem |
+| `hunter_left(slot: int)` | B `HuntController` | A `Hud` (mensagem), `SpectatorCamera` | peer saiu ou caiu durante a caçada |
+| `hunter_died(slot: int)` | B `HuntController` | A `Hud`, `SpectatorCamera` | qualquer caçador (local ou remoto) morreu |
+| `spectate_changed(slot: int)` | A `Player` | A `Hud` | começou/trocou de alvo como espectador (−1 = deixou) |
+| `net_stall_changed(stalled: bool)` | `Net` | A `Hud` (faixa "Anfitrião sem resposta…") | cliente ficou `net.host_stall_warn_s` sem snapshot / voltou |
+
+`player_died()` continua significando "o caçador **desta máquina** morreu". Sinais de cão
+(`dog_state_changed`, `dog_health_changed`, `dog_command_executed`) passam a valer só para o cão do jogador
+local, em qualquer máquina. `dog_marked_boar` e `bait_placed` valem para o time inteiro.
 
 Ordem garantida na morte de um javali (B): `boar_hit` → `boar_state_changed(id, &"dead")` →
 `boar_killed` → `boar_counts_changed`. A checagem de fim de caçada acontece no `_process` do
@@ -381,6 +415,7 @@ func get_contract_count(map_id: StringName) -> int
 func get_gold_packages() -> Array[Dictionary]
 func get_gold_package(id: StringName) -> Dictionary
 func get_pix_config() -> Dictionary
+func get_net() -> Dictionary                          # data/net.json inteiro (§9.9)
 func get_item_def(id: StringName) -> Dictionary       # procura em weapons, equipment e dogs
 func get_item_category(id: StringName) -> StringName  # &"weapon" | &"equipment" | &"dog" | &""
 ```
@@ -436,8 +471,9 @@ func get_setting(key: String) -> Variant                  # stub: valor default 
 func set_setting(key: String, value: Variant) -> void     # valida, emite settings_changed, salva
 ```
 `apply_hunt_result`: `money += result.total_money`; subtrai `result.consumables_used` do inventário;
-se `VICTORY`: marca o contrato vencido e desbloqueia o próximo (`index + 1`, se existir); atualiza stats;
-`save()`. Chamado só por `Router.finish_hunt`.
+se `VICTORY` **e `result.counts_for_progression`**: marca o contrato vencido e desbloqueia o próximo
+(`index + 1`, se existir); atualiza stats; `save()`. Chamado só por `Router.finish_hunt`. Settings novo:
+`player_name` (String, §10).
 
 ### 6.4 Autoload `InputSetup` — `res://src/input/input_setup.gd` — dono: Pacote A
 API em §4. Stub: `register_actions()` vazio, `is_touch_mode()` → `false`.
@@ -478,6 +514,9 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `HuntWorld` | `src/core/hunt_world.gd` | Node3D | contrato caçada/mundo ↔ caçador/HUD/tests (B implementa `HuntController`) |
 | `BoarVisualBase` | `src/core/boar_visual_base.gd` | Node3D | API da visão do javali + fallback |
 | `DogVisualBase` | `src/core/dog_visual_base.gd` | Node3D | API da visão do cão + fallback |
+| `HunterVisualBase` | `src/core/hunter_visual_base.gd` | Node3D | API da visão do caçador aliado (§7.11) + fallback |
+| `NetCodec` | `src/core/net_codec.gd` | RefCounted | constantes e quantização da rede (compartilhadas por A, B e N) |
+| `NetPeerInfo` | `src/core/net_peer_info.gd` | RefCounted | um jogador da sala |
 | `WeaponViewBase` | `src/core/weapon_view_base.gd` | Node3D | API da arma em 1ª pessoa + fallback |
 | `MapEnvironmentBase` | `src/core/map_environment_base.gd` | Node3D | API do ambiente (céu/sol) + fallback |
 
@@ -494,6 +533,8 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
 | `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
+| `RemoteHunter` | `src/player/remote_hunter.gd` (cena `src/player/remote_hunter.tscn`, `ScenePaths.REMOTE_HUNTER`) | PlayerBase | caçador de outro jogador; API de `PlayerBase` (`setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld)`, `net_apply_state`…); `net_write_state` devolve os últimos 14 bytes recebidos (`NetCodec.HUNTER_STATE_BYTES`), então o anfitrião reenvia todos os caçadores sem caso especial; sem corpo e sem forma de colisão |
+| `SpectatorCamera` | `src/player/spectator_camera.gd` | Node3D | interna |
 
 Estrutura obrigatória de `src/player/player.tscn` (B só usa a raiz):
 ```
@@ -510,7 +551,11 @@ O `Player` instancia `ScenePaths.HUD` como filho em `setup()` e chama `hud.bind(
 | class_name | Arquivo | Extends | Observação |
 |---|---|---|---|
 | `HuntController` | `src/hunt/hunt_controller.gd` (raiz de `src/hunt/hunt.tscn`) | HuntWorld | `var route_on_finish: bool = true` (tests põem false antes de `add_child`) |
-| `BoarSpawner` | `src/hunt/boar_spawner.gd` | Node | interna |
+| `BoarSpawner` | `src/hunt/boar_spawner.gd` | Node | interna; em rede: `static func scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array`, `func notify_shot(origin: Vector3, noise_radius_m: float) -> void` |
+| `HuntHostSync` | `src/hunt/hunt_host_sync.gd` | Node | interna (anfitrião: enfileira `EV_*`, escreve o snapshot, aplica `C_*`) |
+| `HuntReplica` | `src/hunt/hunt_replica.gd` | Node3D | interna (cliente: as réplicas de javalis e cães são filhas dela; `setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager)`) |
+| `BoarPuppet` | `src/boars/boar_puppet.gd` | Node3D | interna (réplica do javali, com 4 `HitZone`) |
+| `DogPuppet` | `src/dogs/dog_puppet.gd` | Node3D | interna (réplica do cão) |
 | `FallbackPlayer` | `src/hunt/debug/fallback_player.gd` | PlayerBase | cápsula simples usada se `player.tscn` não existir |
 | `MapRoot` | `src/world/map_root.gd` | Node3D | raiz de toda cena de mapa (§8.5) |
 | `Heightmap` | `src/world/heightmap.gd` | RefCounted | `get_height(x, z) -> float`, `get_normal(x, z) -> Vector3` |
@@ -526,7 +571,22 @@ O `Player` instancia `ScenePaths.HUD` como filho em `setup()` e chama `hud.bind(
 | `Steering` | `src/boars/steering.gd` | RefCounted (static) | seek/flee/separação/evitação |
 | `Boar` | `src/boars/boar.gd` (cena `src/boars/boar.tscn`) | Node3D | FSM do javali |
 | `BoarHerd` | `src/boars/boar_herd.gd` | RefCounted | líder, alerta compartilhado |
-| `Dog` | `src/dogs/dog.gd` (cena `src/dogs/dog.tscn`) | Node3D | FSM do cão |
+| `Dog` | `src/dogs/dog.gd` (cena `src/dogs/dog.tscn`) | Node3D | FSM do cão; `setup(p_breed_id: StringName, world: HuntWorld, spawn_position: Vector3, p_owner_slot: int = 0)`, `command()` público |
+
+Alterações de assinatura existentes por causa da rede: `MapRoot.build_flora(density: float, sync_layout: bool
+= false)`; `CropManager` ganha `apply_eaten(indices: PackedInt32Array)`, `set_replicated_health(pct: float)` e
+o sinal `patch_eaten(index: int)`. O solo chama tudo com os defaults e o comportamento não muda.
+
+Membros novos, internos de B (uso só dentro de `src/hunt`, `src/boars`, `src/world`):
+- `BoarSpawner`: sinal `boar_added(boar: Boar)`.
+- `MapRoot.get_flora_positions(id: StringName) -> PackedVector2Array`.
+- `Boar`: sinais `hit_applied(boar, zone, damage, shot_id)` e `attacked(boar, victim_slot)`; `var killer_slot: int`;
+  `get_hit_zone(zone: StringName) -> HitZone`, `get_yaw() -> float`, `net_state_byte() -> int`,
+  `net_confirm_charge_hit(victim_slot: int) -> bool`; estáticos `make_hit_zones(parent: Node3D, p_boar_id: int,
+  p_body_scale: float) -> Array[HitZone]`, `basis_for(yaw: float, up: Vector3) -> Basis`,
+  `charge_hits(pos: Vector2, dir: Vector2, p_body_scale: float, boar_y: float, target: Vector3) -> bool`.
+- `HuntController`: `place_bait(at: Vector3)` (ceva vinda da rede), `get_baits() -> Array[Bait]`.
+- `CropManager`: `set_replicated_attack(on: bool)`, `is_under_attack() -> bool`, `get_eaten_indices() -> PackedInt32Array`.
 
 ### 6.10 game-systems — classes públicas (testadas pelo qa)
 
@@ -544,7 +604,86 @@ O `Player` instancia `ScenePaths.HUD` como filho em `setup()` e chama `hud.bind(
 | `RedeemCode` | `src/systems/pix/redeem_code.gd` | RefCounted (static) | `static func normalize(code: String) -> String`, `static func generate(gold: int, nonce: String, secret: String) -> String`, `static func parse(code: String, secret: String) -> int` (ouro ou -1) |
 | `DonationService` | `src/systems/pix/donation_service.gd` | RefCounted | `signal redeem_finished(ok: bool, gold: int, message: String)`, `func _init(gateway: PixGateway = null)`, `func get_packages() -> Array[Dictionary]`, `func get_pix_payload(package_id: StringName) -> String`, `func redeem(code: String) -> void` |
 
+| `LoadoutPanel` | `src/ui/common/loadout_panel.gd` | VBoxContainer | painel de equipamento da Preparação, reaproveitado pelo lobby (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`) |
+
 Detalhes de Pix em §9.8.
+
+### 6.11 Autoload `Net` — `res://src/net/net.gd` — dono: Pacote N
+
+Ordem dos autoloads: `Net` é o último (usa `Data`, `Profile`, `Router`). Offline (`Role.OFFLINE`) o autoload
+fica com `set_process(false)`, não abre socket e todos os getters devolvem os valores "solo" abaixo (stub). O
+stub da fase F1 é exatamente esse estado.
+
+```gdscript
+enum Role { OFFLINE, HOST, CLIENT }
+enum RoomState { NONE, CONNECTING, LOBBY, LOADING, IN_HUNT }
+enum Path { NONE, RELAY, RTC }
+
+signal room_state_changed(state: int)                 # RoomState
+signal room_error(code: StringName, message: String)  # message já em PT-BR
+signal roster_changed()                               # entrou/saiu alguém, pronto, contrato, caminho do enlace
+signal hunt_go()                                      # todos carregaram (ou estouraram o prazo): a caçada começa
+
+# --- estado (valor solo entre parênteses) ---
+func is_configured() -> bool            # data/net.json tem URL utilizável nesta plataforma
+func is_active() -> bool                # (false) true em LOADING/IN_HUNT: a caçada atual é em rede
+func is_in_room() -> bool               # (false) true de LOBBY em diante
+func is_host() -> bool                  # (false)
+func get_role() -> int                  # (Role.OFFLINE)
+func get_room_state() -> int            # (RoomState.NONE)
+func get_room_code() -> String          # ("")
+func get_room_link() -> String          # ("") URL da página + "?sala=CODE"
+func get_local_slot() -> int            # (0) slot = id do peer − 1; anfitrião = 0
+func get_player_count() -> int          # (1) peers presentes
+func get_roster() -> Array[NetPeerInfo] # ([]) ordenado por slot
+func get_peer(slot: int) -> NetPeerInfo # (null)
+func get_selected_map_id() -> StringName       # (&"")
+func get_selected_contract_index() -> int      # (0)
+func get_link_path(slot: int) -> int    # (Path.NONE) Path do enlace com aquele peer (HUD/lobby/testes)
+func get_hunt_seed() -> int             # (0) 0 fora de sala; semente do L_START, igual em todos os peers
+func is_peer_absent(slot: int) -> bool  # (false) ausência curta (peer_absent_s), sem remoção da sala
+
+# --- lobby (game-systems) ---
+func create_room() -> void              # nome vem de Profile.get_setting("player_name")
+func join_room(code: String) -> void
+func leave_room() -> void               # idempotente; fecha tudo e volta a OFFLINE
+func set_ready(ready: bool) -> void     # cliente; reenvia o resumo do loadout
+func host_select_contract(map_id: StringName, contract_index: int) -> bool   # só anfitrião, só contrato dele desbloqueado
+func host_start_hunt() -> bool          # só anfitrião, todos prontos: tranca a sala, envia L_START
+func take_url_room_code() -> String     # lê "?sala=" uma única vez ("" depois ou fora do Web)
+
+# --- caçada (Pacote B) ---
+func bind_world(world: HuntWorld) -> void    # fim da montagem; Net passa a despachar registros para o mundo
+func unbind_world(world: HuntWorld) -> void  # _exit_tree
+func flush() -> void                         # envia já os eventos pendentes (fim de caçada)
+```
+
+Responsabilidade de `Net` na caçada: a cada tick (acumulado por `delta` de `_process`; prazos por relógio de
+parede) o anfitrião monta para cada enlace um quadro de estado (`world.net_write_snapshot`) e um de eventos
+(`world.net_take_events`); o cliente monta `C_STATE` (`world.get_player().net_write_state`) e eventos
+(`world.net_take_claims`). Na chegada, despacha para `net_apply_snapshot`, `net_apply_event`,
+`net_apply_claim` e `get_hunter(slot).net_apply_state`. Registros de caçada recebidos antes de `bind_world`
+ficam em fila e são aplicados em ordem. Formatos de registro: `docs/multiplayer.md` §4. Ao entrar em
+`LOADING`, `Net` completa o `Router.get_pending_request()` com `rng_seed` (= `get_hunt_seed()`),
+`player_count`, `map_id` e `contract_index`.
+
+Classes internas de N (ninguém fora de `src/net` as referencia): `NetSession` (sala, lobby, relógio de ticks,
+despacho), `NetSignaling` (`WebSocketPeer`, JSON de sala/sinalização, quadros de relay), `NetLink` (um par:
+caminho RELAY/RTC, `seq`/`ack`, reordenação, reenvio), `NetRtc` (`WebRTCPeerConnection` + 2 canais; só
+instanciado no Web), `NetLoopback` (par em memória com perda/reordenação configuráveis, para testes).
+
+Mensagens de `Net.room_error` (texto em `src/net`, PT-BR):
+
+| `code` | Mensagem |
+|---|---|
+| `not_configured` | "O modo com amigos ainda não foi configurado." |
+| `server_unreachable` | "O servidor de salas está indisponível agora. Ele é gratuito e tem um limite diário, que renova às 21h (horário de Brasília). Tente mais tarde. O modo solo funciona normalmente." |
+| `room_not_found` | "Sala não encontrada. Confira o código." |
+| `room_full` | "A sala já está cheia (4 caçadores)." |
+| `in_progress` | "A caçada dessa sala já começou. Espere ela terminar." |
+| `version_mismatch` | "Sua versão (X) é diferente da do anfitrião (Y). Recarregue a página para atualizar." |
+| `host_left` | "O anfitrião saiu. A sala foi fechada." |
+| `connection_lost` | "Conexão perdida." |
 
 ---
 
@@ -731,6 +870,9 @@ Ids (quem toca entre parênteses):
 | Mundo (B) | `bait_drop`, `amb_cerrado_loop`, `amb_wind_loop`, `victory_sting`, `defeat_sting` |
 | UI (systems) | `ui_click`, `ui_buy`, `ui_error`, `ui_coin` |
 
+Cooperativo: o Pacote A (`RemoteHunter`) passa a usar `play_3d` para os tiros e passos de aliados, com os
+ids de arma e de passo já listados. Nenhum id novo.
+
 ### 7.9 UI: tema, ícones, sobreposição de luneta
 - **Tema** `res://assets/ui/theme.tres` (aplicado globalmente via `gui/theme/custom`). Fonte padrão do Godot
   (suporta acentos), tamanho base 20 px; alvo de toque mínimo 64 px a 720p. Variações de tipo obrigatórias
@@ -770,6 +912,30 @@ Ids (quem toca entre parênteses):
 `impact_dust`, `impact_blood`, `impact_wood`: raiz `CPUParticles3D` com `one_shot = true`,
 `emitting = false`, ≤ 24 partículas, `lifetime` ≤ 0,8 s. O A instancia, posiciona, faz `emitting = true` e
 libera após `lifetime * 2`. Máximo 6 simultâneos (o A descarta excedentes). Fallback: nada.
+
+### 7.11 Caçador aliado — `res://assets/models/hunter/hunter_visual.tscn`
+- Raiz `Node3D` estendendo `HunterVisualBase` (`res://assets/models/hunter/hunter_visual.gd`). Origem no
+  chão entre os pés, frente −Z, escala 1 = 1,78 m em pé. **O gameplay mantém a raiz em escala 1** (agachar é
+  `set_crouching`) e é dono de posição e yaw da raiz.
+- Filhos diretos obrigatórios: `Muzzle` e `NameAnchor` (`Marker3D`), reposicionados pelo asset a cada frame.
+  O gameplay lê `global_position` deles no momento do uso (nunca guarda) e só pode pendurar filhos em
+  `NameAnchor`.
+- Orçamento: ≤ 600 triângulos, ≤ 10 `MeshInstance3D`, materiais compartilhados entre instâncias (cor por
+  vértice; cor do slot sem material novo por jogador), sombra só no tronco, clarão do tiro sem luz.
+- `setup(slot, weapon_id)` é chamado **exatamente uma vez, antes de `add_child`**. O slot não muda enquanto
+  o caçador existe; não há `set_slot` e o gameplay não chama `setup` de novo.
+
+| Método | Contrato |
+|---|---|
+| `setup(slot: int, weapon_id: StringName) -> void` | cor de identidade `SLOT_COLORS[slot]` e arma inicial |
+| `set_weapon(weapon_id: StringName) -> void` | `&""` = desarmado (binóculo, item) |
+| `set_locomotion(speed_mps: float) -> void` | 0 = parado; todo frame |
+| `set_crouching(on: bool)`, `set_aiming(on: bool)`, `set_look_pitch(pitch_rad: float)` | pose; pitch positivo = olhando para cima |
+| `play_fire()`, `play_reload(duration_s: float)`, `play_hit()` | momentos únicos (o som é do gameplay) |
+| `play_death(instant: bool = false) -> void` | cai e congela; `instant = true` já nasce caído (entrada tardia/reconexão); ignora chamadas seguintes |
+| `get_muzzle()`, `get_name_anchor()` | já na base |
+
+Fallback: `HunterVisualBase.create_fallback()` (cápsula na cor do slot).
 
 ---
 
@@ -919,7 +1085,8 @@ inclusive em derrota/desistência (o bônus de contrato só na vitória).
 
 ### 8.8 Fim da caçada (B)
 Avaliado no `_process` do `HuntController`, nesta ordem, só se `not is_hunt_over()`:
-1. jogador morto (`player_died` recebido) → `DEFEAT_DEATH`;
+1. todos os caçadores presentes mortos (no solo: `player_died` recebido) → `DEFEAT_DEATH`. Em rede só o
+   anfitrião avalia; clientes terminam por `EV_HUNT_END` ou `DISCONNECTED`;
 2. `crop_health_pct <= 0` → `DEFEAT_CROP`;
 3. `hunt_abandon_requested` recebido → `ABANDONED`;
 4. `killed == total` → `VICTORY` (`contract_bonus = Profile.contract_bonus(...)`).
@@ -973,6 +1140,103 @@ caso contrário → `return` + `CMD_RECALL` + "Volta!". Caramelo também aliment
 | `scout_drone` | consumível | revela todos os javalis no minimapa por `reveal_s` | A (HUD), emite `item_used` |
 `use_item` usa o item selecionado entre ativos/consumíveis equipados; `item_next` cicla.
 
+### 8.12 Caçada em rede (B, com A e N)
+Formatos de registro: `docs/multiplayer.md` §4. Offline (`Net.get_role() == Role.OFFLINE`) tudo acima vale
+sem mudança. `get_player()` continua sendo "o caçador desta máquina"; a IA usa `get_hunters()`.
+
+**Papéis na montagem.** `HuntController` continua raiz única de `hunt.tscn`; lê `Net.get_role()` uma vez
+na montagem.
+
+| Trecho | HOST | CLIENT |
+|---|---|---|
+| RNG | `rng_seed` de `L_START` (nunca 0) | o mesmo seed (lavoura com o mesmo jitter visual) |
+| Flora | `build_flora(density, true)` | idem |
+| Caçadores | `Player` local em `PlayerSpawn` deslocado `(slot − (n−1)/2) × coop.spawn_spacing_m` no eixo direito; `RemoteHunter` para cada outro slot (`AssetLoader.instantiate(ScenePaths.REMOTE_HUNTER)` + `setup_remote`) | idem |
+| Cães | um `Dog` por slot com cão (`NetPeerInfo.dog_id`), `owner_slot` | `DogPuppet` criado pela réplica ao ver o cão no snapshot |
+| Javalis | `spawner.setup` com contrato escalado (`BoarSpawner.scale_groups`); cria `HuntHostSync` | não chama `spawner.setup`; cria `HuntReplica` |
+| Início | `Net.bind_world(self)`; espera `Net.hunt_go` com o overlay "Aguardando os outros caçadores…"; depois `spawner.begin()` e `hunt_started` | `Net.bind_world(self)` (Net envia `L_LOADED`); espera `Net.hunt_go`; `hunt_started` |
+| Getters de javali (`HuntWorld`) | `spawner` | `HuntReplica` (mesmas respostas, a partir das réplicas) |
+| `debug_*` | como hoje | sem efeito |
+
+**Alvo múltiplo (anfitrião).** O javali percorre `get_hunters()` vivos e presentes (`is_alive()` e
+`is_present()`), do mais próximo ao mais distante, e guarda `_target_hunter`, nunca sem validar. No máximo um
+raio de visão por javali por percepção. `HitInfo.shooter_slot` define a ameaça e o `killer_slot`; abate por cão
+vai para o dono do cão.
+
+**Tiro ("favor the shooter").** A `HitZone` da réplica recebe `receive_hit` da arma como hoje. A
+`HuntReplica` junta os acertos do mesmo `shot_id` e, no `shot_fired`, fecha um `C_SHOT`; o acerto já emite
+`boar_hit` local (hitmarker imediato). O anfitrião valida: javali vivo; `damage ≤ weapon.damage`; `n ≤
+weapon.pellets`; `dist ≤ weapon.max_range_m`; `|distância(javali no anfitrião, origem) − dist| ≤
+net.hit_claim_tolerance_m`. Passou: monta `HitInfo` (`shooter_slot`, `shot_id`, `zone`, `damage`) e chama o
+mesmo caminho de dano do solo. Todo `C_SHOT` chama `spawner.notify_shot`. `shot_id` carrega o slot nos 8 bits
+altos (`NetCodec.make_shot_id`); quem conta "meu tiro" filtra por `NetCodec.shot_slot(shot_id) ==
+world.get_local_slot()`. O `C_SHOT` de tiro que errou vai com `shot_id = NetCodec.make_shot_id(slot, 0)`. O
+cliente ignora o campo `killed` do snapshot: os abates da equipe vêm de `EV_BOAR_DEATH`.
+
+**Investida ("favor the victim").** Em `charge`, a réplica roda a geometria de acerto
+(`Boar.charge_hits`) contra o `Player` local; acertou (uma vez por investida): `player.apply_damage` local,
+`play_attack` e `C_CHARGE_HIT`. O anfitrião testa só caçadores `is_local()`; para os remotos espera
+`C_CHARGE_HIT` e então `_enter_recover()` + `EV_BOAR_ATTACK`.
+
+**Morte, espectador e fim.** `Player._die` não muda. Em rede, passados `coop.spectate_delay_s` e havendo
+aliado vivo, o `Player` ativa `SpectatorCamera` (terceira pessoa a `coop.spectate_distance_m` atrás e
+`coop.spectate_height_m` acima do aliado; `fire` troca de alvo). O controlador acompanha `is_alive()` de cada
+caçador e emite `hunter_died(slot)`. Só o anfitrião decide o fim (§8.8); `_finish` enfileira `EV_HUNT_END` e
+chama `Net.flush()`; o cliente, ao receber, roda o mesmo `_finish(outcome)` com a lavoura do evento. Pausa >
+"Desistir": anfitrião ("Encerrar a caçada para todos") → `ABANDONED` para todos; cliente ("Sair da caçada") →
+`Net.leave_room()` e resultado local `ABANDONED` com os próprios abates. Depois de `hunt.end_delay_s`, cada peer
+chama `Router.finish_hunt(result)`; a sala volta a LOBBY e a tela de resultado oferece "Voltar para a sala".
+
+**Quedas, ausências e prazos.**
+
+| Situação | Detecção | Efeito |
+|---|---|---|
+| Anfitrião saiu ou caiu | `host_left` do servidor, ou `net.host_timeout_s` sem snapshot | cliente: `net_connection_lost()` → `Outcome.DISCONNECTED`; abates pagos, consumíveis descontados, sem bônus, sem progressão |
+| Anfitrião congelado (aba em segundo plano) | `net.host_stall_warn_s` sem snapshot | faixa no HUD (`net_stall_changed`); réplicas param; o caçador do cliente segue jogável. Voltou antes de `host_timeout_s`: segue. Medido: após 5 s de aba congelada o delta de `_process` é ~0,07 s (não carrega o tempo perdido), então prazos usam relógio de parede; ao acordar de um congelamento da própria máquina, os relógios de silêncio são zerados |
+| Cliente saiu ou caiu | `peer_left`, ou `net.peer_timeout_s` sem estado | `net_peer_left(slot)`: caçador e cão dele somem; a caçada segue; se não sobrar vivo, derrota |
+| Cliente em silêncio curto | `net.peer_absent_s` | `is_present() = false`: javalis o ignoram |
+| Anfitrião perdeu a rede | WebSocket e todos os enlaces caídos | `net_connection_lost()` no anfitrião: remotos saem, ele termina a caçada sozinho ("Conexão perdida: você continua sozinho.") |
+| Servidor de salas indisponível durante a caçada | WebSocket fechado ou envio falhando | enlaces em RTC continuam; enlaces em relay caem (linhas acima) |
+| Reconexão pelo mesmo código | — | fora da v1; sala trancada recusa `join` |
+| Cliente em `LOADING` sem `L_GO` | `net.load_timeout_s` + `net.host_timeout_s` | cliente desiste (`DISCONNECTED`) |
+
+`net_connection_lost()` vem antes de `room_error`. No cliente encerra `DISCONNECTED`; no ANFITRIÃO não encerra:
+ele segue sozinho ("Conexão perdida: você continua sozinho."). Cliente removido por silêncio não é avisado:
+encerra pelo próprio `host_timeout_s`. A sala destranca quando o anfitrião chama `Net.unbind_world`.
+`DISCONNECTED` paga os abates, sem bônus e sem progresso; conta em `hunts_played`, não em `hunts_won`.
+`hunter_died(slot)` é emitido também no solo, para o caçador local (o HUD ignora o slot local). "Todos os
+caçadores presentes mortos" conta quem ainda está na caçada; quem está só em silêncio curto vale pelo último
+estado. Anfitrião que desiste ("Encerrar a caçada para todos"): anfitrião `ABANDONED`, `EV_HUNT_END` +
+`Net.flush()`; clientes `ABANDONED` com `counts_for_progression = false` e abates pagos. Cliente que sai:
+`Net.leave_room()` + `ABANDONED` local.
+
+**Economia.** O anfitrião calcula `Profile.kill_reward` e envia o valor em `EV_BOAR_DEATH`; cada máquina só
+acrescenta a `result.kills`/`money_from_kills` os abates com `killer_slot` local. `boar_killed` é emitido para
+todos os abates. Cada peer calcula `Profile.contract_bonus` com a lavoura de `EV_HUNT_END` (cheio para cada um
+que estava na sala no fim). Ao montar a caçada em rede, `result.counts_for_progression =
+Profile.is_contract_unlocked(map, index)`. Cada peer monta o próprio `HuntRequest` com
+`Profile.build_hunt_request`; `Net` preenche `rng_seed`, `player_count`, `map_id` e `contract_index`.
+`HuntResult.scoreboard`: uma entrada por slot que começou a caçada (inclusive quem saiu): `{slot, name, kills,
+money, weight_kg}`; `money` = só dinheiro de abate; vazio no solo. Mensagem de abate de aliado: "<Nome> abateu um
+javali: <tipo>, <kg> kg". Loadout, munição e itens nunca saem
+da máquina do dono. `Router.finish_hunt` e `apply_hunt_result` continuam sendo o único ponto de crédito, uma
+vez por máquina.
+
+**Escala de javalis** (`BoarSpawner.scale_groups`, função pura): `alvo = round(total_base ×
+coop.boar_count_mult_by_players[n − 1])`. Clona grupos inteiros em ordem (pulando os que têm `alpha`), cada
+clone com `spawn_zone + 1 + volta` e `delay_s = maior delay do contrato + coop.extra_group_delay_s × (ordem do
+clone)`; o último clone perde membros do fim (nunca o líder) para fechar no alvo. O teto
+`hunt.max_alive_boars` continua valendo: grupos esperam vaga. Exemplo: primeiro contrato (índice 0, 9 javalis)
+→ 14 e 23 com 2 e 4 jogadores; o maior caso atual é 63 javalis (cabem em ids de 1 byte).
+Medido nas fases F4/F5: snapshot de 254 B com 26 javalis; download do cliente ~3,5–4,6 kB/s (meta 5);
+anfitrião > 100 fps no desktop.
+
+**Mundo.** Heightmap, props, água e índices dos canteiros são determinísticos entre peers. A flora não é entre
+qualidades gráficas: com `sync_layout = true` o laço sorteia sempre a quantidade cheia e só guarda as primeiras
+`round(count × density)` de capim/arbusto; o solo chama com `false` (layout de hoje). Lavoura no cliente: o
+`CropManager` é o mesmo, sem comedores; `EV_CROP_EATEN` → `apply_eaten(indices)`; `set_replicated_health(pct)`
+a cada snapshot atualiza a saúde e passa pelo mesmo `crop_health_changed` do solo.
+
 ---
 
 ## 9. Dados (`data/`)
@@ -993,6 +1257,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `economy.start_*` | número/lista/obj | R$, ouro | perfil novo |
 | `loadout.weapon_slots/item_slots` | int | — | preparação |
 | `shop.max_consumable_owned` | int | — | loja |
+| `coop.*` | número/lista | m, s | modo cooperativo (B, A) |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
 ```json
 {
@@ -1024,7 +1289,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
   "hunt": {
     "end_delay_s": 2.5,
     "crop_health_signal_step_pct": 0.5,
-    "max_alive_boars": 18,
+    "max_alive_boars": 26,
     "kill_message_s": 3.0,
     "boar_perception_interval_s": 0.2,
     "spawn_radius_m": 8.0,
@@ -1039,6 +1304,15 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
+  "coop": {
+    "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],
+    "extra_group_delay_s": 20.0,
+    "spawn_spacing_m": 2.0,
+    "spectate_delay_s": 2.0,
+    "spectate_distance_m": 3.5,
+    "spectate_height_m": 2.0,
+    "name_tag_max_m": 120.0
+  },
   "quality_presets": {
     "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 0.75, "view_distance_m": 160},
     "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 0.9,  "view_distance_m": 220},
@@ -1046,6 +1320,8 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
   }
 }
 ```
+`coop.*` (B, A, `Net`): `boar_count_mult_by_players` é indexado por `player_count − 1`; os demais campos estão
+em §8.12.
 
 ### 9.2 `data/weapons.json`
 | Campo | Tipo | Unid. | Significado |
@@ -1359,6 +1635,44 @@ O desenvolvedor gera códigos com `RedeemCode.generate` (ex.: uma cena de ferram
 > Segurança real exige um backend (webhook do PSP + códigos emitidos e invalidados no servidor), plugado
 > como nova subclasse de `PixGateway`.
 
+### 9.9 `data/net.json`
+```json
+{
+  "version": 1,
+  "server_url": "wss://javali-salas.acpw01.workers.dev/ws",
+  "dev_server_url": "ws://localhost:8787/ws",
+  "rtc_enabled": true,
+  "ice_servers": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"],
+  "ice_timeout_s": 8.0,
+  "rtc_stall_s": 3.0,
+  "connect_timeout_s": 8.0,
+  "ping_s": 15.0,
+  "pong_timeout_s": 10.0,
+  "max_players": 4,
+  "snapshot_hz": 10,
+  "hunter_state_hz": 10,
+  "relay_hz": 10,
+  "boar_interp_delay_ms": 200,
+  "hunter_interp_delay_ms": 150,
+  "max_frame_bytes": 1100,
+  "reliable_window": 64,
+  "load_timeout_s": 25.0,
+  "host_stall_warn_s": 2.5,
+  "host_timeout_s": 20.0,
+  "peer_absent_s": 3.0,
+  "peer_timeout_s": 30.0,
+  "hit_claim_tolerance_m": 12.0,
+  "name_max_chars": 12
+}
+```
+`server_url` é a produção (`wss://javali-salas.acpw01.workers.dev/ws`, já no lugar do marcador `SUBDOMINIO`);
+`dev_server_url` vale em nativo e em página servida de `localhost`. `relay_hz` é a taxa de envio de um enlace
+enquanto está em relay (uma mensagem por tick por direção). Só em página servida de `localhost`/`127.0.0.1`
+valem as sobreposições por URL para teste: `?server=ws://127.0.0.1:PORT/ws`, `?relay_only=1` (não tenta
+WebRTC), `?drop_ice=1` (não envia candidatos: força o estouro de `ice_timeout_s`). Em nativo: `-- --server=…`.
+Dono: game-systems; leitor: `Net` (e `HuntHostSync`/`HuntReplica` para `hit_claim_tolerance_m` e as demoras
+de interpolação). Protocolo e limites do servidor: `docs/multiplayer.md` §4 e §5.
+
 ---
 
 ## 10. Save
@@ -1407,14 +1721,17 @@ Esquema (versão 2):
     "volume_ambience": 0.7,
     "quality": "auto",
     "touch_controls": "auto",
-    "show_fps": false
+    "show_fps": false,
+    "player_name": ""
   }
 }
 ```
 `best_crop_pct[i] = -1` = nunca vencido; `is_contract_completed` = `>= 0`. `items` guarda quantidade de
 consumíveis e `1` para passivos/ativos possuídos. Settings: `mouse_sensitivity`/`touch_sensitivity` 0,1–3,0
 (multiplicam `player.mouse_deg_per_px`/`touch_deg_per_px`); volumes 0–1; `quality` ∈ `auto|low|medium|high`;
-`touch_controls` ∈ `auto|on|off`.
+`touch_controls` ∈ `auto|on|off`; `player_name` String (até `net.name_max_chars`, sem caracteres de controle;
+vazio aparece como "Caçador N", N = slot + 1). A versão do save continua 2: save antigo ganha
+`player_name = ""` pelo `sanitize`. Nada de sala, código ou resultado pendente é gravado.
 
 ---
 
@@ -1427,19 +1744,58 @@ Cena principal: `res://src/ui/boot/boot.tscn`. Troca **sempre** por `Router.goto
 | Cena (`ScenePaths`) | Arquivo | Dono | Botões (nós com nome único `%`) → destino |
 |---|---|---|---|
 | `BOOT` | `src/ui/boot/boot.tscn` | systems | `%StartButton` (tela cheia, "Toque para começar"): `Sfx.unlock_audio()`, tela cheia em toque, → `MAIN_MENU` |
-| `MAIN_MENU` | `src/ui/main_menu/main_menu.tscn` | systems | `%PlayButton` → `MAP_SELECT`; `%ShopButton` → `SHOP`; `%DonateButton` → `DONATE`; `%SettingsButton` → `SETTINGS`; mostra `%MoneyLabel`, `%GoldLabel` |
+| `MAIN_MENU` | `src/ui/main_menu/main_menu.tscn` | systems | `%PlayButton` → `MAP_SELECT`; `%FriendsButton` ("Jogar com amigos (beta)"; sempre visível desde a F6) → `LOBBY`; `%ShopButton` → `SHOP`; `%DonateButton` → `DONATE`; `%SettingsButton` → `SETTINGS`; mostra `%MoneyLabel`, `%GoldLabel` |
 | `MAP_SELECT` | `src/ui/map_select/map_select.tscn` | systems | botões gerados `Map_<map_id>` (indisponível: desabilitado, "Em breve") → seta `Router.selected_map_id` → `PREPARATION`; `%BackButton` |
 | `PREPARATION` | `src/ui/preparation/preparation.tscn` | systems | `Contract_<index>` (0-based; trancado = desabilitado), `%WeaponSlot0`, `%WeaponSlot1`, `%DogOption` (OptionButton), `Item_<id>` (CheckButton), `%StartHuntButton` → `Router.start_hunt(Profile.build_hunt_request(...))`; `%ShopButton`; `%BackButton` → `MAP_SELECT` |
 | `HUNT` | `src/hunt/hunt.tscn` | B | — |
-| `RESULT` | `src/ui/result/result.tscn` | systems | lê `Router.last_result`: resultado, lista de abates (tipo, kg, R$), bônus, total, lavoura %. `%ContinueButton` → `SHOP`; `%RetryButton` → `PREPARATION`; `%MenuButton` → `MAIN_MENU` |
+| `RESULT` | `src/ui/result/result.tscn` | systems | lê `Router.last_result`: resultado, lista de abates (tipo, kg, R$), bônus, total, lavoura %. `%ContinueButton` → `SHOP` (em sala: `LOBBY`); `%RetryButton` → `PREPARATION`; `%MenuButton` → `MAIN_MENU` |
 | `SHOP` | `src/ui/shop/shop.tscn` | systems | abas Armas/Equipamentos/Cães; `Buy_<id>`; `%NextHuntButton` → `PREPARATION`; `%BackButton` → `MAIN_MENU` |
 | `DONATE` | `src/ui/donate/donate.tscn` | systems | `Package_<id>`, `%PixCodeText` (LineEdit só leitura), `%CopyButton` (`DisplayServer.clipboard_set`), `%RedeemCodeEdit`, `%RedeemButton`, `%RedeemStatusLabel`, `%BackButton` → `MAIN_MENU` |
 | `SETTINGS` | `src/ui/settings/settings.tscn` | systems | contém `settings_panel.tscn`; `%BackButton` → `MAIN_MENU` |
 | `SETTINGS_PANEL` | `src/ui/settings/settings_panel.tscn` | systems | raiz `Control` com `signal closed`; `%CloseButton` emite `closed`; reutilizado na pausa |
+| `LOBBY` | `src/ui/lobby/lobby.tscn` | systems | estados Entrada / Conectando / Sala (abaixo); sai por `%BackButton` → `MAIN_MENU` e `%LeaveButton` (ambos chamam `Net.leave_room()`) |
+
+`LOBBY` (nós; `%` = nome único):
+
+| Estado do lobby | Nós |
+|---|---|
+| Entrada | `%NameEdit` (grava `player_name`), `%CreateRoomButton`, `%CodeEdit` (5 caracteres, maiúsculas), `%JoinButton`, `%BackButton` → `MAIN_MENU`; `%StatusLabel` mostra o erro |
+| Conectando | `%StatusLabel`, `%CancelButton` (sempre habilitado) |
+| Sala | `%MessageLabel`, `%RoomCodeLabel`, `%RoomLinkLabel`, `%CopyLinkButton` (Web: copia `Net.get_room_link()` e mostra "Link copiado!" por `Lobby.COPIED_FEEDBACK_S`; fora do Web copia o código), `Slot_N/{Swatch, Info/Name, Info/Detail, Role}` (Detail = arma e "direto"/"via servidor"), `%MapOption` e `Contract_<index>` (só anfitrião; só contratos desbloqueados dele), `%ContractLabel`, `%HintLabel`, `LoadoutPanel` (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`), `%ReadyButton` (cliente), `%StartButton` (anfitrião; habilita só com todos os clientes prontos), `%ShopButton`, `%LeaveButton` |
+
+`%BackButton` só na tela de entrada. `Lobby` tem `class_name`. O `Net` escolhe o contrato padrão; o lobby só
+chama `Net.host_select_contract` quando o anfitrião escolhe, e `_begin_hunt` usa `Net.get_hunt_seed()`. O
+cliente aperta `%ReadyButton` (o pronto automático da F2 acabou). Cão desabilitado com "Cães em rede: em
+breve." até a F7. `LoadoutPanel` (`src/ui/common/loadout_panel.gd`, `class_name LoadoutPanel`,
+`VBoxContainer`): `setup(root: Control, dog_locked_text: String = "")`, sinal `changed`; usado pela Preparação
+(mesmos nós `%`) e pelo lobby.
+
+Cada peer troca para `HUNT` ao receber `Net.room_state_changed(LOADING)`. Na tela de resultado em sala,
+"Voltar à sala" → `LOBBY` e `%MenuButton` chama `Net.leave_room()`.
+
+Link com `?sala=CODIGO`: o Boot (`boot.gd`), depois do toque inicial, lê `Net.take_url_room_code()`; se não
+vazio, vai ao `LOBBY` com o código como meta do `Router` (`Lobby.INVITE_META`; a API do `Router` não muda), e o
+lobby entra na sala sozinho com o nome salvo.
+
+Espectador (F6): `SpectatorCamera` (`src/player/spectator_camera.gd`, extends `Camera3D`; `begin`,
+`get_target_slot`, `get_candidates`, `switch_target`, `is_active`), criada pelo `Player` ao morrer se houver
+aliado vivo; ela emite `spectate_changed`. `Player.get_spectator()`, `Player.is_spectating()`. Troca de alvo
+por `fire`, `item_next` ou `weapon_swap`; respeita só o terreno. Minimapa: `ally_yaws`, `ally_down`,
+`center_color`, `is_in_view()` (arrays paralelos a `allies`/`ally_colors`); aliado vivo = seta na cor do slot,
+caído = X, fora do alcance = seta na borda. Bússola: losango na cor do slot (oco se caído). Jogador caído em
+rede pode abrir a pausa (P) para sair; no solo continua recusando. Loja aberta a partir da sala volta para o
+`LOBBY`. Na sala, dica fixa: "Quem cria a sala deve ter o melhor aparelho e conexão. Se o anfitrião sair do
+jogo, a partida termina para todos." Conexão ao servidor tem prazo `net.connect_timeout_s`; nenhuma tela
+bloqueia esperando rede. Até a fase dos cães, o lobby mostra "Cães ainda não entram no modo com amigos" e
+`dog` vai 255. Textos de erro: `Net.room_error` (§6.11). Resultado em rede: "Seus abates: 7 · Equipe: 21 de
+25", placar por jogador (`HuntResult.scoreboard`) e, para `DISCONNECTED`, "Conexão perdida: a caçada foi
+encerrada"; com `counts_for_progression == false`: "Este contrato ainda não estava liberado para você: os
+prêmios foram pagos, mas o progresso não avança."
 
 O que persiste entre cenas: apenas autoloads (`Profile` com save, `Router` com `selected_map_id`,
 `selected_contract_index`, `pending_request`, `last_result`; `InputSetup`; `Sfx` com loops — o B chama
-`Sfx.stop_all_loops()` ao sair da caçada, em `_exit_tree`). Nada de nós órfãos entre cenas.
+`Sfx.stop_all_loops()` ao sair da caçada, em `_exit_tree`; `Net` com a sala e os enlaces). Nada de nós órfãos
+entre cenas.
 
 Camadas de `CanvasLayer`: HUD 10, toque 11, pausa 20, carregamento 30, aviso de orientação 100.
 
@@ -1462,10 +1818,18 @@ Todo teste que mexe em perfil chama primeiro `Profile.set_save_path("user://test
 
 | Cena | Cobre |
 |---|---|
-| `tests/check_scripts.tscn` | carrega todo `.gd` em `res://src`, `res://assets`, `res://tests` (`ResourceLoader.load` + `GDScript.can_instantiate()`), carrega todo `.tscn` como `PackedScene` (sem instanciar `hunt.tscn`), instancia e libera cada cena de `assets/`; confere que os 6 autoloads existem e têm todos os métodos da §6 (`has_method`) e todos os sinais de `GameEvents` da §5 (`has_signal`). |
-| `tests/unit_tests.tscn` | `Data` (sem erros; ids referenciados existem; bandos 3–6 ou 1; soma ≤ `max_alive_boars`; todo contrato de mapa disponível tem ≥ 1 grupo), `Wallet`, `Inventory`, `Shop` (sem saldo, já possui, máximo, ouro), `RewardCalculator` (exemplo da §9.6 = 1782), `Progression`, `SaveService` (arquivo corrompido, vazio, versão antiga, tipos errados, backup), `PixBrCode` (CRC "123456789" = 0x29B1; estrutura dos campos; CRC final confere), `RedeemCode` (gera/valida/rejeita alterado/rejeita reuso via `DonationService`), `HuntResult`/`HitInfo`, `BoarVisualBase.scale_for_weight`, **contrato de assets** (cada caminho da §7: carrega, raiz estende a base, filhos obrigatórios, chama cada método da API sem erro, contagem de triângulos ≤ orçamento; flora: `build_mesh` de cada id ≠ null), `Heightmap` (determinismo por seed; bilinear em pontos da grade). |
+| `tests/check_scripts.tscn` | carrega todo `.gd` em `res://src`, `res://assets`, `res://tests` (`ResourceLoader.load` + `GDScript.can_instantiate()`), carrega todo `.tscn` como `PackedScene` (sem instanciar `hunt.tscn`), instancia e libera cada cena de `assets/`; confere que os 7 autoloads (incluindo `Net`) existem e têm todos os métodos da §6 (`has_method`) e todos os sinais de `GameEvents` da §5, inclusive os 5 do cooperativo (`has_signal`); confere a regra de camadas de N (§2). |
+| `tests/unit_tests.tscn` | `Data` (sem erros; ids referenciados existem; bandos 3–6 ou 1; soma ≤ `max_alive_boars`; todo contrato de mapa disponível tem ≥ 1 grupo), `Wallet`, `Inventory`, `Shop` (sem saldo, já possui, máximo, ouro), `RewardCalculator` (exemplo da §9.6 = 1782), `Progression`, `SaveService` (arquivo corrompido, vazio, versão antiga, tipos errados, backup), `PixBrCode` (CRC "123456789" = 0x29B1; estrutura dos campos; CRC final confere), `RedeemCode` (gera/valida/rejeita alterado/rejeita reuso via `DonationService`), `HuntResult`/`HitInfo`, `BoarVisualBase.scale_for_weight`, **contrato de assets** (cada caminho da §7: carrega, raiz estende a base, filhos obrigatórios, chama cada método da API sem erro, contagem de triângulos ≤ orçamento; flora: `build_mesh` de cada id ≠ null), `Heightmap` (determinismo por seed; bilinear em pontos da grade), `test_net.gd` (`NetCodec`, enlace com `NetLoopback` com perda/reordenação, réplica, `scale_groups`, economia em rede). |
 | `tests/flow_test.tscn` | Boot → `%StartButton` → menu → `%PlayButton` → `Map_mato_grosso` → `Contract_0` + `%StartHuntButton` → espera `GameEvents.hunt_started` → `world.debug_force_end(HuntResult.Outcome.VICTORY)` → espera cena `RESULT` → confere `Profile.get_money()` aumentou e contrato 1 desbloqueado → `%ContinueButton` → `SHOP` → `Buy_shotgun_12` com saldo forçado → `%NextHuntButton` → `PREPARATION`. Cliques via `button.pressed.emit()`; cenas encontradas com `get_tree().current_scene.get_node("%Nome")` ou `find_child("Map_mato_grosso", true, false)`. |
 | `tests/playthrough.tscn` | Instancia `ScenePaths.HUNT` como filho (com `route_on_finish = false` e `Router.set_pending_request(...)` com `rng_seed = 12345`), `Engine.time_scale = 4.0`. Cenário 1 (bot vence o contrato 0): para cada javali vivo, `bot_teleport` a 20 m dele (lado oposto à mata, Y via `world.get_height`), `bot_look_at(world.get_boar_zone_position(id, &"vital"))`, `bot_set_aim(true)`, `bot_fire()` respeitando cadência, `bot_reload()` com pente vazio; espera `VICTORY` com ≥ 1 abate por tiro real. Cenário 2 (bot parado, contrato 0): `DEFEAT_CROP` dentro do tempo (acelere com `debug_set_crop_health(5.0)` após 30 s). Cenário 3: `player.apply_damage(9999, ...)` → `DEFEAT_DEATH`. Cenário 4: dois javalis mortos no mesmo frame (`debug_kill_boar` duas vezes) não duplicam contagem nem `hunt_ended`. Checa: `hunt_ended` emitido exatamente 1 vez, `HuntResult` coerente (`total_money = money_from_kills + contract_bonus`, `kills.size() == killed`). |
+
+| `tests/net_test.tscn` | integração do cooperativo: servidor Bun local (`server/server.js`, porta livre) e processos Godot headless pelo relay, cada cenário em processo filho; todo filho encerra em qualquer caminho de saída. 9 cenários: `relay_normal`, `relay_host_drops`, `deadlines` (enlace e sala, `src/net/debug/net_e2e`; o par cliente `net_e2e_peer.gd` aperta `%ReadyButton`), `victory`, `crop`, `death`, `host_drop`, `host_freeze`, `client_drop` (caçada, `src/hunt/debug/net_hunt_e2e`). Sem Bun, cada cenário sai como SKIP explícito. Cães (N6) ficam para a F7. |
+| `tests/net_unit.tscn` | sandboxes de processo único (sem socket nem Bun), cada uma em processo filho com `--fixed-fps 60`: `net_roles`, `net_boars`, `net_flow`, `hud_net`, `link_selftest`; filho sem a linha-resumo é FAIL. `-- --only=a,b` seleciona. |
+| `tests/web/coop_probe.py` | dois Chrome exercitando WebRTC de verdade e o fallback (`?relay_only=1`, `?drop_ice=1`); obrigatório antes de publicar mudança em `src/net`. Na mesma máquina precisa de `--disable-features=WebRtcHideLocalIpsWithMdns` (senão o ICE não fecha). |
+
+Servidor de salas: `bun test` em `server/` (lógica neutra em `server/rooms.js`) e `server/check.js` contra Bun
+local e produção (`wrangler dev` não funciona em Bun: o Worker é verificado publicando e rodando
+`bun check.js <url de produção>`). Detalhe em `docs/multiplayer.md` §2.2 (A7).
 
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
@@ -1487,7 +1851,7 @@ resultado de renderização.
 | Terreno | 256 × 256 m; grade 129×129 (2 m); malha em 2×2 blocos de 64×64 quads = 32 768 tris, 4 draw calls; colisão HeightMapShape3D 257×257 |
 | Flora | só `MultiMeshInstance3D`, blocos de 128 m (2×2) por id; grama `visibility_range_end` 60 m, arbusto 90 m, árvores = view distance; densidade × `flora_density` |
 | Lavoura | patches 2×2 m em `MultiMesh` por blocos de 32×32 m, 2 multimeshes por bloco (saudável/comida; trocar = escalar instância a 0); `visibility_range_end` 110 m; ≈ 30 draw calls |
-| Javalis simultâneos | ≤ 18 vivos (+ carcaças); ≤ 6 MeshInstance por javali, pernas somem a 40 m |
+| Javalis simultâneos | ≤ 26 vivos (+ carcaças); ≤ 6 MeshInstance por javali, pernas somem a 40 m |
 | Física | 1 `CharacterBody3D`; ≤ 200 shapes estáticas; 72 `HitZone`; ≤ 100 raios de visão/s; 0 corpos de IA |
 | Sombras | 1 `DirectionalLight3D`; desligada em "low"; 30/45 m em medium/high; mapa 2048, filtro hard; flora/lavoura/arma sem sombra |
 | Luzes extras | nenhuma |
@@ -1498,6 +1862,8 @@ resultado de renderização.
 | Carregar a caçada | ≤ 3 s; nenhuma etapa > 700 ms |
 | Memória | alvo ≤ 300 MB no total da aba |
 | Alocação | nada de `Array`/`Dictionary` novos por frame em laços de IA; HUD/minimapa a 10 Hz |
+| Aliados (cooperativo) | ≤ 3 `RemoteHunter`, ≤ 600 tris e ≤ 10 `MeshInstance3D` cada, + 1 `Label3D`; draw calls: pior caso ≤ 230 com 3 aliados |
+| Rede (cooperativo) | download do cliente ≤ 5 kB/s; quadro de estado ≤ 1100 B (`net.max_frame_bytes`); nenhuma alocação por tick além de um `PackedByteArray` por quadro; raios de visão ≤ 130/s |
 
 ### 13.2 Riscos conhecidos da Web/iOS e mitigação
 - **Áudio só após gesto:** o Boot exige toque/clique; `Sfx.unlock_audio()` dentro do handler. iOS no modo
@@ -1518,6 +1884,18 @@ resultado de renderização.
 - **JSON no export:** `include_filter="data/*.json"` obrigatório (§3.2).
 - **Resolução 3D:** `scaling_3d_scale` no Compatibility usa bilinear; se não surtir efeito numa versão, a
   qualidade "low" ainda reduz sombras e flora.
+- **Cooperativo — aba do anfitrião em segundo plano** (ligação, troca de app, tela apagada): a simulação
+  congela para todos e o iOS derruba o socket em segundos. Mitigação: faixa de aviso (`host_stall_warn_s`) +
+  prazo de `host_timeout_s` + fim com abates pagos; Wake Lock (`navigator.wakeLock.request("screen")`, falha
+  silenciosa) durante a caçada em rede; dica no lobby para o anfitrião ser o melhor aparelho; migração de
+  anfitrião fica fora da v1.
+- **Cooperativo — NAT simétrico em 4G:** o ICE não fecha. Mitigação: o enlace nasce em relay pelo servidor de
+  salas e é promovido a WebRTC; sem TURN na v1.
+- **Cooperativo — cota diária do servidor de salas (plano gratuito):** esgotada, não se criam salas novas e
+  pares em relay caem até as 21h de Brasília; o solo nunca depende do servidor. Mitigação: uma mensagem por
+  tick por direção no relay (`relay_hz`), WebRTC como caminho normal, mensagem clara no lobby
+  (`server_unreachable`); saída futura: TURN gratuito do Cloudflare. Demais riscos (desempenho do anfitrião,
+  draw calls dos aliados, dessincronização de mundo, WebRTC só testável no Chrome): `docs/multiplayer.md` §8.
 
 ### 13.3 Riscos de integração (do contrato)
 - **R1 — Costura visual × gameplay do javali.** Escala por peso, orientação -Z, caixas de `HIT_ZONES` e
@@ -1540,7 +1918,8 @@ resultado de renderização.
 2. `src/core/*.gd` copiados **verbatim** do Apêndice A.
 3. Stubs dos autoloads com todas as assinaturas da §6 (Apêndice B: `Data` funcional; demais com os valores
    "stub" indicados): `src/systems/data_registry.gd`, `src/systems/profile.gd`, `src/systems/router.gd`,
-   `src/input/input_setup.gd`, `assets/audio/sfx_library.gd`.
+   `src/input/input_setup.gd`, `assets/audio/sfx_library.gd`; no cooperativo (F1), `src/net/net.gd` com o
+   stub offline de §6.11.
 4. `data/*.json` copiados verbatim da §9 (seed). A partir daí são do game-systems.
 5. Rodar `--import` e `check_scripts` (este último ainda não existe: basta abrir o projeto headless com
    `--quit` sem erros de parser).
@@ -1627,6 +2006,31 @@ Critérios de aceite: as 4 cenas existem, terminam sozinhas com código de saíd
 cada teste que falha imprime arquivo/condição. Testes que dependem de pacote ainda não entregue imprimem
 `SKIP` (exceto em `--strict`).
 
+### Pacote N — game-developer (rede do cooperativo)
+Arquivos: `src/net/net.gd` (autoload `Net`, §6.11), `net_session.gd`, `net_signaling.gd`, `net_link.gd`,
+`net_rtc.gd`, `net_loopback.gd`. Só referencia `src/core/*` e autoloads; troca de cena só via `Router`.
+Os pacotes A, B, systems e art-director também recebem tarefas do cooperativo (arquivos novos listados em
+§2, §6.8–§6.11 e §7.11; `src/ui/lobby/` e `loadout_panel.gd` são do game-systems; `server/` e `src/core/*` da
+coordenação; `tests/net/`, `tests/net_test.tscn`, `tests/unit/test_net.gd`, `tests/web/coop_probe.py` do
+qa-tester).
+
+### Fases do cooperativo e critérios de aceite
+Modelo: Sonnet por padrão; Fable onde indicado. Toda fase termina com as 4 suítes atuais passando sem mudança
+de resultado e é publicável (a entrada do menu é visível para todos desde a F6; antes só com `?mp=1`). Detalhe de arquivos por fase:
+`docs/multiplayer.md` §9.
+
+| Fase | Objetivo | Dono / modelo | Aceite |
+|---|---|---|---|
+| F0 — servidor de salas no ar | `wss://javali-salas.SUBDOMINIO.workers.dev/ws` cria sala, deixa entrar, repassa sinalização e relay. Nenhum código de jogo | coordenação (Sonnet; Fable se hibernação ou deploy derem trabalho) | `bun test` verde (criar, entrar, lista de peers, sala cheia, versão diferente, sala trancada, código em uso, `signal`, repasse binário, regra da estrela, anfitrião saiu, cada limite, e o mesmo roteiro com a lista de conexões recriada entre chamadas); `bun check.js` verde contra Bun local, `wrangler dev` e produção; origem errada recebe 403; `tools/wscheck.html` mostra "Sala criada" no celular; sala parada 30 s e retomada continua repassando |
+| F1 — contrato e esqueleto | o projeto compila com os tipos novos e o `Net` offline; nada muda para o jogador | coordenação (core, `project.godot`), game-systems (dados, save), qa-tester (testes), game-architect (contrato) | 4 suítes verdes; `check_scripts` confere o autoload `Net`, os 5 sinais e a regra de camadas de N; unidade: `Net.is_active() == false`, `Net.get_local_slot() == 0`, save antigo ganha `player_name = ""` sem mudar de versão |
+| F2 — dois navegadores se vendo andar (caminho crítico) | com `?mp=1`, um cria a sala, outro entra pelo código, o anfitrião inicia, os dois andam e se veem, por WebRTC; sem javalis para o cliente | N (Fable); A, B, systems, qa (Sonnet) | `net_test` verde (posição do caçador remoto a ≤ 0,5 m da real após 1 s parado; versão diferente recusada; quinto peer recusado; processos filhos encerrados em todo caminho de saída); `coop_probe.py`: `huntProbe.path == "rtc"` nos dois e `allies[0]` de B segue A a ≤ 1 m; unidade do enlace com loopback a 20% de perda e reordenação: eventos chegam todos e em ordem; medido o delta de `_process` depois de 5 s de aba congelada |
+| F3 — fallback de relay robusto | par cujo ICE não fecha joga igual; RTC que morre no meio não derruba o jogador | N (Fable), qa (Sonnet) | com `drop_ice=1`, `path == "relay"` depois de `ice_timeout_s` e o teste de andar passa; unidade: troca de caminho com 5 eventos não confirmados entrega os 5 uma vez, em ordem; um enlace em relay envia no máximo `relay_hz` mensagens por segundo por direção |
+| F4 — javalis replicados e tiro (caminho crítico) | os dois veem os mesmos javalis, atiram, veem abates e são investidos | B (Fable: IA dos javalis), A e qa (Sonnet) | N3: anfitrião + cliente no contrato 0 com seed fixa, bot do cliente mata ≥ 3 javalis atirando nas réplicas, `VICTORY` nos dois, soma dos abates = total, cada abate em um só resultado; snapshot → réplica com erro ≤ 1 cm; hash das posições de tronco igual em low/medium/high com `sync_layout`; `playthrough` sem mudança; banda ≤ 5 kB/s de download por cliente no contrato 5; fps do anfitrião em desktop ≥ 60 com 26 javalis e 3 remotos |
+| F5 — lavoura, itens, fim de caçada e economia | uma caçada cooperativa completa, do lobby ao resultado, com dinheiro certo | B (Fable: fluxo da caçada), A, N, systems, qa (Sonnet) | N4: cliente termina `DISCONNECTED` em ≤ `host_timeout_s` + 2 s com os próprios abates creditados e sem progressão; N5: anfitrião segue e vence sozinho; `apply_hunt_result` com `counts_for_progression = false` credita dinheiro e não desbloqueia; `scale_groups` dá 14 e 23 para o contrato 1 com 2 e 4 jogadores; canteiros comidos iguais nos dois peers |
+| F6 — lobby completo, aliados no HUD, espectador: beta (concluída em 2026-11-14 (sessão manual com 3 aparelhos reais ainda pendente)) | "Jogar com amigos (beta)" visível para todos | systems, A, art-director, qa (Sonnet) | `flow_test` sem mudança; abrir `?sala=CODE` entra na sala sem digitar; servidor inacessível → `server_unreachable` em ≤ 9 s e "Voltar" funciona; morrer com aliado vivo mostra a câmera de espectador e "Assistindo: <Nome>"; sessão manual de 3 jogadores (PC, Android, iPhone) relatada; `mobile_probe.py` verde |
+| F7 — cães em rede | cada jogador leva o seu cão e manda "Pega!"/"Volta!" | B, qa (Sonnet) | N6: comando do cliente muda o estado só do cão dele; sinais de cão só no HUD do dono; marcação aparece para os dois; solo sem mudança |
+| F8 — robustez móvel | cair e voltar na mesma página sem perder a caçada | N e B (Fable), qa (Sonnet) | derrubar o WebSocket do cliente por 5 s: ele volta no mesmo slot com os mesmos javalis vivos e o mesmo resultado parcial; relatório de fps e banda em celular intermediário como anfitrião de 4 |
+
 ---
 
 ## Apêndice A — `src/core/` (verbatim; coordenador copia, ninguém edita)
@@ -1679,6 +2083,13 @@ signal loadout_changed()
 signal progression_changed()
 signal settings_changed(key: String, value: Variant)
 signal touch_mode_changed(is_touch: bool)
+
+# Co-op (see docs/multiplayer.md)
+signal hunter_joined(slot: int, display_name: String)
+signal hunter_left(slot: int)
+signal hunter_died(slot: int)
+signal spectate_changed(slot: int)
+signal net_stall_changed(stalled: bool)
 
 @warning_ignore_restore("unused_signal")
 ```
@@ -1790,14 +2201,17 @@ const RESULT: String = "res://src/ui/result/result.tscn"
 const DONATE: String = "res://src/ui/donate/donate.tscn"
 const SETTINGS: String = "res://src/ui/settings/settings.tscn"
 const SETTINGS_PANEL: String = "res://src/ui/settings/settings_panel.tscn"
+const LOBBY: String = "res://src/ui/lobby/lobby.tscn"
 const HUNT: String = "res://src/hunt/hunt.tscn"
 const PLAYER: String = "res://src/player/player.tscn"
+const REMOTE_HUNTER: String = "res://src/player/remote_hunter.tscn"
 const HUD: String = "res://src/hud/hud.tscn"
 const BOAR: String = "res://src/boars/boar.tscn"
 const DOG: String = "res://src/dogs/dog.tscn"
 
 const BOAR_VISUAL: String = "res://assets/models/boar/boar_visual.tscn"
 const DOG_VISUAL: String = "res://assets/models/dog/dog_visual.tscn"
+const HUNTER_VISUAL: String = "res://assets/models/hunter/hunter_visual.tscn"
 const FLORA_LIBRARY: String = "res://assets/models/flora/flora_library.gd"
 const TERRAIN_MATERIAL: String = "res://assets/materials/terrain.tres"
 const WATER_MATERIAL: String = "res://assets/materials/water.tres"
@@ -1892,6 +2306,7 @@ var direction: Vector3 = Vector3.FORWARD
 var distance_m: float = 0.0
 var zone: StringName = &""
 var target_id: int = -1
+var shooter_slot: int = 0            # co-op: slot of the hunter who fired (0 in solo)
 ```
 
 ### `src/core/hit_zone.gd`
@@ -1938,6 +2353,7 @@ var clean_kill: bool = false
 var reward_money: int = 0
 var position: Vector3 = Vector3.ZERO
 var time_s: float = 0.0
+var killer_slot: int = 0             # co-op: slot of the hunter credited with the kill (0 in solo)
 
 
 func to_dict() -> Dictionary:
@@ -1962,6 +2378,7 @@ var item_ids: Array[StringName] = []                  # equipped equipment ids (
 var item_counts: Dictionary = {}                      # StringName -> int (consumables: carried; others: 1)
 var quality: StringName = &""                         # &"" = resolve from settings
 var rng_seed: int = 0                                 # 0 = randomize
+var player_count: int = 1                             # co-op: hunters in the hunt (1 = solo)
 
 
 static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0) -> HuntRequest:
@@ -1985,7 +2402,7 @@ class_name HuntResult
 extends RefCounted
 ## What the hunt returns. Applied once by Profile.apply_hunt_result.
 
-enum Outcome { VICTORY, DEFEAT_CROP, DEFEAT_DEATH, ABANDONED }
+enum Outcome { VICTORY, DEFEAT_CROP, DEFEAT_DEATH, ABANDONED, DISCONNECTED }
 
 var outcome: Outcome = Outcome.ABANDONED
 var map_id: StringName = &""
@@ -2000,6 +2417,11 @@ var duration_s: float = 0.0
 var shots_fired: int = 0
 var shots_hit: int = 0
 var consumables_used: Dictionary = {}   # StringName -> int
+# Co-op. kills/money_from_kills = only the local player's; boars_total = the team's.
+var counts_for_progression: bool = true # false: rewards are paid but the contract is not marked won/unlocked
+var player_count: int = 1
+var team_kills: int = 0
+var scoreboard: Array[Dictionary] = []  # {slot, name, kills, money}; empty in solo
 
 
 func is_victory() -> bool:
@@ -2026,8 +2448,34 @@ extends CharacterBody3D
 ## Contract hunter <-> hunt. Package A implements Player (extends this). Package B uses only this API.
 ## Origin = feet. Forward = -Z (yaw on this node).
 
+var slot: int = 0
+
 
 func setup(_request: HuntRequest, _world: HuntWorld) -> void:
+	pass
+
+
+func setup_remote(_slot: int, _display_name: String, _weapon_id: StringName, _world: HuntWorld) -> void:
+	pass
+
+
+func is_local() -> bool:      # false for RemoteHunter
+	return true
+
+
+func is_present() -> bool:    # false while a remote hunter has been silent for net.peer_absent_s: AI ignores it
+	return true
+
+
+func get_display_name() -> String:
+	return ""
+
+
+func net_write_state(_out: StreamPeerBuffer) -> void:   # writes exactly NetCodec.HUNTER_STATE_BYTES
+	pass
+
+
+func net_apply_state(_inp: StreamPeerBuffer) -> void:   # reads exactly NetCodec.HUNTER_STATE_BYTES
 	pass
 
 
@@ -2219,8 +2667,24 @@ func get_dog_health_pct() -> float:
 	return 0.0
 
 
-func get_player() -> PlayerBase:
+func get_player() -> PlayerBase:   # the hunter of THIS machine
 	return null
+
+
+func get_hunters() -> Array[PlayerBase]:      # every hunter in the world, local first. Solo: [get_player()]
+	var out: Array[PlayerBase] = []
+	var p: PlayerBase = get_player()
+	if p != null:
+		out.append(p)
+	return out
+
+
+func get_hunter(_slot: int) -> PlayerBase:    # null if that slot is not in the hunt
+	return get_player()
+
+
+func get_local_slot() -> int:
+	return 0
 
 
 func get_elapsed_s() -> float:
@@ -2245,6 +2709,39 @@ func debug_set_crop_health(_pct: float) -> void:
 
 
 func debug_force_end(_outcome: HuntResult.Outcome) -> void:
+	pass
+
+
+# --- Net seam: bodies are record payloads of docs/multiplayer.md section 4 ---
+func net_write_snapshot(_out: StreamPeerBuffer) -> void:      # host: body of H_SNAPSHOT
+	pass
+
+
+func net_apply_snapshot(_inp: StreamPeerBuffer) -> void:      # client
+	pass
+
+
+func net_take_events(_out: StreamPeerBuffer) -> void:         # host: appends queued EV_* records (type, len, body)
+	pass
+
+
+func net_apply_event(_type: int, _inp: StreamPeerBuffer, _length: int) -> void:   # client
+	pass
+
+
+func net_take_claims(_out: StreamPeerBuffer) -> void:         # client: appends queued C_* event records
+	pass
+
+
+func net_apply_claim(_slot: int, _type: int, _inp: StreamPeerBuffer, _length: int) -> void:   # host
+	pass
+
+
+func net_peer_left(_slot: int) -> void:                       # that hunter (and its dog) leaves the world
+	pass
+
+
+func net_connection_lost() -> void:                           # client: ends DISCONNECTED; host: every remote leaves
 	pass
 ```
 
@@ -2374,6 +2871,221 @@ static func create_fallback() -> DogVisualBase:
 	mouth.position = Vector3(0.0, 0.5, -0.45)
 	v.add_child(mouth)
 	return v
+```
+
+### `src/core/hunter_visual_base.gd`
+```gdscript
+class_name HunterVisualBase
+extends Node3D
+## Visual-only third-person hunter: how a player is seen by the other players in multiplayer.
+## Origin on the ground between the feet, forward -Z. Scale 1 = 1.78 m tall standing.
+## Gameplay owns the root transform (position + yaw). The asset animates children only.
+## Required children: Muzzle (Marker3D, follows the weapon tip), NameAnchor (Marker3D above the head).
+
+const SLOT_COUNT: int = 4
+
+## Identity color of each player slot. Single source for the model, name tag, minimap and lobby.
+## Chosen to stand out against cerrado greens/browns and to stay apart from damage red.
+const SLOT_COLORS: Array[Color] = [
+	Color(0.93, 0.47, 0.13),   # 0 orange
+	Color(0.20, 0.56, 0.90),   # 1 blue
+	Color(0.96, 0.80, 0.18),   # 2 yellow
+	Color(0.74, 0.36, 0.84),   # 3 purple
+]
+
+
+static func slot_color(slot: int) -> Color:
+	return SLOT_COLORS[posmod(slot, SLOT_COUNT)]
+
+
+var _fallback_body: MeshInstance3D = null   # set only by create_fallback()
+
+
+func setup(slot: int, _weapon_id: StringName) -> void:   # cosmetic; called once before entering the tree
+	if _fallback_body != null:   # fallback capsule: paint with the slot color
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color = slot_color(slot)
+		_fallback_body.material_override = mat
+
+
+func set_weapon(_weapon_id: StringName) -> void:   # &"" = unarmed
+	pass
+
+
+func set_locomotion(_speed_mps: float) -> void:   # 0 = idle; called every frame
+	pass
+
+
+func set_crouching(_on: bool) -> void:
+	pass
+
+
+func set_aiming(_on: bool) -> void:   # weapon shouldered vs. carried low
+	pass
+
+
+func set_look_pitch(_pitch_rad: float) -> void:   # positive = looking up; bends torso/weapon
+	pass
+
+
+func play_fire() -> void:   # recoil kick + muzzle flash
+	pass
+
+
+func play_reload(_duration_s: float) -> void:
+	pass
+
+
+func play_hit() -> void:   # flinch when damaged
+	pass
+
+
+func play_death(_instant: bool = false) -> void:   # falls and freezes; instant = born fallen; ignores later calls
+	pass
+
+
+func get_muzzle() -> Node3D:
+	return get_node_or_null(^"Muzzle") as Node3D
+
+
+func get_name_anchor() -> Node3D:
+	return get_node_or_null(^"NameAnchor") as Node3D
+
+
+static func create_fallback() -> HunterVisualBase:
+	var v: HunterVisualBase = HunterVisualBase.new()
+	v.name = "HunterVisualFallback"
+	var body: MeshInstance3D = MeshInstance3D.new()
+	var capsule: CapsuleMesh = CapsuleMesh.new()
+	capsule.radius = 0.3
+	capsule.height = 1.78
+	body.mesh = capsule
+	body.position = Vector3(0.0, 0.89, 0.0)
+	v.add_child(body)
+	v._fallback_body = body
+	var muzzle: Marker3D = Marker3D.new()
+	muzzle.name = "Muzzle"
+	muzzle.position = Vector3(0.2, 1.35, -0.9)
+	v.add_child(muzzle)
+	var name_anchor: Marker3D = Marker3D.new()
+	name_anchor.name = "NameAnchor"
+	name_anchor.position = Vector3(0.0, 2.05, 0.0)
+	v.add_child(name_anchor)
+	return v
+```
+
+### `src/core/net_codec.gd`
+```gdscript
+class_name NetCodec
+extends RefCounted
+## Wire constants and quantization shared by packages A, B and N. See docs/multiplayer.md section 4.
+
+const PROTOCOL_VERSION: int = 1
+const LANE_STATE: int = 0
+const LANE_EVENT: int = 1
+const FRAME_HEADER_BYTES: int = 5      # lane u8, seq u16, ack u16
+const RECORD_HEADER_BYTES: int = 3     # type u8, len u16
+const HUNTER_STATE_BYTES: int = 14
+const NO_SLOT: int = 255
+
+# Link / lobby (event lane)
+const L_READY: int = 0x10
+const L_LOBBY: int = 0x11
+const L_START: int = 0x12
+const L_LOADED: int = 0x13
+const L_GO: int = 0x14
+const L_NEED_RELAY: int = 0x15
+# Host -> client
+const H_SNAPSHOT: int = 0x20           # state lane
+const EV_BOAR_SPAWN: int = 0x21
+const EV_BOAR_HIT: int = 0x22
+const EV_BOAR_ATTACK: int = 0x23
+const EV_BOAR_DEATH: int = 0x24
+const EV_CROP_EATEN: int = 0x25
+const EV_BAIT: int = 0x26
+const EV_DOG_MARK: int = 0x27
+const EV_DOG_CMD: int = 0x28
+const EV_MESSAGE: int = 0x29
+const EV_HUNT_END: int = 0x2A
+const EV_FULL_SYNC: int = 0x2B         # reserved (F8)
+# Client -> host
+const C_STATE: int = 0x40              # state lane
+const C_SHOT: int = 0x41
+const C_CHARGE_HIT: int = 0x42
+const C_BAIT: int = 0x43
+const C_DOG_CMD: int = 0x44
+
+# Hunter state flags
+const HF_CROUCH: int = 1
+const HF_AIM: int = 2
+const HF_SPRINT: int = 4
+const HF_ALIVE: int = 8
+const HF_RELOAD: int = 16
+const HF_UNARMED: int = 32             # binoculars / item in hand
+
+const BOAR_STATES: Array[StringName] = [&"wander", &"to_crop", &"eat", &"to_bait", &"alert", &"flee",
+	&"scrape", &"charge", &"recover", &"bayed", &"held", &"dead"]
+const DOG_STATES: Array[StringName] = [&"follow", &"seek", &"point", &"bay", &"hold", &"retreat", &"return"]
+const ZONES: Array[StringName] = [&"head", &"vital", &"body", &"rear", &"dog"]
+
+
+static func make_shot_id(slot: int, counter: int) -> int:
+	return (slot << 24) | (counter & 0xFFFFFF)
+
+
+static func shot_slot(shot_id: int) -> int:
+	return (shot_id >> 24) & 0xFF
+
+
+static func put_xz(out: StreamPeerBuffer, rect: Rect2, x: float, z: float) -> void:
+	out.put_u16(clampi(roundi((x - rect.position.x) / rect.size.x * 65535.0), 0, 65535))
+	out.put_u16(clampi(roundi((z - rect.position.y) / rect.size.y * 65535.0), 0, 65535))
+
+
+static func get_xz(inp: StreamPeerBuffer, rect: Rect2) -> Vector2:
+	var qx: int = inp.get_u16()
+	var qz: int = inp.get_u16()
+	return Vector2(rect.position.x + float(qx) / 65535.0 * rect.size.x,
+		rect.position.y + float(qz) / 65535.0 * rect.size.y)
+
+
+static func angle_to_u8(rad: float) -> int:
+	return posmod(roundi(rad / TAU * 256.0), 256)
+
+
+static func u8_to_angle(q: int) -> float:
+	return float(q) / 256.0 * TAU
+
+
+static func angle_to_u16(rad: float) -> int:
+	return posmod(roundi(rad / TAU * 65536.0), 65536)
+
+
+static func u16_to_angle(q: int) -> float:
+	return float(q) / 65536.0 * TAU
+
+
+## Wrap-aware "a is newer than b" for u16 sequence numbers.
+static func seq_newer(a: int, b: int) -> bool:
+	return ((a - b) & 0xFFFF) != 0 and ((a - b) & 0xFFFF) < 0x8000
+```
+Com mapa de 256 m, posição XZ tem passo de 4 mm; `u8` de ângulo, 1,4°; `u16`, 0,0055°. Todo inteiro em
+little-endian (padrão do `StreamPeerBuffer`). Índices de arma, cão, tipo de javali e mapa são a posição do
+id em `Data.get_*_ids()` (dados idênticos entre peers, garantidos pela checagem de versão); 255 = nenhum.
+
+### `src/core/net_peer_info.gd`
+```gdscript
+class_name NetPeerInfo
+extends RefCounted
+
+var slot: int = 0
+var display_name: String = ""
+var is_host: bool = false
+var ready: bool = false
+var loaded: bool = false
+var weapon_id: StringName = &""     # weapon in slot 0 of the loadout (lobby display, first visual)
+var dog_id: StringName = &""
+var path: int = 0                   # Net.Path of the link (host: link to that peer; client: link to host)
 ```
 
 ### `src/core/weapon_view_base.gd`

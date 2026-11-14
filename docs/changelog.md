@@ -3,6 +3,32 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.0 — 14/11/2026
+
+**Jogar com amigos (beta): caçada cooperativa de 2 a 4 jogadores.**
+
+O que mudou para o jogador:
+
+- Botão novo no menu, "Jogar com amigos (beta)". Um jogador cria a sala e recebe um código de 5 letras e
+  um link de convite; os amigos entram pelo código ou abrindo o link. Cada um escolhe o próprio equipamento
+  e aperta "Pronto"; o anfitrião escolhe o mapa e o contrato e inicia.
+- Todos caçam os mesmos javalis. Cada abate paga quem deu o tiro; o bônus do contrato é pago cheio a cada
+  jogador. O contrato só avança para quem já o tinha liberado.
+- Mais jogadores, mais javalis: ×1,5 com dois, ×2 com três, ×2,5 com quatro.
+- Derrota se a lavoura acabar ou se todos os caçadores caírem. Quem cai assiste a um aliado até o fim.
+- Aliados aparecem no mapa com a cor de cada um (laranja, azul, amarelo, roxo), no minimapa e na bússola.
+- Se o anfitrião sair, a caçada termina para todos e os abates de cada um são pagos.
+- Cães ainda não vão para a caçada com amigos (em breve). O modo solo não mudou.
+
+O que mudou no projeto:
+
+- Servidor de salas em `server/` (Cloudflare Workers + Durable Objects, plano gratuito), publicado em
+  `wss://javali-salas.acpw01.workers.dev/ws`. Os jogadores se conectam direto por WebRTC; quando não dá,
+  o tráfego passa pelo servidor.
+- Autoload novo `Net` (`src/net/`), configuração em `data/net.json`, bloco `coop` em `data/game.json`.
+- Plano e protocolo em `docs/multiplayer.md`; contrato 1.1 em `docs/arquitetura.md`.
+- Suítes novas: `tests/net_test.tscn`, `tests/net_unit.tscn`, `tests/web/coop_probe.py`.
+
 ## 0.3.4 — 12/11/2026
 
 **Drone batedor vira item básico e todo jogador ganha 3.**

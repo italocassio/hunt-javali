@@ -34,6 +34,13 @@ signal dog_health_changed(pct: float)
 signal dog_marked_boar(position: Vector3, duration_s: float)
 signal dog_command_executed(command: StringName)
 
+# Multiplayer (docs/multiplayer.md section 3.5)
+signal hunter_joined(slot: int, display_name: String)
+signal hunter_left(slot: int)
+signal hunter_died(slot: int)
+signal spectate_changed(slot: int)
+signal net_stall_changed(stalled: bool)
+
 # HUD
 signal hud_message_requested(text: String, duration_s: float)
 

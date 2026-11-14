@@ -347,3 +347,103 @@ func test_profile_kill_reward_unknown_type() -> void:
 	fresh_profile()
 	eq(Profile.kill_reward(&"nao_existe", 100.0, Ids.ZONE_BODY, false, &"mato_grosso", 0), 0, "tipo desconhecido")
 	eq(Profile.contract_bonus(&"mato_grosso", 0, 100.0), int(Data.get_contract(&"mato_grosso", 0)["bonus_money"]), "bonus pelo Profile")
+
+
+# --- Network hunts: counts_for_progression and DISCONNECTED (docs/multiplayer.md sections 3.7 and 6.7) ---
+# All of these use the temporary save of fresh_profile(), never user://save.json.
+
+func _net_result(outcome: HuntResult.Outcome, contract_index: int, counts: bool, money: int = 500) -> HuntResult:
+	var r: HuntResult = HuntResult.new()
+	r.outcome = outcome
+	r.map_id = &"mato_grosso"
+	r.contract_index = contract_index
+	r.total_money = money
+	r.crop_health_pct = 70.0
+	r.counts_for_progression = counts
+	r.player_count = 2
+	var k: KillInfo = KillInfo.new()
+	k.weight_kg = 90.0
+	r.kills.append(k)
+	return r
+
+
+func test_net_win_without_progression_pays_but_does_not_unlock_or_complete() -> void:
+	fresh_profile()
+	var progress: Dictionary = record_signal(GameEvents.progression_changed)
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(_net_result(HuntResult.Outcome.VICTORY, 0, false, 640))
+	eq(Profile.get_money(), money0 + 640, "vitoria em rede paga o total")
+	ok(not Profile.is_contract_unlocked(&"mato_grosso", 1), "nao libera o contrato 1")
+	ok(not Profile.is_contract_completed(&"mato_grosso", 0), "nao conclui o contrato 0")
+	eq(Profile.get_unlocked_contract_count(&"mato_grosso"), 1, "so o primeiro continua liberado")
+	eq(Profile.get_best_crop_pct(&"mato_grosso", 0), -1.0, "sem recorde de lavoura")
+	eq(int(Profile.get_stats()["hunts_won"]), 1, "a vitoria conta nas estatisticas")
+	eq(int(Profile.get_stats()["hunts_played"]), 1, "hunts_played")
+	eq(int(Profile.get_stats()["boars_killed"]), 1, "boars_killed")
+	eq(progress["count"], 0, "progression_changed nao e emitido")
+	eq(wallet["count"], 1, "wallet_changed emitido uma vez")
+	var raw: Dictionary = SaveService.read("user://test_save.json")
+	eq(int(raw.get("wallet", {}).get("money", -1)), money0 + 640, "dinheiro gravado em disco")
+
+
+func test_net_win_with_progression_unlocks() -> void:
+	fresh_profile()
+	var progress: Dictionary = record_signal(GameEvents.progression_changed)
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(_net_result(HuntResult.Outcome.VICTORY, 0, true, 640))
+	eq(Profile.get_money(), money0 + 640, "paga")
+	ok(Profile.is_contract_completed(&"mato_grosso", 0), "contrato 0 concluido")
+	ok(Profile.is_contract_unlocked(&"mato_grosso", 1), "contrato 1 liberado")
+	eq(Profile.get_best_crop_pct(&"mato_grosso", 0), 70.0, "recorde de lavoura")
+	eq(progress["count"], 1, "progression_changed emitido uma vez")
+	eq(int(Profile.get_stats()["hunts_won"]), 1, "hunts_won")
+
+
+func test_net_win_without_progression_then_with_progression() -> void:
+	## A friend's win on a locked contract must not "use up" the unlock: the player's own later win still counts.
+	fresh_profile()
+	Profile.apply_hunt_result(_net_result(HuntResult.Outcome.VICTORY, 1, false))
+	ok(not Profile.is_contract_completed(&"mato_grosso", 1), "contrato 1 (trancado) nao conclui em rede sem progressao")
+	eq(Profile.get_unlocked_contract_count(&"mato_grosso"), 1, "continua com 1 liberado")
+	Profile.apply_hunt_result(_net_result(HuntResult.Outcome.VICTORY, 0, true))
+	eq(Profile.get_unlocked_contract_count(&"mato_grosso"), 2, "a vitoria propria libera o 1")
+	eq(int(Profile.get_stats()["hunts_won"]), 2, "as duas vitorias contam")
+
+
+func test_net_disconnected_pays_but_is_not_a_win() -> void:
+	fresh_profile()
+	var money0: int = Profile.get_money()
+	# counts_for_progression stays true here (the default): DISCONNECTED must not unlock anything by itself.
+	var r: HuntResult = _net_result(HuntResult.Outcome.DISCONNECTED, 0, true, 275)
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 275, "DISCONNECTED paga os abates")
+	eq(int(Profile.get_stats()["hunts_won"]), 0, "nao incrementa hunts_won")
+	eq(int(Profile.get_stats()["hunts_played"]), 1, "conta como partida jogada")
+	ok(not Profile.is_contract_completed(&"mato_grosso", 0), "nao conclui")
+	ok(not Profile.is_contract_unlocked(&"mato_grosso", 1), "nao libera")
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 275, "mesmo resultado aplicado 2x nao paga de novo")
+	eq(int(Profile.get_stats()["hunts_played"]), 1, "nem conta 2x")
+
+
+func test_net_other_outcomes_pay_and_do_not_progress() -> void:
+	fresh_profile()
+	for outcome: HuntResult.Outcome in [HuntResult.Outcome.DEFEAT_CROP, HuntResult.Outcome.DEFEAT_DEATH, HuntResult.Outcome.ABANDONED]:
+		var before: int = Profile.get_money()
+		Profile.apply_hunt_result(_net_result(outcome, 0, true, 90))
+		eq(Profile.get_money(), before + 90, "%s paga os abates" % HuntResult.Outcome.keys()[outcome])
+	ok(not Profile.is_contract_completed(&"mato_grosso", 0), "nenhuma derrota conclui")
+	eq(int(Profile.get_stats()["hunts_won"]), 0, "nenhuma derrota conta vitoria")
+	eq(int(Profile.get_stats()["hunts_played"]), 3, "tres partidas")
+
+
+func test_net_result_hostile_values() -> void:
+	## Negative money and a junk scoreboard coming out of a network hunt cannot debit or crash the profile.
+	fresh_profile()
+	var r: HuntResult = _net_result(HuntResult.Outcome.DISCONNECTED, 0, false, -900)
+	r.scoreboard = [{"slot": 3, "name": "X", "kills": -1, "money": -5}]
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0, "total_money negativo nao debita")
+	eq(int(Profile.get_stats()["hunts_played"]), 1, "ainda conta a partida")

@@ -118,7 +118,8 @@ func fire(cam: Camera3D, aim_t: float, move_frac: float, exclude: Array[RID], vf
 	_cooldown_s = get_def_float("fire_interval_s")
 	if get_def_float("cycle_s") > 0.0:
 		_cycle_delay_left = CYCLE_DELAY_S
-	var shot_id: int = _next_shot_id
+	var shooter_slot: int = Net.get_local_slot()
+	var shot_id: int = NetCodec.make_shot_id(shooter_slot, _next_shot_id)
 	_next_shot_id += 1
 	var xf: Transform3D = cam.global_transform
 	var forward: Vector3 = -xf.basis.z
@@ -199,6 +200,7 @@ func _resolve_pellet(space: PhysicsDirectSpaceState3D, origin: Vector3, dir: Vec
 	if collider is HitZone:
 		var info: HitInfo = HitInfo.new()
 		info.shot_id = shot_id
+		info.shooter_slot = NetCodec.shot_slot(shot_id)
 		info.weapon_id = weapon_id
 		info.damage = get_def_float("damage") * _falloff(float(hit["distance"]))
 		info.origin = origin

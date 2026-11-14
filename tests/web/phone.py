@@ -8,9 +8,12 @@ import time
 from cdp import ChromeProc, StaticServer, free_port
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-BUILD_DIR = os.path.join(ROOT, "build", "web")
-SHOTS_DIR = r"C:\Users\adrie\AppData\Local\Temp\claude\90ca056d862530a5\5cd4ecfb-1f57-4211-b698-70930ccb7ffe\scratchpad\shots\mobile"
-SCRATCH = r"C:\Users\adrie\AppData\Local\Temp\claude\90ca056d862530a5\5cd4ecfb-1f57-4211-b698-70930ccb7ffe\scratchpad"
+# JAVALI_BUILD_DIR: serve a fresh export (tools/godot.sh --export-release "Web" <dir>/index.html) instead of build/web.
+BUILD_DIR = os.environ.get("JAVALI_BUILD_DIR") or os.path.join(ROOT, "build", "web")
+# Scratch space (screenshots, Chrome profiles): JAVALI_SCRATCH, else a folder under the system temp directory.
+SCRATCH = os.environ.get("JAVALI_SCRATCH") or os.path.join(tempfile.gettempdir(), "javali_mobile_probe")
+SHOTS_DIR = os.path.join(SCRATCH, "shots", "mobile")
+os.makedirs(SCRATCH, exist_ok=True)
 
 WIDTH, HEIGHT, DPR = 844, 390, 3
 QUERY = "?probe=1"   # enables the game's window.huntProbe QA hook (src/hud/hud.gd)

@@ -139,6 +139,7 @@ func _run() -> void:
 	await _case("shop_to_preparation", _step_shop_next)
 	await _case("preparation_second_contract", _step_second_request)
 	await _case("back_buttons_navigate", _step_back_buttons)
+	await _case("friends_lobby_offline_and_back", _step_friends_lobby)
 	_t.call("cleanup_test_files")
 	if not _finished:
 		_finished = true
@@ -338,3 +339,43 @@ func _step_back_buttons() -> void:
 		if _press("ShopButton") and await _wait_scene(ScenePaths.SHOP):
 			if _press("BackButton"):
 				await _wait_scene(ScenePaths.MAIN_MENU)
+
+
+## F6: "Jogar com amigos (beta)" is always in the menu. Offline (no server URL in a desktop run, nothing listening
+## anywhere): menu -> lobby entry screen -> Voltar -> menu, with no room and no stuck state in Net.
+func _step_friends_lobby() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	var friends: Button = _button("FriendsButton")
+	if friends == null:
+		return
+	_t.call("ok", friends.visible and not friends.disabled, "FriendsButton visivel e habilitado sem ?mp=1")
+	_t.call("eq", friends.text, "Jogar com amigos (beta)", "texto do FriendsButton")
+	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "pre-condicao: Net sem sala")
+	friends.pressed.emit()
+	if not await _wait_scene(ScenePaths.LOBBY):
+		return
+	for node_name: String in ["NameEdit", "CreateRoomButton", "CodeEdit", "JoinButton", "BackButton", "MessageLabel", "StatusLabel"]:
+		_t.call("ok", _node(node_name) != null, "lobby tem %s" % node_name)
+	var join: Button = _node("JoinButton") as Button
+	var create: Button = _node("CreateRoomButton") as Button
+	var code: LineEdit = _node("CodeEdit") as LineEdit
+	var message: Label = _node("MessageLabel") as Label
+	if join != null:
+		_t.call("eq", join.disabled, true, "Entrar desabilitado sem codigo")
+	if create != null and message != null and not Net.is_configured():
+		_t.call("eq", create.disabled, true, "Criar sala desabilitado sem servidor configurado")
+		_t.call("ok", message.text != "", "mensagem de modo nao configurado (%s)" % message.text)
+	if code != null and join != null:
+		code.text = "abc"
+		code.text_changed.emit("abc")
+		_t.call("eq", code.text, "ABC", "codigo vira maiusculo")
+		_t.call("eq", join.disabled, true, "Entrar segue desabilitado com codigo curto")
+		code.text = ""
+		code.text_changed.emit("")
+	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "o lobby sozinho nao abre sala")
+	_t.call("ok", not Net.is_in_room(), "Net fora de sala no lobby de entrada")
+	if _press("BackButton"):
+		await _wait_scene(ScenePaths.MAIN_MENU)
+	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "Net sem sala depois de Voltar")

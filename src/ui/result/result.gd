@@ -14,12 +14,18 @@ const TITLES: Dictionary = {
 	HuntResult.Outcome.DEFEAT_CROP: "Derrota: lavoura destruída",
 	HuntResult.Outcome.DEFEAT_DEATH: "Derrota: o caçador caiu",
 	HuntResult.Outcome.ABANDONED: "Caçada abandonada",
+	HuntResult.Outcome.DISCONNECTED: "Conexão perdida: a caçada foi encerrada",
 }
 const TIPS: Dictionary = {
 	HuntResult.Outcome.DEFEAT_CROP: "Os abates feitos foram pagos. Ataque primeiro o bando que já está comendo, e use a ceva de milho para segurar os outros longe da lavoura.",
 	HuntResult.Outcome.DEFEAT_DEATH: "Os abates feitos foram pagos. Macho e cachaço raspam o chão antes de investir: saia da linha da corrida. O colete de couro reduz o dano.",
 	HuntResult.Outcome.ABANDONED: "Os abates feitos foram pagos. O bônus do contrato só sai na vitória.",
+	HuntResult.Outcome.DISCONNECTED: "O anfitrião saiu. Seus abates foram pagos.",
 }
+const NO_PROGRESS_TEXT: String = "Este contrato ainda não estava liberado para você: os prêmios foram pagos, mas o progresso não avança."
+const SCORE_NAME_FALLBACK: String = "Caçador %d"
+const SCORE_SWATCH_PX: float = 18.0
+const SCORE_KILLS_COLUMN_PX: float = 90.0
 const ZONE_NAMES: Dictionary = {"head": "cabeça", "vital": "vitais", "body": "corpo", "rear": "traseiro", "dog": "cão"}
 
 var _result: HuntResult = null
@@ -60,7 +66,10 @@ func _build_body(body: VBoxContainer) -> void:
 	left.size_flags_stretch_ratio = 1.25
 	left.add_theme_constant_override("separation", 8)
 	columns.add_child(left)
-	left.add_child(UiKit.label("Abates: %d de %d javalis" % [_result.kills.size(), maxi(_result.boars_total, _result.kills.size())], "HeaderLabel"))
+	if _is_network():
+		left.add_child(UiKit.label("Seus abates: %d · Equipe: %d de %d" % [_result.kills.size(), _result.team_kills, maxi(_result.boars_total, _result.team_kills)], "HeaderLabel"))
+	else:
+		left.add_child(UiKit.label("Abates: %d de %d javalis" % [_result.kills.size(), maxi(_result.boars_total, _result.kills.size())], "HeaderLabel"))
 	var scroller: Array = UiKit.scroll_list(6)
 	left.add_child(scroller[0])
 	var list: VBoxContainer = scroller[1]
@@ -73,8 +82,54 @@ func _build_body(body: VBoxContainer) -> void:
 	(right_scroll[0] as Control).size_flags_stretch_ratio = 1.0
 	columns.add_child(right_scroll[0])
 	var right: VBoxContainer = right_scroll[1]
+	if _is_network() and not _result.scoreboard.is_empty():
+		right.add_child(_build_scoreboard_card())
 	right.add_child(_build_payment_card())
 	right.add_child(_build_stats_card())
+
+
+func _is_network() -> bool:
+	return _result != null and (_result.player_count > 1 or not _result.scoreboard.is_empty())
+
+
+func _build_scoreboard_card() -> Control:
+	var card: PanelContainer = UiKit.card()
+	UiKit.mark(card, self, "Scoreboard")
+	var box: VBoxContainer = VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	card.add_child(box)
+	box.add_child(UiKit.label("Placar da equipe", "HeaderLabel"))
+	for entry: Dictionary in _result.scoreboard:
+		var slot: int = int(entry.get("slot", 0))
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		var swatch: ColorRect = ColorRect.new()
+		swatch.color = HunterVisualBase.slot_color(slot)
+		swatch.custom_minimum_size = Vector2(SCORE_SWATCH_PX, SCORE_SWATCH_PX)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(swatch)
+		var player_name: String = str(entry.get("name", ""))
+		if player_name == "":
+			player_name = SCORE_NAME_FALLBACK % (slot + 1)
+		var name_label: Label = UiKit.label(player_name)
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.add_theme_color_override("font_color", HunterVisualBase.slot_color(slot).lightened(0.25))
+		row.add_child(name_label)
+		var kills_label: Label = UiKit.label("%d abates" % int(entry.get("kills", 0)))
+		kills_label.custom_minimum_size = Vector2(SCORE_KILLS_COLUMN_PX, 0)
+		kills_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(kills_label)
+		if entry.has("weight_kg"):
+			var weight_label: Label = UiKit.label("%s kg" % UiKit.decimal(float(entry["weight_kg"]), 1))
+			weight_label.custom_minimum_size = Vector2(WEIGHT_COLUMN_PX, 0)
+			weight_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			row.add_child(weight_label)
+		box.add_child(row)
+	return card
+
+
+func _in_room() -> bool:
+	return Net.is_in_room()
 
 
 func _build_kill_row(kill: KillInfo) -> Control:
@@ -198,19 +253,26 @@ func _build_footer(footer: HBoxContainer) -> void:
 	menu.custom_minimum_size.x = 200
 	UiKit.mark(menu, self, "MenuButton")
 	footer.add_child(menu)
-	menu.pressed.connect(func() -> void: Router.goto(ScenePaths.MAIN_MENU))
+	menu.pressed.connect(_on_menu)
 	var retry: Button = UiKit.button("Caçar de novo" if victory else "Tentar de novo", "SecondaryButton")
 	retry.custom_minimum_size.x = 240
 	UiKit.mark(retry, self, "RetryButton")
 	footer.add_child(retry)
 	retry.pressed.connect(_on_retry)
+	retry.visible = not _in_room()
 	footer.add_child(UiKit.spacer())
-	var cont: Button = UiKit.button("Continuar para a loja", "PrimaryButton", 80)
+	var cont: Button = UiKit.button("Voltar à sala" if _in_room() else "Continuar para a loja", "PrimaryButton", 80)
 	cont.custom_minimum_size.x = 360
 	UiKit.mark(cont, self, "ContinueButton")
 	footer.add_child(cont)
 	cont.pressed.connect(_on_continue)
 	cont.grab_focus()
+
+
+func _on_menu() -> void:
+	if _in_room():
+		Net.leave_room()
+	Router.goto(ScenePaths.MAIN_MENU)
 
 
 func _on_retry() -> void:
@@ -221,6 +283,9 @@ func _on_retry() -> void:
 
 
 func _on_continue() -> void:
+	if _in_room():
+		Router.goto(ScenePaths.LOBBY)
+		return
 	if _result != null:
 		Router.selected_map_id = _result.map_id
 		# After a win the next hunt is the next contract (if there is one).
@@ -248,6 +313,8 @@ func _contract_line() -> String:
 
 
 func _progress_text() -> String:
+	if _result.is_victory() and not _result.counts_for_progression:
+		return NO_PROGRESS_TEXT
 	if not _result.is_victory():
 		return TIPS.get(_result.outcome, "")
 	var count: int = Data.get_contract_count(_result.map_id) if Data.get_map_ids().has(_result.map_id) else 0

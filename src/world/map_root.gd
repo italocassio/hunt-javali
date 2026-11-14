@@ -52,6 +52,7 @@ var _has_farm_rect: bool = false
 var _prop_circles: Array[Vector3] = []   # x, z, radius (flora exclusion)
 var _block_crop_rects: Array[Rect2] = []
 var _block_water: Array[Vector3] = []     # x, z, radius
+var _flora_placements: Dictionary = {}    # StringName id -> PackedVector2Array (last build_flora)
 
 
 func get_map_rect() -> Rect2:
@@ -92,6 +93,11 @@ func get_retreat_zones() -> PackedVector2Array:
 
 func get_static_shapes_used() -> int:
 	return _shapes_used
+
+
+## XZ positions placed for a flora id by the last build_flora (empty before it).
+func get_flora_positions(id: StringName) -> PackedVector2Array:
+	return _flora_placements.get(id, PackedVector2Array()) as PackedVector2Array
 
 
 # --- Build steps ---------------------------------------------------------------------------------
@@ -273,7 +279,11 @@ func _build_prop_group(key: String, t: Dictionary, xforms: Array[Transform3D]) -
 	add_child(mmi)
 
 
-func build_flora(density: float) -> void:
+## sync_layout (network hunts, docs/multiplayer.md section 6.4): the loop always draws the full count
+## (density 1.0) and only keeps the first round(count x density) of the density-scaled ids, so the RNG
+## stream, and with it every trunk, termite mound and obstacle, is the same on every quality.
+## Solo passes false: the layout of before, draw for draw.
+func build_flora(density: float, sync_layout: bool = false) -> void:
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = terrain_seed * 7919 + 13
 	var placements: Dictionary = {}
@@ -286,13 +296,15 @@ func build_flora(density: float) -> void:
 	var rect: Rect2 = get_map_rect().grow(-FLORA_EDGE_MARGIN_M)
 	for key: Variant in base_flora.keys():
 		var id: StringName = StringName(String(key))
-		var n: int = _scaled_count(id, int(base_flora[key]), density)
+		var keep: int = _scaled_count(id, int(base_flora[key]), density)
+		var draws: int = int(base_flora[key]) if sync_layout else keep
 		var list: PackedVector2Array = _list(placements, id)
-		for i: int in n:
+		for i: int in draws:
 			for t: int in FLORA_PLACE_TRIES:
 				var p: Vector2 = Vector2(rng.randf_range(rect.position.x, rect.end.x), rng.randf_range(rect.position.y, rect.end.y))
 				if not _flora_blocked(p):
-					list.append(p)
+					if i < keep:
+						list.append(p)
 					break
 		placements[id] = list
 	var zones_holder: Node = get_node_or_null(^"FloraZones")
@@ -303,17 +315,20 @@ func build_flora(density: float) -> void:
 				continue
 			for key: Variant in z.counts.keys():
 				var id: StringName = StringName(String(key))
-				var n: int = _scaled_count(id, int(z.counts[key]), density)
+				var keep: int = _scaled_count(id, int(z.counts[key]), density)
+				var draws: int = int(z.counts[key]) if sync_layout else keep
 				var list: PackedVector2Array = _list(placements, id)
-				for i: int in n:
+				for i: int in draws:
 					for t: int in FLORA_PLACE_TRIES:
 						var ang: float = rng.randf_range(0.0, TAU)
 						var rad: float = sqrt(rng.randf()) * z.radius_m
 						var p: Vector2 = Vector2(z.position.x + cos(ang) * rad, z.position.z + sin(ang) * rad)
 						if rect.has_point(p) and not _flora_blocked(p):
-							list.append(p)
+							if i < keep:
+								list.append(p)
 							break
 				placements[id] = list
+	_flora_placements = placements
 	flora = FloraScatter.new()
 	flora.name = "Flora"
 	add_child(flora)

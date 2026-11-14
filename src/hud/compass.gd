@@ -12,11 +12,14 @@ const COLOR_TICK: Color = Color(0.96, 0.94, 0.90, 0.55)
 const COLOR_DOG: Color = Color("#F2C12E")
 const COLOR_BOAR: Color = Color("#D9452B")
 const FONT_SIZE: int = 20
+const ALLY_HALF_PX: float = 6.0
+const ALLY_FALLEN_WIDTH_PX: float = 3.0
+const ALLY_FALLEN_ALPHA: float = 0.85
 const CARDINALS: Dictionary = {0: "N", 90: "L", 180: "S", 270: "O"}
 
 var _yaw: float = 0.0
 var _origin: Vector3 = Vector3.ZERO
-var _marks: Array[Dictionary] = []   # {pos: Vector3, kind: StringName}
+var _marks: Array[Dictionary] = []   # {pos: Vector3, kind: StringName}; kind &"ally" also has color: Color, down: bool
 
 
 func _init() -> void:
@@ -76,11 +79,16 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> v
 	var at_edge: bool = absf(rel) > VISIBLE_SPAN_DEG * 0.5
 	rel = clampf(rel, -VISIBLE_SPAN_DEG * 0.5, VISIBLE_SPAN_DEG * 0.5)
 	var x: float = w * 0.5 + rel / VISIBLE_SPAN_DEG * w
-	var color: Color = COLOR_DOG if mark["kind"] == &"dog" else COLOR_BOAR
+	var kind: StringName = mark["kind"]
+	var color: Color = COLOR_DOG if kind == &"dog" else COLOR_BOAR
+	if kind == &"ally":
+		color = mark.get("color", COLOR_TEXT)
 	if at_edge:
 		color.a = 0.6
 	var cy: float = h - 10.0
-	if mark["kind"] == &"dog":
+	if kind == &"ally":
+		_draw_ally_marker(Vector2(x, cy), color, bool(mark.get("down", false)))
+	elif kind == &"dog":
 		draw_circle(Vector2(x, cy), 6.0, Color.BLACK)
 		draw_circle(Vector2(x, cy), 4.5, color)
 	else:
@@ -88,3 +96,18 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> v
 			Vector2(x, cy - 8.0)]), Color.BLACK)
 		draw_colored_polygon(PackedVector2Array([Vector2(x - 6.0, cy + 5.0), Vector2(x + 6.0, cy + 5.0),
 			Vector2(x, cy - 5.5)]), color)
+
+
+## Ally in the slot colour: a diamond (boars are triangles, the dog a dot). A fallen one is hollow and dimmed.
+func _draw_ally_marker(at: Vector2, color: Color, down: bool) -> void:
+	var outer: PackedVector2Array = PackedVector2Array([at + Vector2(0.0, -ALLY_HALF_PX - 2.0),
+		at + Vector2(ALLY_HALF_PX + 2.0, 0.0), at + Vector2(0.0, ALLY_HALF_PX + 2.0), at + Vector2(-ALLY_HALF_PX - 2.0, 0.0)])
+	var inner: PackedVector2Array = PackedVector2Array([at + Vector2(0.0, -ALLY_HALF_PX),
+		at + Vector2(ALLY_HALF_PX, 0.0), at + Vector2(0.0, ALLY_HALF_PX), at + Vector2(-ALLY_HALF_PX, 0.0)])
+	if down:
+		var dim: Color = Color(color.r, color.g, color.b, color.a * ALLY_FALLEN_ALPHA)
+		draw_polyline(inner + PackedVector2Array([inner[0]]), Color.BLACK, ALLY_FALLEN_WIDTH_PX + 2.0)
+		draw_polyline(inner + PackedVector2Array([inner[0]]), dim, ALLY_FALLEN_WIDTH_PX)
+		return
+	draw_colored_polygon(outer, Color.BLACK)
+	draw_colored_polygon(inner, color)

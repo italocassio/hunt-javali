@@ -5,6 +5,10 @@ extends Node3D
 ## the visual. Usage: instantiate -> setup() -> add_child -> start().
 
 signal died(boar: Boar)
+## A hit was applied (final damage, after the zone multiplier). Emitted before died. Network host only listens.
+signal hit_applied(boar: Boar, zone: StringName, damage: float, shot_id: int)
+## A charge reached a hunter (local one judged here, remote one confirmed by its C_CHARGE_HIT).
+signal attacked(boar: Boar, victim_slot: int)
 
 # --- Rules the contract fixes in text (not present in data/) ---
 const VISION_CROUCH_MULT: float = 0.6
@@ -62,6 +66,16 @@ const ROAR_DB: float = 3.0
 const HIT_ZONE_NODES: Dictionary = {
 	&"head": ^"HitHead", &"vital": ^"HitVital", &"body": ^"HitBody", &"rear": ^"HitRear",
 }
+# Perception verdicts for one hunter (docs/multiplayer.md section 6.3: at most one ray per perception).
+const SENSE_NONE: int = 0
+const SENSE_DETECTED: int = 1
+const SENSE_RAY_USED: int = 2
+# Network state byte of the snapshot (docs/multiplayer.md section 4.5).
+const NET_ST_STATE_MASK: int = 0x0F
+const NET_ST_WOUNDED: int = 0x10
+const NET_ST_EATING: int = 0x20
+const NET_ST_APPROACH: int = 0x40
+const NET_ST_CHARGE_TOGGLE: int = 0x80
 
 var boar_id: int = -1
 var type_id: StringName = &""
@@ -73,6 +87,8 @@ var max_health: float = 100.0
 var wounded: bool = false
 var killing_zone: StringName = &""
 var body_scale: float = 1.0
+## Slot of the hunter who dealt the last damage (the killer once dead). Solo: 0.
+var killer_slot: int = 0
 
 var _world: HuntController = null
 var _visual: BoarVisualBase = null
@@ -132,6 +148,9 @@ var _charge_dir: Vector2 = Vector2.ZERO
 var _charge_travelled: float = 0.0
 var _charge_limit: float = 0.0
 var _charge_hit_done: bool = false
+var _charge_serial: int = 0
+## Hunter this boar reacts to. Never trusted without _can_target (it may have died, left or been freed).
+var _target_hunter: PlayerBase = null
 var _dog: Node3D = null
 var _dog_until: float = 0.0
 var _voice_time: float = 0.0
@@ -222,6 +241,99 @@ func set_highlight(on: bool) -> void:
 	_visual.set_highlight(on)
 
 
+# --- Network interface (docs/multiplayer.md section 6.3) ------------------------------------------
+
+func get_yaw() -> float:
+	return _yaw
+
+
+func get_hit_zone(zone: StringName) -> HitZone:
+	if not HIT_ZONE_NODES.has(zone):
+		return null
+	return get_node_or_null(HIT_ZONE_NODES[zone] as NodePath) as HitZone
+
+
+## st byte of H_SNAPSHOT: b0-3 state, b4 wounded, b5 eating in place, b6 closing in, b7 flips per charge.
+func net_state_byte() -> int:
+	var st: int = clampi(NetCodec.BOAR_STATES.find(state), 0, NET_ST_STATE_MASK)
+	if wounded:
+		st |= NET_ST_WOUNDED
+	if _eating_here:
+		st |= NET_ST_EATING
+	if _approaching:
+		st |= NET_ST_APPROACH
+	if (_charge_serial & 1) == 1:
+		st |= NET_ST_CHARGE_TOGGLE
+	return st
+
+
+## A remote victim says this charge hit it (judged on its machine). Accepted once per charge, while
+## charging or right after (the claim arrives late): the boar recovers as if it had hit here.
+func net_confirm_charge_hit(victim_slot: int) -> bool:
+	if state != Ids.BS_CHARGE and state != Ids.BS_RECOVER:
+		return false
+	if _charge_hit_done:
+		return false
+	_charge_hit_done = true
+	_visual.play_attack()
+	attacked.emit(self, victim_slot)
+	if state == Ids.BS_CHARGE:
+		_enter_recover()
+	return true
+
+
+# --- Shared geometry (also used by BoarPuppet) ---------------------------------------------------
+
+## Creates (or reuses) the four HitZone children of `parent`, sized for the weight scale. Box shapes come
+## already multiplied by the scale; physics nodes are never scaled.
+static func make_hit_zones(parent: Node3D, p_boar_id: int, p_body_scale: float) -> Array[HitZone]:
+	var out: Array[HitZone] = []
+	for zone: StringName in HIT_ZONE_NODES.keys():
+		var path: NodePath = HIT_ZONE_NODES[zone] as NodePath
+		var hz: HitZone = parent.get_node_or_null(path) as HitZone
+		if hz == null:
+			hz = HitZone.new()
+			hz.name = String(path)
+			parent.add_child(hz)
+		var def: Array = BoarVisualBase.HIT_ZONES[zone] as Array
+		hz.zone = zone
+		hz.target_id = p_boar_id
+		hz.position = (def[0] as Vector3) * p_body_scale
+		var shape: BoxShape3D = BoxShape3D.new()
+		shape.size = (def[1] as Vector3) * p_body_scale
+		var cs: CollisionShape3D = hz.get_node_or_null(^"Shape") as CollisionShape3D
+		if cs == null:
+			cs = CollisionShape3D.new()
+			cs.name = "Shape"
+			hz.add_child(cs)
+		cs.shape = shape
+		out.append(hz)
+	return out
+
+
+## Body basis for a heading (forward = -Z) tilted to the ground normal.
+static func basis_for(yaw: float, up: Vector3) -> Basis:
+	var f2: Vector2 = Steering.dir_from_yaw(yaw)
+	var fwd: Vector3 = Vector3(f2.x, 0.0, f2.y)
+	var right: Vector3 = fwd.cross(up)
+	if right.length_squared() < 0.0001:
+		return Basis(Vector3.UP, yaw)
+	right = right.normalized()
+	var forward: Vector3 = up.cross(right).normalized()
+	return Basis(right, up, -forward)
+
+
+## Section 8.3: the snout within reach of `target` (feet) and the target in the frontal half-circle.
+static func charge_hits(pos: Vector2, dir: Vector2, p_body_scale: float, boar_y: float, target: Vector3) -> bool:
+	if absf(target.y - boar_y) > CHARGE_HEIGHT_TOLERANCE_M:
+		return false
+	var txz: Vector2 = Vector2(target.x, target.z)
+	if (txz - pos).dot(dir) <= 0.0:
+		return false
+	var snout: Vector2 = pos + dir * SNOUT_OFFSET_M * p_body_scale
+	return snout.distance_to(txz) < HIT_BASE_RADIUS_M + HIT_RADIUS_PER_SCALE_M * p_body_scale
+
+
 # --- Herd interface ------------------------------------------------------------------------------
 
 ## Shared alert: a herd mate saw or heard the player.
@@ -229,6 +341,7 @@ func receive_alert(threat: Vector2) -> void:
 	if not _is_calm():
 		return
 	_threat = threat
+	_retarget_near(threat)
 	_enter_alert(false)
 
 
@@ -237,6 +350,7 @@ func react(threat: Vector2, herd_hit: bool) -> void:
 	if state == Ids.BS_DEAD or state == Ids.BS_BAYED or state == Ids.BS_HELD:
 		return
 	_threat = threat
+	_retarget_near(threat)
 	if herd_hit and is_aggressive_type():
 		_engaged = true
 	if state == Ids.BS_SCRAPE or state == Ids.BS_CHARGE or state == Ids.BS_RECOVER:
@@ -281,6 +395,7 @@ func apply_dog_damage(amount: float) -> void:
 	if state == Ids.BS_DEAD or amount <= 0.0:
 		return
 	_dog_damaged = true
+	killer_slot = _world.get_local_slot()   # dogs only run on this machine (section 6.5)
 	health -= amount
 	if health <= 0.0:
 		_die(Ids.ZONE_DOG)
@@ -340,27 +455,94 @@ func _process(delta: float) -> void:
 
 # --- Perception ----------------------------------------------------------------------------------
 
+## Tests the live, present hunters from the nearest to the farthest and stops at the first one detected.
+## Only the nearest candidate inside vision range and cone gets the line-of-sight ray (one ray at most).
+## Solo: exactly the single-player test of before.
 func _perceive() -> void:
 	_detects = false
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive():
-		return
-	var ppos: Vector3 = player.global_position
-	var to: Vector2 = Vector2(ppos.x - position.x, ppos.z - position.z)
+	var hunters: Array[PlayerBase] = _world.get_hunters()
+	var count: int = hunters.size()
+	var done: int = 0          # bitmask of hunters already tested (at most 4)
+	var ray_left: bool = true
+	for _k: int in count:
+		var best: int = -1
+		var best_d: float = INF
+		for i: int in count:
+			if (done & (1 << i)) != 0:
+				continue
+			var h: PlayerBase = hunters[i]
+			if not _can_target(h):
+				done |= 1 << i
+				continue
+			var d: float = Vector2(h.global_position.x - position.x, h.global_position.z - position.z).length_squared()
+			if d < best_d:
+				best_d = d
+				best = i
+		if best < 0:
+			return
+		done |= 1 << best
+		var verdict: int = _sense(hunters[best], ray_left)
+		if verdict == SENSE_DETECTED:
+			_detects = true
+			_target_hunter = hunters[best]
+			return
+		if verdict == SENSE_RAY_USED:
+			ray_left = false
+
+
+func _sense(hunter: PlayerBase, ray_allowed: bool) -> int:
+	var hpos: Vector3 = hunter.global_position
+	var to: Vector2 = Vector2(hpos.x - position.x, hpos.z - position.z)
 	var dist: float = to.length()
-	if dist < player.get_noise_radius():
-		_detects = true
-		return
+	if dist < hunter.get_noise_radius():
+		return SENSE_DETECTED
 	var vision: float = _vision_range
-	if player.is_crouching():
+	if hunter.is_crouching():
 		vision *= VISION_CROUCH_MULT
-	elif Vector2(player.velocity.x, player.velocity.z).length() > _sprint_threshold_mps:
+	elif Vector2(hunter.velocity.x, hunter.velocity.z).length() > _sprint_threshold_mps:
 		vision *= VISION_SPRINT_MULT
 	if dist > vision:
-		return
+		return SENSE_NONE
 	if dist > 0.5 and Steering.dir_from_yaw(_yaw).dot(to / dist) < _cos_half_fov:
-		return
-	_detects = _has_line_of_sight(player)
+		return SENSE_NONE
+	if not ray_allowed:
+		return SENSE_NONE
+	return SENSE_DETECTED if _has_line_of_sight(hunter) else SENSE_RAY_USED
+
+
+func _can_target(hunter: PlayerBase) -> bool:
+	return is_instance_valid(hunter) and hunter.is_alive() and hunter.is_present()
+
+
+## The current target while it is still valid; otherwise the nearest live hunter (null if none).
+func _acquire_target() -> PlayerBase:
+	if not _can_target(_target_hunter):
+		_target_hunter = _nearest_hunter(get_xz())
+	return _target_hunter
+
+
+func _nearest_hunter(point: Vector2) -> PlayerBase:
+	var best: PlayerBase = null
+	var best_d: float = INF
+	for h: PlayerBase in _world.get_hunters():
+		if not _can_target(h):
+			continue
+		var d: float = point.distance_squared_to(Vector2(h.global_position.x, h.global_position.z))
+		if d < best_d:
+			best_d = d
+			best = h
+	return best
+
+
+## A shared alert or reaction points at a place: the hunter standing nearest to it becomes the target.
+func _retarget_near(point: Vector2) -> void:
+	var h: PlayerBase = _nearest_hunter(point)
+	if h != null:
+		_target_hunter = h
+
+
+func _target_xz() -> Vector2:
+	return Vector2(_target_hunter.global_position.x, _target_hunter.global_position.z)
 
 
 func _has_line_of_sight(player: PlayerBase) -> bool:
@@ -381,8 +563,7 @@ func _has_line_of_sight(player: PlayerBase) -> bool:
 
 func _after_perception() -> void:
 	if _detects:
-		var player: PlayerBase = _world.get_player()
-		_threat = Vector2(player.global_position.x, player.global_position.z)
+		_threat = _target_xz()
 		herd.last_detect_time = _now()
 		if _is_calm():
 			herd.raise_alert(self, _threat)
@@ -402,8 +583,7 @@ func _is_calm() -> bool:
 func _wants_charge(dist: float, herd_hit: bool) -> bool:
 	if _charge_speed <= 0.0 or _charges_done >= _max_charges:
 		return false
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive() or _world.is_hunt_over():
+	if _acquire_target() == null or _world.is_hunt_over():
 		return false
 	match _aggression:
 		&"always":
@@ -433,11 +613,10 @@ func _begin_attack(dist: float) -> void:
 
 ## After recover / dog release: charge again, flee, or go back to feeding.
 func _reevaluate() -> void:
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive() or _world.is_hunt_over():
+	if _acquire_target() == null or _world.is_hunt_over():
 		_resume()
 		return
-	_threat = Vector2(player.global_position.x, player.global_position.z)
+	_threat = _target_xz()
 	var dist: float = get_xz().distance_to(_threat)
 	var in_reach: bool = dist <= maxf(_vision_range, _aggro_radius) * DISENGAGE_RANGE_MULT
 	if in_reach and _wants_charge(dist, false):
@@ -620,11 +799,10 @@ func _tick_alert(delta: float) -> void:
 
 
 func _tick_approach(delta: float) -> void:
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive() or _world.is_hunt_over():
+	if _acquire_target() == null or _world.is_hunt_over():
 		_resume()
 		return
-	_threat = Vector2(player.global_position.x, player.global_position.z)
+	_threat = _target_xz()
 	var dist: float = get_xz().distance_to(_threat)
 	if dist <= _charge_max_dist * CHARGE_START_FRAC:
 		_enter_scrape()
@@ -691,11 +869,10 @@ func _enter_scrape() -> void:
 
 
 func _tick_scrape(delta: float) -> void:
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive() or _world.is_hunt_over():
+	if _acquire_target() == null or _world.is_hunt_over():
 		_resume()
 		return
-	_threat = Vector2(player.global_position.x, player.global_position.z)
+	_threat = _target_xz()
 	_face(_threat, delta, 1.0)
 	if _state_time >= _telegraph_s:
 		_enter_charge()
@@ -711,6 +888,7 @@ func _enter_charge() -> void:
 	_charge_limit = minf(dist + CHARGE_OVERSHOOT_M, _charge_max_dist)
 	_charge_hit_done = false
 	_charges_done += 1
+	_charge_serial += 1
 	_set_state(Ids.BS_CHARGE)
 	Sfx.play_3d(&"boar_charge_roar", global_position, ROAR_DB, _voice_pitch())
 
@@ -729,27 +907,22 @@ func _tick_charge(delta: float) -> void:
 		_enter_recover()
 
 
-## Section 8.3: snout within reach and the player in the frontal half-circle; once per charge.
+## Section 8.3: snout within reach and a hunter in the frontal half-circle; once per charge.
+## Only hunters of this machine are judged here; a remote victim judges on its own machine (C_CHARGE_HIT).
 func _try_charge_hit() -> bool:
 	if _charge_hit_done or _world.is_hunt_over():
 		return false
-	var player: PlayerBase = _world.get_player()
-	if player == null or not player.is_alive():
-		return false
-	var ppos: Vector3 = player.global_position
-	if absf(ppos.y - position.y) > CHARGE_HEIGHT_TOLERANCE_M:
-		return false
-	var pos: Vector2 = get_xz()
-	var pxz: Vector2 = Vector2(ppos.x, ppos.z)
-	var snout: Vector2 = pos + _charge_dir * SNOUT_OFFSET_M * body_scale
-	if (pxz - pos).dot(_charge_dir) <= 0.0:
-		return false
-	if snout.distance_to(pxz) >= HIT_BASE_RADIUS_M + HIT_RADIUS_PER_SCALE_M * body_scale:
-		return false
-	_charge_hit_done = true
-	player.apply_damage(_charge_damage, global_position, _knockback_mps)
-	_visual.play_attack()
-	return true
+	for h: PlayerBase in _world.get_hunters():
+		if not h.is_local() or not h.is_alive():
+			continue
+		if not charge_hits(get_xz(), _charge_dir, body_scale, position.y, h.global_position):
+			continue
+		_charge_hit_done = true
+		h.apply_damage(_charge_damage, global_position, _knockback_mps)
+		_visual.play_attack()
+		attacked.emit(self, h.slot)
+		return true
+	return false
 
 
 func _enter_recover() -> void:
@@ -797,7 +970,10 @@ func _on_hit_received(hit: HitInfo) -> void:
 	elif hit.shot_id != _first_shot_id:
 		_multi_shot = true
 	health -= final
+	var shooter_slot: int = NetCodec.shot_slot(hit.shot_id)
+	killer_slot = shooter_slot
 	GameEvents.boar_hit.emit(boar_id, hit.zone, final, hit.position, hit.shot_id)
+	hit_applied.emit(self, hit.zone, final, hit.shot_id)
 	if health <= 0.0:
 		_die(hit.zone)
 		return
@@ -806,10 +982,12 @@ func _on_hit_received(hit: HitInfo) -> void:
 	_update_wounded()
 	if is_aggressive_type():
 		_engaged = true
-	var player: PlayerBase = _world.get_player()
+	var shooter: PlayerBase = _world.get_hunter(shooter_slot)
 	var threat: Vector2 = Vector2(hit.origin.x, hit.origin.z)
-	if player != null:
-		threat = Vector2(player.global_position.x, player.global_position.z)
+	if is_instance_valid(shooter):
+		threat = Vector2(shooter.global_position.x, shooter.global_position.z)
+		if _can_target(shooter):
+			_target_hunter = shooter
 	herd.last_detect_time = _now()
 	herd.raise_reaction(threat, true)
 
@@ -889,14 +1067,7 @@ func _settle(delta: float) -> void:
 
 
 func _apply_basis() -> void:
-	var f2: Vector2 = Steering.dir_from_yaw(_yaw)
-	var fwd: Vector3 = Vector3(f2.x, 0.0, f2.y)
-	var right: Vector3 = fwd.cross(_up)
-	if right.length_squared() < 0.0001:
-		return
-	right = right.normalized()
-	var forward: Vector3 = _up.cross(right).normalized()
-	basis = Basis(right, _up, -forward)
+	basis = basis_for(_yaw, _up)
 
 
 func _spread_point(center: Vector2, radius: float, rect: Rect2) -> Vector2:
@@ -1007,24 +1178,7 @@ func _build_visual() -> void:
 	add_child(_visual)
 
 
-## Box shapes come already multiplied by the weight scale; physics nodes are never scaled.
 func _build_hit_zones() -> void:
-	for zone: StringName in HIT_ZONE_NODES.keys():
-		var hz: HitZone = get_node_or_null(HIT_ZONE_NODES[zone] as NodePath) as HitZone
-		if hz == null:
-			push_error("Boar: missing hit zone node for '%s'" % zone)
-			continue
-		var def: Array = BoarVisualBase.HIT_ZONES[zone] as Array
-		hz.zone = zone
-		hz.target_id = boar_id
-		hz.position = (def[0] as Vector3) * body_scale
-		var shape: BoxShape3D = BoxShape3D.new()
-		shape.size = (def[1] as Vector3) * body_scale
-		var cs: CollisionShape3D = hz.get_node_or_null(^"Shape") as CollisionShape3D
-		if cs == null:
-			cs = CollisionShape3D.new()
-			cs.name = "Shape"
-			hz.add_child(cs)
-		cs.shape = shape
+	for hz: HitZone in make_hit_zones(self, boar_id, body_scale):
 		if not hz.hit_received.is_connected(_on_hit_received):
 			hz.hit_received.connect(_on_hit_received)

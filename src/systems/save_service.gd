@@ -18,7 +18,9 @@ const DEFAULT_SETTINGS: Dictionary = {
 	"quality": "auto",
 	"touch_controls": "auto",
 	"show_fps": false,
+	"player_name": "",
 }
+const DEFAULT_NAME_MAX_CHARS: int = 12   # fallback only when data/net.json failed to load
 const SENSITIVITY_RANGE: Vector2 = Vector2(0.1, 3.0)
 const QUALITY_VALUES: Array[String] = ["auto", "low", "medium", "high"]
 const TOUCH_VALUES: Array[String] = ["auto", "on", "off"]
@@ -215,7 +217,21 @@ static func sanitize_setting(key: String, value: Variant) -> Variant:
 		"invert_y", "show_fps":
 			if value is bool:
 				return value
+		"player_name":
+			if value is String:
+				return _clean_name(value)
 	return default_value
+
+
+## Strips control characters, trims, and cuts to net.name_max_chars.
+static func _clean_name(raw: String) -> String:
+	var out: String = ""
+	for i: int in raw.length():
+		var code: int = raw.unicode_at(i)
+		if code >= 32 and code != 127 and not (code >= 128 and code < 160):
+			out += raw[i]
+	var max_chars: int = int(Data.get_net().get("name_max_chars", DEFAULT_NAME_MAX_CHARS))
+	return out.strip_edges().left(maxi(0, max_chars)).strip_edges()
 
 
 static func _migrate_step(data: Dictionary, from_version: int) -> Dictionary:

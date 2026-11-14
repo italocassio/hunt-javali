@@ -255,9 +255,12 @@ func apply_hunt_result(result: HuntResult) -> void:
 		var n: int = mini(int(result.consumables_used[id]), int(_inventory.items.get(item_id, 0)))
 		if n > 0:
 			_inventory.remove_item(item_id, n)
-	var progressed: bool = result.is_victory()
+	# Network hunts: a win on a contract the player had not unlocked pays but does not advance progression.
+	var won: bool = result.is_victory()
+	var progressed: bool = won and result.counts_for_progression
 	if progressed:
 		_progression.mark_won(result.map_id, result.contract_index, result.crop_health_pct)
+	if won:
 		_stats["hunts_won"] = int(_stats.get("hunts_won", 0)) + 1
 	_stats["hunts_played"] = int(_stats.get("hunts_played", 0)) + 1
 	_stats["boars_killed"] = int(_stats.get("boars_killed", 0)) + result.kills.size()

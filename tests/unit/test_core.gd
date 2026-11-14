@@ -21,7 +21,31 @@ func test_hunt_result_defaults_and_dict() -> void:
 	var json_text: String = JSON.stringify(d)
 	ok(json_text != "" and JSON.parse_string(json_text) is Dictionary, "to_dict serializa em JSON")
 	var outcomes: PackedStringArray = PackedStringArray(HuntResult.Outcome.keys())
-	eq(outcomes, PackedStringArray(["VICTORY", "DEFEAT_CROP", "DEFEAT_DEATH", "ABANDONED"]), "enum Outcome")
+	eq(outcomes, PackedStringArray(["VICTORY", "DEFEAT_CROP", "DEFEAT_DEATH", "ABANDONED", "DISCONNECTED"]), "enum Outcome")
+	eq(HuntResult.Outcome.VICTORY, 0, "VICTORY continua 0")
+	eq(HuntResult.Outcome.ABANDONED, 3, "ABANDONED continua 3")
+	eq(HuntResult.Outcome.DISCONNECTED, 4, "DISCONNECTED e o quinto valor, no fim")
+	var dc: HuntResult = HuntResult.new()
+	dc.outcome = HuntResult.Outcome.DISCONNECTED
+	ok(not dc.is_victory(), "DISCONNECTED nao e vitoria")
+	eq(dc.to_dict()["outcome"], "DISCONNECTED", "DISCONNECTED no dict")
+
+
+func test_hunt_result_coop_defaults() -> void:
+	var r: HuntResult = HuntResult.new()
+	eq(r.counts_for_progression, true, "conta para progressao por padrao (solo)")
+	eq(r.player_count, 1, "player_count padrao 1")
+	eq(r.team_kills, 0, "team_kills padrao 0")
+	eq(r.scoreboard.size(), 0, "scoreboard vazio no solo")
+	ok(r.scoreboard is Array, "scoreboard e Array")
+	var other: HuntResult = HuntResult.new()
+	other.scoreboard.append({"slot": 1, "name": "A", "kills": 2, "money": 10})
+	eq(r.scoreboard.size(), 0, "scoreboard nao e compartilhado entre instancias")
+
+
+func test_hunt_request_coop_defaults() -> void:
+	eq(HuntRequest.new().player_count, 1, "player_count padrao 1")
+	eq(HuntRequest.make_debug(&"mato_grosso", 0).player_count, 1, "make_debug e solo")
 
 
 func test_hit_info_defaults() -> void:
@@ -29,6 +53,69 @@ func test_hit_info_defaults() -> void:
 	eq(h.target_id, -1, "target_id padrao -1")
 	eq(h.zone, &"", "zona vazia")
 	eq(h.damage, 0.0, "dano 0")
+	eq(h.shooter_slot, 0, "shooter_slot padrao 0 (anfitriao/solo)")
+
+
+func test_kill_info_defaults() -> void:
+	var k: KillInfo = KillInfo.new()
+	eq(k.killer_slot, 0, "killer_slot padrao 0 (anfitriao/solo)")
+
+
+func test_scene_paths_coop() -> void:
+	eq(ScenePaths.LOBBY, "res://src/ui/lobby/lobby.tscn", "LOBBY")
+	eq(ScenePaths.REMOTE_HUNTER, "res://src/player/remote_hunter.tscn", "REMOTE_HUNTER")
+
+
+func test_player_base_solo_virtuals() -> void:
+	var p: PlayerBase = PlayerBase.new()
+	track(p)
+	eq(p.slot, 0, "slot padrao 0")
+	ok(p.is_local(), "is_local verdadeiro")
+	ok(p.is_present(), "is_present verdadeiro")
+	eq(p.get_display_name(), "", "nome vazio")
+	var out: StreamPeerBuffer = StreamPeerBuffer.new()
+	p.net_write_state(out)   # base is a no-op: concrete classes write exactly HUNTER_STATE_BYTES
+	p.net_apply_state(out)
+	p.setup_remote(1, "x", &"", null)
+	eq(p.slot, 0, "setup_remote da base nao mexe no slot")
+
+
+func test_hunt_world_solo_virtuals() -> void:
+	var w: HuntWorld = HuntWorld.new()
+	track(w)
+	eq(w.get_local_slot(), 0, "slot local 0")
+	eq(w.get_hunters().size(), 0, "sem jogador: lista vazia")
+	eq(w.get_hunter(0), null, "sem jogador: get_hunter nulo")
+	var out: StreamPeerBuffer = StreamPeerBuffer.new()
+	w.net_write_snapshot(out)
+	w.net_take_events(out)
+	w.net_take_claims(out)
+	eq(out.get_size(), 0, "ganchos de rede da base nao escrevem nada")
+	w.net_apply_snapshot(out)
+	w.net_apply_event(NetCodec.EV_MESSAGE, out, 0)
+	w.net_apply_claim(1, NetCodec.C_SHOT, out, 0)
+	w.net_peer_left(1)
+	w.net_connection_lost()
+	ok(not w.is_hunt_over(), "ganchos de rede da base nao encerram a caçada")
+
+
+func test_hunter_visual_fallback() -> void:
+	for slot: int in [0, 1, 2, 3, 4, -1, 7]:
+		var v: HunterVisualBase = HunterVisualBase.create_fallback()
+		v.setup(slot, &"carbine_22")
+		track(v)
+		ok(v.get_muzzle() != null, "Muzzle no slot %d" % slot)
+		ok(v.get_name_anchor() != null, "NameAnchor no slot %d" % slot)
+		v.play_death()
+		v.play_death(true)
+		v.set_weapon(&"")
+	eq(HunterVisualBase.slot_color(0), HunterVisualBase.SLOT_COLORS[0], "cor do slot 0")
+	eq(HunterVisualBase.slot_color(4), HunterVisualBase.SLOT_COLORS[0], "slot 4 volta ao 0")
+	eq(HunterVisualBase.slot_color(-1), HunterVisualBase.SLOT_COLORS[3], "slot -1 nao sai do vetor")
+	var seen: Dictionary = {}
+	for c: Color in HunterVisualBase.SLOT_COLORS:
+		seen[c.to_html()] = true
+	eq(seen.size(), HunterVisualBase.SLOT_COUNT, "cores dos slots distintas")
 
 
 func test_hunt_request() -> void:

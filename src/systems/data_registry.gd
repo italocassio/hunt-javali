@@ -10,6 +10,7 @@ const FILES: Dictionary = {
 	"maps": "res://data/maps.json",
 	"gold": "res://data/gold_packages.json",
 	"pix": "res://data/pix_config.json",
+	"net": "res://data/net.json",
 }
 # file key -> list key inside the file
 const LISTS: Dictionary = {
@@ -56,6 +57,10 @@ func get_load_errors() -> PackedStringArray:
 
 func get_game() -> Dictionary:
 	return _raw.get("game", {})
+
+
+func get_net() -> Dictionary:
+	return _raw.get("net", {})
 
 
 func get_weapon(id: StringName) -> Dictionary:
@@ -203,7 +208,8 @@ func _validate() -> void:
 	for entry: Variant in _raw["boars"].get("types", []):
 		if entry is Dictionary:
 			_require_fields(entry, ["weight_min_kg", "weight_max_kg", "health_per_kg", "value_per_kg", "aggression"], str(entry.get("id", "?")))
-	for needed: String in ["economy", "loadout", "shop", "hunt", "player", "quality_presets"]:
+	_require_fields(_raw["net"], ["server_url", "dev_server_url", "max_players", "name_max_chars", "max_frame_bytes"], "net")
+	for needed: String in ["economy", "loadout", "shop", "hunt", "player", "quality_presets", "coop"]:
 		if not _raw["game"].has(needed):
 			_errors.append("Data: game.json lacks '%s'" % needed)
 	for wid: Variant in _raw["game"].get("economy", {}).get("start_weapons", []):

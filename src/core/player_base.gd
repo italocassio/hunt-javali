@@ -3,6 +3,8 @@ extends CharacterBody3D
 ## Contract hunter <-> hunt. Package A implements Player (extends this). Package B uses only this API.
 ## Origin = feet. Forward = -Z (yaw on this node).
 
+var slot: int = 0
+
 
 func setup(_request: HuntRequest, _world: HuntWorld) -> void:
 	pass
@@ -62,6 +64,30 @@ func get_ammo_reserve() -> int:
 
 func is_reloading() -> bool:
 	return false
+
+
+func setup_remote(_slot: int, _display_name: String, _weapon_id: StringName, _world: HuntWorld) -> void:
+	pass
+
+
+func is_local() -> bool:      # false for RemoteHunter
+	return true
+
+
+func is_present() -> bool:    # false while a remote hunter has been silent for net.peer_absent_s: AI ignores it
+	return true
+
+
+func get_display_name() -> String:
+	return ""
+
+
+func net_write_state(_out: StreamPeerBuffer) -> void:   # writes exactly NetCodec.HUNTER_STATE_BYTES
+	pass
+
+
+func net_apply_state(_inp: StreamPeerBuffer) -> void:   # reads exactly NetCodec.HUNTER_STATE_BYTES
+	pass
 
 
 # --- Bot hooks (tests) ---

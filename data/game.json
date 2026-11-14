@@ -48,6 +48,15 @@
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
+  "coop": {
+    "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],
+    "extra_group_delay_s": 20.0,
+    "spawn_spacing_m": 2.0,
+    "spectate_delay_s": 2.0,
+    "spectate_distance_m": 3.5,
+    "spectate_height_m": 2.0,
+    "name_tag_max_m": 120.0
+  },
   "quality_presets": {
     "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 0.75, "view_distance_m": 160},
     "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 0.9,  "view_distance_m": 220},

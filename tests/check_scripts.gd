@@ -57,9 +57,11 @@ func _run() -> void:
 	await _case("game_events_signals", _check_game_events)
 	await _case("autoloads_have_no_class_name", _check_no_class_name_in_autoloads)
 	await _case("class_declarations_core", _check_core_classes)
-	await _case("class_declarations_package_A", _check_package_classes.bind("A"))
+	await _case("class_declarations_core_net", _check_core_additions)
+	await _case("class_declarations_package_A",_check_package_classes.bind("A"))
 	await _case("class_declarations_package_B", _check_package_classes.bind("B"))
 	await _case("class_declarations_systems", _check_package_classes.bind("S"))
+	await _case("class_declarations_net", _check_package_classes.bind("N"))
 	await _case("global_class_names_unique", _check_unique_class_names)
 	await _case("layering_no_cross_package_refs", _check_layering)
 	await _case("no_ext_resource_to_assets_outside_assets", _check_ext_resources)
@@ -218,7 +220,7 @@ func _check_methods(node: Object, specs: Array[String], label: String) -> void:
 func _check_autoload_signatures() -> void:
 	var table: Dictionary = {
 		"Data": Sigs.DATA_METHODS, "Profile": Sigs.PROFILE_METHODS, "InputSetup": Sigs.INPUT_SETUP_METHODS,
-		"Sfx": Sigs.SFX_METHODS, "Router": Sigs.ROUTER_METHODS,
+		"Sfx": Sigs.SFX_METHODS, "Router": Sigs.ROUTER_METHODS, "Net": Sigs.NET_METHODS,
 	}
 	for aname: String in table:
 		var node: Node = get_tree().root.get_node_or_null(aname)
@@ -242,6 +244,7 @@ func _check_autoload_signatures() -> void:
 		var consts: Dictionary = profile.get_script().get_script_constant_map()
 		_t.call("eq", consts.get("SAVE_VERSION", -1), 2, "Profile.SAVE_VERSION")
 		_t.call("eq", consts.get("DEFAULT_SAVE_PATH", ""), "user://save.json", "Profile.DEFAULT_SAVE_PATH")
+	_check_net_autoload()
 	var input_setup: Node = get_tree().root.get_node_or_null("InputSetup")
 	if input_setup != null:
 		var iconsts: Dictionary = input_setup.get_script().get_script_constant_map()
@@ -254,6 +257,35 @@ func _check_autoload_signatures() -> void:
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))
 			_t.call("eq", got, expected, "InputSetup.ACTIONS")
+
+
+## Net (docs/multiplayer.md section 3.4): signals, enums and the offline state of the F1 stub.
+func _check_net_autoload() -> void:
+	var net: Node = get_tree().root.get_node_or_null("Net")
+	if net == null:
+		return   # reported by the autoload checks
+	var consts: Dictionary = (net.get_script() as Script).get_script_constant_map()
+	for ename: String in Sigs.NET_ENUMS:
+		if not consts.has(ename):
+			_t.call("fail", "Net: falta o enum %s" % ename)
+			continue
+		var members: Array = (consts[ename] as Dictionary).keys()
+		_t.call("eq", members, Sigs.NET_ENUMS[ename], "Net.%s (membros e ordem)" % ename)
+	var entries: Array[Dictionary] = net.get_signal_list()
+	var declared: Dictionary = {}
+	for spec_text: String in Sigs.NET_SIGNALS:
+		var spec: Dictionary = Sigs.parse(spec_text)
+		declared[spec["name"]] = true
+		var entry: Dictionary = Sigs.find_signal(entries, spec["name"])
+		if entry.is_empty():
+			_t.call("fail", "Net: falta o sinal %s" % spec_text)
+			continue
+		var diff: String = Sigs.compare_signal(entry, spec)
+		if diff != "":
+			_t.call("fail", "Net.%s: %s" % [spec["name"], diff])
+	for s: Dictionary in (net.get_script() as Script).get_script_signal_list():
+		if not declared.has(str(s["name"])):
+			_t.call("fail", "Net declara sinal fora do contrato: %s" % s["name"])
 
 
 func _check_game_events() -> void:
@@ -310,6 +342,8 @@ func _check_core_classes() -> void:
 		"HuntWorld": "res://src/core/hunt_world.gd", "BoarVisualBase": "res://src/core/boar_visual_base.gd",
 		"DogVisualBase": "res://src/core/dog_visual_base.gd", "WeaponViewBase": "res://src/core/weapon_view_base.gd",
 		"MapEnvironmentBase": "res://src/core/map_environment_base.gd",
+		"HunterVisualBase": "res://src/core/hunter_visual_base.gd",
+		"NetCodec": "res://src/core/net_codec.gd", "NetPeerInfo": "res://src/core/net_peer_info.gd",
 	}
 	var classes: Dictionary = _global_classes()
 	for cname: String in core:
@@ -317,6 +351,55 @@ func _check_core_classes() -> void:
 			_t.call("fail", "class_name %s nao registrado (rode --import?)" % cname)
 		else:
 			_t.call("eq", str(classes[cname]["path"]), core[cname], "caminho de %s" % cname)
+
+
+## Additions of docs/multiplayer.md section 3.6 to src/core: methods, properties and constant values.
+func _check_core_additions() -> void:
+	var classes: Dictionary = _global_classes()
+	for spec: Dictionary in Sigs.CORE_CLASSES:
+		var cname: String = spec["name"]
+		var script: GDScript = ResourceLoader.load(spec["path"]) as GDScript
+		if script == null:
+			_t.call("fail", "%s: nao carrega" % spec["path"])
+			continue
+		_t.call("eq", script.get_global_name(), cname, "%s: class_name declarado" % spec["path"])
+		_t.call("ok", classes.has(cname), "%s: class_name fora do cache global (rode --import)" % cname)
+		var chain: Array[String] = _base_chain(script)
+		var want_base: String = spec["base"]
+		var base_ok: bool = want_base in chain
+		for native: String in chain:
+			if not base_ok and ClassDB.class_exists(native) and ClassDB.is_parent_class(native, want_base):
+				base_ok = true
+		_t.call("ok", base_ok, "%s deve estender %s (cadeia: %s)" % [cname, want_base, str(chain)])
+		var entries: Array[Dictionary] = script.get_script_method_list()
+		for spec_text: String in spec.get("methods", []):
+			var parsed: Dictionary = Sigs.parse(spec_text)
+			var entry: Dictionary = Sigs.find_method(entries, parsed["name"])
+			if entry.is_empty():
+				_t.call("fail", "%s: falta o metodo %s" % [cname, spec_text])
+				continue
+			var diff: String = Sigs.compare_method(entry, parsed)
+			if diff != "":
+				_t.call("fail", "%s.%s: %s" % [cname, parsed["name"], diff])
+		var props: Array[String] = []
+		for p: Dictionary in script.get_script_property_list():
+			props.append(str(p["name"]))
+		for want: String in spec.get("props", []):
+			_t.call("ok", want in props, "%s: falta a propriedade '%s'" % [cname, want])
+		var consts: Dictionary = script.get_script_constant_map()
+		var want_consts: Dictionary = spec.get("consts", {})
+		for key: String in want_consts:
+			if not consts.has(key):
+				_t.call("fail", "%s: falta a constante %s" % [cname, key])
+			else:
+				_t.call("eq", consts[key], want_consts[key], "%s.%s" % [cname, key])
+	# Outcome gets its new member at the end (values of the old ones must not move).
+	_t.call("eq", PackedStringArray(HuntResult.Outcome.keys()),
+		PackedStringArray(["VICTORY", "DEFEAT_CROP", "DEFEAT_DEATH", "ABANDONED", "DISCONNECTED"]), "HuntResult.Outcome")
+	# Static tables of NetCodec: sizes are part of the wire format.
+	_t.call("eq", NetCodec.BOAR_STATES.size(), 12, "NetCodec.BOAR_STATES")
+	_t.call("eq", NetCodec.DOG_STATES.size(), 7, "NetCodec.DOG_STATES")
+	_t.call("eq", NetCodec.ZONES.size(), 5, "NetCodec.ZONES")
 
 
 func _base_chain(script: Script) -> Array[String]:
@@ -434,15 +517,18 @@ func _class_names(pkg: String) -> Array[String]:
 
 
 func _check_layering() -> void:
-	var a_classes: Array[String] = _class_names("A")
-	var b_classes: Array[String] = _class_names("B")
-	var s_classes: Array[String] = _class_names("S")
-	# folder -> forbidden class names
+	# Planned classes (docs/multiplayer.md section 3.3) count even before their file exists.
+	var a_classes: Array[String] = _class_names("A") + Sigs.PLANNED_A_CLASSES
+	var b_classes: Array[String] = _class_names("B") + Sigs.PLANNED_B_CLASSES
+	var s_classes: Array[String] = _class_names("S") + Sigs.PLANNED_S_CLASSES
+	var n_classes: Array[String] = _class_names("N") + Sigs.PLANNED_NET_CLASSES
+	# folder -> forbidden class names. Package N (src/net) is private: only the autoload Net and src/core are shared.
 	var rules: Array[Array] = [
-		[["res://src/input", "res://src/player", "res://src/weapons", "res://src/hud"], b_classes + s_classes, "pacote A"],
-		[["res://src/hunt", "res://src/world", "res://src/boars", "res://src/dogs"], a_classes + s_classes, "pacote B"],
-		[["res://src/systems", "res://src/ui"], a_classes + b_classes, "game-systems"],
-		[["res://assets"], a_classes + b_classes + s_classes, "art-director"],
+		[["res://src/input", "res://src/player", "res://src/weapons", "res://src/hud"], b_classes + s_classes + n_classes, "pacote A"],
+		[["res://src/hunt", "res://src/world", "res://src/boars", "res://src/dogs"], a_classes + s_classes + n_classes, "pacote B"],
+		[["res://src/systems", "res://src/ui"], a_classes + b_classes + n_classes, "game-systems"],
+		[["res://assets"], a_classes + b_classes + s_classes + n_classes, "art-director"],
+		[["res://src/net"], a_classes + b_classes + s_classes, "pacote N"],
 	]
 	var checked: int = 0
 	for rule: Array in rules:

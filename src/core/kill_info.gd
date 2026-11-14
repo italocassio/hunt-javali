@@ -10,6 +10,7 @@ var clean_kill: bool = false
 var reward_money: int = 0
 var position: Vector3 = Vector3.ZERO
 var time_s: float = 0.0
+var killer_slot: int = 0
 
 
 func to_dict() -> Dictionary:

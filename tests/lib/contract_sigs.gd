@@ -33,7 +33,59 @@ const GAME_EVENTS_SIGNALS: Array[String] = [
 	"progression_changed()",
 	"settings_changed(key: String, value: Variant)",
 	"touch_mode_changed(is_touch: bool)",
+	# docs/multiplayer.md section 3.5
+	"hunter_joined(slot: int, display_name: String)",
+	"hunter_left(slot: int)",
+	"hunter_died(slot: int)",
+	"spectate_changed(slot: int)",
+	"net_stall_changed(stalled: bool)",
 ]
+
+## docs/multiplayer.md section 3.4: autoload Net.
+const NET_METHODS: Array[String] = [
+	"is_configured() -> bool",
+	"is_active() -> bool",
+	"is_in_room() -> bool",
+	"is_host() -> bool",
+	"get_role() -> int",
+	"get_room_state() -> int",
+	"get_room_code() -> String",
+	"get_room_link() -> String",
+	"get_local_slot() -> int",
+	"get_player_count() -> int",
+	"get_roster() -> Array[NetPeerInfo]",
+	"get_peer(slot: int) -> NetPeerInfo",
+	"get_selected_map_id() -> StringName",
+	"get_selected_contract_index() -> int",
+	"get_link_path(slot: int) -> int",
+	"create_room() -> void",
+	"join_room(code: String) -> void",
+	"leave_room() -> void",
+	"set_ready(ready: bool) -> void",
+	"host_select_contract(map_id: StringName, contract_index: int) -> bool",
+	"host_start_hunt() -> bool",
+	"take_url_room_code() -> String",
+	"bind_world(world: HuntWorld) -> void",
+	"unbind_world(world: HuntWorld) -> void",
+	"flush() -> void",
+	# approved by the coordination, outside the original section 3.4 (net.gd)
+	"is_peer_absent(slot: int) -> bool",
+	"get_hunt_seed() -> int",
+]
+
+const NET_SIGNALS: Array[String] = [
+	"room_state_changed(state: int)",
+	"room_error(code: StringName, message: String)",
+	"roster_changed()",
+	"hunt_go()",
+]
+
+## Enum name -> member names in declaration order (the order is the numeric value).
+const NET_ENUMS: Dictionary = {
+	"Role": ["OFFLINE", "HOST", "CLIENT"],
+	"RoomState": ["NONE", "CONNECTING", "LOBBY", "LOADING", "IN_HUNT"],
+	"Path": ["NONE", "RELAY", "RTC"],
+}
 
 const DATA_METHODS: Array[String] = [
 	"reload() -> void",
@@ -127,18 +179,25 @@ const AUTOLOADS: Dictionary = {
 	"InputSetup": ["res://src/input/input_setup.gd"],
 	"Sfx": ["res://assets/audio/sfx_library.gd"],
 	"Router": ["res://src/systems/router.gd"],
+	"Net": ["res://src/net/net.gd"],
 }
-const AUTOLOAD_ORDER: Array[String] = ["GameEvents", "Data", "Profile", "InputSetup", "Sfx", "Router"]
+const AUTOLOAD_ORDER: Array[String] = ["GameEvents", "Data", "Profile", "InputSetup", "Sfx", "Router", "Net"]
 
 const ROUTER_PROPERTIES: Array[String] = ["selected_map_id", "selected_contract_index", "last_result"]
 const PROFILE_CONSTANTS: Array[String] = ["SAVE_VERSION", "DEFAULT_SAVE_PATH"]
 const INPUT_CONSTANTS: Array[String] = ["ACTIONS"]
 
 ## Public classes of packages A, B and game-systems (6.8, 6.9, 6.10).
-## name -> {path, base (script class name or native class), methods, signals, props}
+## name -> {path, base (script class name or native class), methods, signals, props, pkg (A, B, S or N)}
 const CLASSES: Array[Dictionary] = [
 	# --- Package A ---
-	{"name": "Player", "path": "res://src/player/player.gd", "base": "PlayerBase", "pkg": "A"},
+	{"name": "Player", "path": "res://src/player/player.gd", "base": "PlayerBase", "pkg": "A",
+		"methods": ["get_spectator() -> SpectatorCamera", "is_spectating() -> bool"]},
+	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
+	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
+		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
+			"get_target_slot() -> int", "get_candidates() -> Array[PlayerBase]", "switch_target() -> bool",
+			"is_active() -> bool"]},
 	{"name": "Weapon", "path": "res://src/weapons/weapon.gd", "base": "Node", "pkg": "A"},
 	{"name": "WeaponHolder", "path": "res://src/weapons/weapon_holder.gd", "base": "Node3D", "pkg": "A"},
 	{"name": "Hitscan", "path": "res://src/weapons/hitscan.gd", "base": "RefCounted", "pkg": "A",
@@ -149,19 +208,55 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
 	{"name": "TouchControls", "path": "res://src/hud/touch/touch_controls.gd", "base": "CanvasLayer", "pkg": "A"},
 	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
+	# docs/multiplayer.md section 3.3 / 3.6: an ally in the world. The PlayerBase virtuals it overrides.
+	{"name": "RemoteHunter", "path": "res://src/player/remote_hunter.gd", "base": "PlayerBase", "pkg": "A",
+		"methods": ["is_local() -> bool", "is_present() -> bool", "get_display_name() -> String", "is_alive() -> bool",
+			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
 	# --- Package B ---
 	{"name": "HuntController", "path": "res://src/hunt/hunt_controller.gd", "base": "HuntWorld", "pkg": "B",
 		"props": ["route_on_finish"]},
-	{"name": "BoarSpawner", "path": "res://src/hunt/boar_spawner.gd", "base": "Node", "pkg": "B"},
+	{"name": "BoarSpawner", "path": "res://src/hunt/boar_spawner.gd", "base": "Node", "pkg": "B",
+		"methods": ["scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array",
+			"notify_shot(origin: Vector3, noise_radius_m: float) -> void"]},
+	{"name": "HuntHostSync", "path": "res://src/hunt/hunt_host_sync.gd", "base": "Node", "pkg": "B",
+		"methods": ["setup(world: HuntController, spawner: BoarSpawner) -> void", "write_boars(out: StreamPeerBuffer) -> void",
+			"take_events(out: StreamPeerBuffer) -> void", "queue_bait(at: Vector3, duration_s: float) -> void",
+			"queue_message(target_slot: int, msg: int) -> void",
+			"queue_hunt_end(outcome: int, crop_pct: float, duration_s: float, killed: int, total: int, entries: Array) -> void",
+			"queue_death(boar: Boar, kill: KillInfo, killed: int, total: int) -> void",
+			"apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void"]},
+	{"name": "HuntReplica", "path": "res://src/hunt/hunt_replica.gd", "base": "Node3D", "pkg": "B",
+		"signals": ["kill_confirmed(kill: KillInfo, killed: int, total: int)", "bait_received(at: Vector3, duration_s: float)",
+			"message_received(msg: int)", "hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)"],
+		"methods": ["setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void",
+			"render_time_ms() -> float", "apply_snapshot_boars(inp: StreamPeerBuffer, t_ms: int) -> void",
+			"apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void",
+			"apply_crop_state(crop_pct: float, flags: int) -> void", "queue_bait_claim(at: Vector3) -> void",
+			"take_claims(out: StreamPeerBuffer) -> void", "refresh_thermal() -> void", "is_thermal_on() -> bool",
+			"get_alive_ids() -> PackedInt32Array", "get_puppet(boar_id: int) -> BoarPuppet",
+			"get_boar_position(boar_id: int) -> Vector3", "get_boar_type(boar_id: int) -> StringName",
+			"get_boar_zone_position(boar_id: int, zone: StringName) -> Vector3",
+			"get_nearest_boar_position(from: Vector3) -> Vector3"]},
+	{"name": "BoarPuppet", "path": "res://src/boars/boar_puppet.gd", "base": "Node3D", "pkg": "B",
+		"props": ["boar_id", "type_id", "weight_kg", "state", "wounded", "alive"],
+		"signals": ["hit_by_local(puppet: BoarPuppet, hit: HitInfo)"],
+		"methods": ["get_xz() -> Vector2", "get_yaw() -> float", "get_zone_position(zone: StringName) -> Vector3",
+			"zone_multiplier(zone: StringName) -> float", "set_highlight(on: bool) -> void", "is_highlighted() -> bool",
+			"push_sample(t_ms: float, xz: Vector2, yaw: float, st: int) -> void",
+			"update_pose(render_t_ms: float, delta: float) -> void", "try_charge_hit(hunter: PlayerBase) -> bool",
+			"play_hit_feedback(zone: StringName) -> void", "play_attack() -> void", "die(xz: Vector2, yaw: float) -> void"]},
 	{"name": "FallbackPlayer", "path": "res://src/hunt/debug/fallback_player.gd", "base": "PlayerBase", "pkg": "B"},
 	{"name": "MapRoot", "path": "res://src/world/map_root.gd", "base": "Node3D", "pkg": "B",
-		"props": ["map_size_m", "grid_resolution", "terrain_seed", "height_amplitude_m", "base_flora"]},
+		"props": ["map_size_m", "grid_resolution", "terrain_seed", "height_amplitude_m", "base_flora"],
+		"methods": ["build_flora(density: float, sync_layout: bool = false) -> void"]},
 	{"name": "Heightmap", "path": "res://src/world/heightmap.gd", "base": "RefCounted", "pkg": "B",
 		"methods": ["get_height(x: float, z: float) -> float", "get_normal(x: float, z: float) -> Vector3"]},
 	{"name": "Terrain", "path": "res://src/world/terrain.gd", "base": "Node3D", "pkg": "B"},
 	{"name": "CropField", "path": "res://src/world/crop_field.gd", "base": "Marker3D", "pkg": "B",
 		"props": ["size_m", "crop"]},
-	{"name": "CropManager", "path": "res://src/world/crop_manager.gd", "base": "Node3D", "pkg": "B"},
+	{"name": "CropManager", "path": "res://src/world/crop_manager.gd", "base": "Node3D", "pkg": "B",
+		"signals": ["patch_eaten(index: int)"],
+		"methods": ["apply_eaten(indices: PackedInt32Array) -> void", "set_replicated_health(pct: float) -> void"]},
 	{"name": "PropSpawn", "path": "res://src/world/prop_spawn.gd", "base": "Marker3D", "pkg": "B",
 		"props": ["prop_id", "collision_size", "footprint_radius_m"]},
 	{"name": "WaterBody", "path": "res://src/world/water_body.gd", "base": "Marker3D", "pkg": "B",
@@ -219,6 +314,102 @@ const CLASSES: Array[Dictionary] = [
 		"signals": ["redeem_finished(ok: bool, gold: int, message: String)"],
 		"methods": ["_init(gateway: PixGateway = null)", "get_packages() -> Array",
 			"get_pix_payload(package_id: StringName) -> String", "redeem(code: String) -> void"]},
+	# --- F6 UI (docs/multiplayer.md 6.11): the loadout editor shared by Preparation and the lobby, and the lobby ---
+	{"name": "LoadoutPanel", "path": "res://src/ui/common/loadout_panel.gd", "base": "VBoxContainer", "pkg": "S",
+		"signals": ["changed()"],
+		"methods": ["setup(root: Control, dog_locked_text: String = \"\") -> void", "refresh() -> void"]},
+	{"name": "Lobby", "path": "res://src/ui/lobby/lobby.gd", "base": "Control", "pkg": "S",
+		"methods": ["player_label(info: NetPeerInfo, slot: int, is_local: bool) -> String",
+			"status_text(info: NetPeerInfo) -> String", "path_text(path: int) -> String"]},
+	# --- package N (src/net, internal: the contract of section 3.3 only names the classes; these are the entry
+	# points that Net, the sandboxes and the tests call, so a rename shows up here) ---
+	{"name": "NetSession", "path": "res://src/net/net_session.gd", "base": "RefCounted", "pkg": "N",
+		"signals": ["state_changed(state: int)", "failed(code: StringName, message: String)", "roster_changed()",
+			"hunt_go()", "stall_changed(stalled: bool)"],
+		"methods": ["setup(cfg: Dictionary, env: Dictionary) -> void", "get_role() -> int", "get_state() -> int",
+			"get_code() -> String", "get_local_slot() -> int", "get_player_count() -> int",
+			"get_roster() -> Array[NetPeerInfo]", "get_peer(slot: int) -> NetPeerInfo",
+			"get_selected_map_id() -> StringName", "get_selected_contract_index() -> int", "get_rng_seed() -> int",
+			"is_peer_absent(slot: int) -> bool", "get_link_path(slot: int) -> int", "create() -> void",
+			"join(code: String) -> void", "leave() -> void", "process(delta: float) -> void", "set_ready(ready: bool) -> void",
+			"host_select_contract(map_id: StringName, contract_index: int) -> bool", "host_start_hunt() -> bool",
+			"bind_world(world: HuntWorld) -> void", "unbind_world(world: HuntWorld) -> void", "flush() -> void"]},
+	{"name": "NetSignaling", "path": "res://src/net/net_signaling.gd", "base": "RefCounted", "pkg": "N",
+		"methods": ["build_url(base: String, params: Dictionary) -> String",
+			"open(url: String, cfg: Dictionary, now_ms: int) -> bool", "is_open() -> bool", "is_closed() -> bool",
+			"poll(now_ms: int) -> void", "take_messages() -> Array", "take_relay() -> Array",
+			"send_json(msg: Dictionary) -> bool", "flush() -> void",
+			"send_relay(to_id: int, payload: PackedByteArray) -> bool", "close(now_ms: int, say_leave: bool = true) -> void"]},
+	{"name": "NetLink", "path": "res://src/net/net_link.gd", "base": "RefCounted", "pkg": "N",
+		"signals": ["path_changed()"],
+		"methods": ["get_path() -> int", "is_lost() -> bool", "send_state(records: PackedByteArray) -> void",
+			"send_events(records: PackedByteArray) -> void", "flush_now() -> void",
+			"receive_relay(payload: PackedByteArray) -> void", "receive_frame(frame: PackedByteArray) -> void",
+			"take_state() -> PackedByteArray", "take_events() -> Array", "poll(now_ms: int) -> void", "close() -> void"]},
+	# NetRtc extends the inner class NetLink.Direct, whose global name is empty: the base check uses RefCounted.
+	{"name": "NetRtc", "path": "res://src/net/net_rtc.gd", "base": "RefCounted", "pkg": "N",
+		"methods": ["start(ice_servers: Array, offerer: bool, drop_ice: bool, signal_sink: Callable) -> bool",
+			"handle_signal(data: Dictionary) -> void", "poll() -> void", "is_open() -> bool", "is_failed() -> bool",
+			"send_state(frame: PackedByteArray) -> bool", "send_event(frame: PackedByteArray) -> bool",
+			"take_frames() -> Array", "close() -> void"]},
+	{"name": "NetLoopback", "path": "res://src/net/net_loopback.gd", "base": "RefCounted", "pkg": "N",
+		"methods": ["attach(link_a: NetLink, link_b: NetLink, cfg: Dictionary, with_direct: bool = false) -> void",
+			"open_direct() -> void", "fail_direct() -> void", "step() -> void"]},
+]
+
+
+## Classes the multiplayer contract plans (docs/multiplayer.md section 3.3) that may not exist yet.
+## Only the names matter: they feed the layering rule of check_scripts (section 3.2) even before the file exists.
+## Once a class is delivered, move it to CLASSES with its signatures (RemoteHunter, HuntHostSync, HuntReplica,
+## BoarPuppet and the five classes of package N were moved in F4/F5; SpectatorCamera and LoadoutPanel in F6).
+const PLANNED_NET_CLASSES: Array[String] = []
+const PLANNED_A_CLASSES: Array[String] = []
+const PLANNED_B_CLASSES: Array[String] = ["DogPuppet"]
+const PLANNED_S_CLASSES: Array[String] = []
+
+## Additions of docs/multiplayer.md section 3.6 to src/core (the core classes themselves are listed in
+## check_scripts.gd). name -> {path, base, methods, props, consts}. Constants compare by value.
+const CORE_CLASSES: Array[Dictionary] = [
+	{"name": "NetCodec", "path": "res://src/core/net_codec.gd", "base": "RefCounted",
+		"methods": ["make_shot_id(slot: int, counter: int) -> int", "shot_slot(shot_id: int) -> int",
+			"put_xz(out: StreamPeerBuffer, rect: Rect2, x: float, z: float) -> void",
+			"get_xz(inp: StreamPeerBuffer, rect: Rect2) -> Vector2",
+			"angle_to_u8(rad: float) -> int", "u8_to_angle(q: int) -> float",
+			"angle_to_u16(rad: float) -> int", "u16_to_angle(q: int) -> float",
+			"seq_newer(a: int, b: int) -> bool"],
+		"consts": {"PROTOCOL_VERSION": 1, "LANE_STATE": 0, "LANE_EVENT": 1, "FRAME_HEADER_BYTES": 5,
+			"RECORD_HEADER_BYTES": 3, "HUNTER_STATE_BYTES": 14, "NO_SLOT": 255,
+			"L_READY": 0x10, "L_LOBBY": 0x11, "L_START": 0x12, "L_LOADED": 0x13, "L_GO": 0x14, "L_NEED_RELAY": 0x15,
+			"H_SNAPSHOT": 0x20, "EV_BOAR_SPAWN": 0x21, "EV_BOAR_HIT": 0x22, "EV_BOAR_ATTACK": 0x23,
+			"EV_BOAR_DEATH": 0x24, "EV_CROP_EATEN": 0x25, "EV_BAIT": 0x26, "EV_DOG_MARK": 0x27, "EV_DOG_CMD": 0x28,
+			"EV_MESSAGE": 0x29, "EV_HUNT_END": 0x2A, "EV_FULL_SYNC": 0x2B,
+			"C_STATE": 0x40, "C_SHOT": 0x41, "C_CHARGE_HIT": 0x42, "C_BAIT": 0x43, "C_DOG_CMD": 0x44,
+			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32}},
+	{"name": "NetPeerInfo", "path": "res://src/core/net_peer_info.gd", "base": "RefCounted",
+		"props": ["slot", "display_name", "is_host", "ready", "loaded", "weapon_id", "dog_id", "path"]},
+	{"name": "HunterVisualBase", "path": "res://src/core/hunter_visual_base.gd", "base": "Node3D",
+		"methods": ["setup(slot: int, weapon_id: StringName) -> void", "play_death(instant: bool = false) -> void",
+			"slot_color(slot: int) -> Color"]},
+	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count"]},
+	{"name": "HuntResult", "path": "res://src/core/hunt_result.gd", "base": "RefCounted",
+		"props": ["counts_for_progression", "player_count", "team_kills", "scoreboard"]},
+	{"name": "KillInfo", "path": "res://src/core/kill_info.gd", "base": "RefCounted", "props": ["killer_slot"]},
+	{"name": "HitInfo", "path": "res://src/core/hit_info.gd", "base": "RefCounted", "props": ["shooter_slot"]},
+	{"name": "ScenePaths", "path": "res://src/core/scene_paths.gd", "base": "RefCounted",
+		"consts": {"LOBBY": "res://src/ui/lobby/lobby.tscn", "REMOTE_HUNTER": "res://src/player/remote_hunter.tscn"}},
+	{"name": "PlayerBase", "path": "res://src/core/player_base.gd", "base": "CharacterBody3D", "props": ["slot"],
+		"methods": ["setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld) -> void",
+			"is_local() -> bool", "is_present() -> bool", "get_display_name() -> String",
+			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
+	{"name": "HuntWorld", "path": "res://src/core/hunt_world.gd", "base": "Node3D",
+		"methods": ["get_hunters() -> Array[PlayerBase]", "get_hunter(slot: int) -> PlayerBase",
+			"get_local_slot() -> int",
+			"net_write_snapshot(out: StreamPeerBuffer) -> void", "net_apply_snapshot(inp: StreamPeerBuffer) -> void",
+			"net_take_events(out: StreamPeerBuffer) -> void",
+			"net_apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void",
+			"net_take_claims(out: StreamPeerBuffer) -> void",
+			"net_apply_claim(slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void",
+			"net_peer_left(slot: int) -> void", "net_connection_lost() -> void"]},
 ]
 
 
@@ -276,6 +467,8 @@ static func _split_top_level(text: String) -> Array[String]:
 
 ## Variant.Type for a contract type name; -1 = any (Variant), -2 = unknown class name (object).
 static func type_code(type_name: String) -> int:
+	if type_name.begins_with("Array["):   # typed arrays are TYPE_ARRAY in the method list
+		return TYPE_ARRAY
 	match type_name:
 		"int", "HuntResult.Outcome":
 			return TYPE_INT
@@ -297,10 +490,16 @@ static func type_code(type_name: String) -> int:
 			return TYPE_DICTIONARY
 		"Array":
 			return TYPE_ARRAY
+		"Color":
+			return TYPE_COLOR
 		"PackedStringArray":
 			return TYPE_PACKED_STRING_ARRAY
 		"PackedInt32Array":
 			return TYPE_PACKED_INT32_ARRAY
+		"PackedByteArray":
+			return TYPE_PACKED_BYTE_ARRAY
+		"Callable":
+			return TYPE_CALLABLE
 		"PackedVector3Array":
 			return TYPE_PACKED_VECTOR3_ARRAY
 		"Variant":

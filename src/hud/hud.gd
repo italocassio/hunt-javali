@@ -9,12 +9,32 @@ const TOUCH_TOPLEFT_MARGIN_PX: int = 100      # leaves room for the touch pause 
 const TOUCH_BOTTOM_RIGHT_MARGIN_PX: int = 530 # leaves room for the touch buttons
 const ALARM_REPEAT_S: float = 3.0
 const PROBE_INTERVAL_S: float = 0.1
+const PROBE_ROLES: Array[String] = ["offline", "host", "client"]   # Net.Role order
+const PROBE_PATHS: Array[String] = ["none", "relay", "rtc"]          # Net.Path order
 const DOG_MSG_S: float = 1.2
 const END_MSG_S: float = 5.0
 const HEAL_MSG_S: float = 1.5
 const BLINK_HZ: float = 2.0
 const CROP_WARN_PCT: float = 60.0
 const CROP_DANGER_PCT: float = 30.0
+const ALLY_KILL_TEXT: String = "%s abateu um javali: %s, %d kg"
+const ALLY_NAME_FALLBACK: String = "Um caçador"
+const HUNTER_LEFT_TEXT: String = "%s saiu da caçada."
+const HUNTER_DOWN_TEXT: String = "%s foi derrubado."
+const LOCAL_DOWN_TEXT: String = "Você foi derrubado. Aguarde o fim da caçada."
+const STALL_TEXT: String = "Anfitrião sem resposta…"
+const ALL_DOWN_TEXT: String = "Todos os caçadores caíram!"
+const DISCONNECTED_TEXT: String = "Conexão perdida."
+const SPECTATE_TEXT: String = "Assistindo: %s"
+const SPECTATE_HINT_TOUCH: String = "Toque em Tiro para trocar de caçador"
+const SPECTATE_HINT_KEYS: String = "Clique ou F para trocar de caçador"
+const SPECTATE_HINT_FONT_PX: int = 20
+const NO_SLOT: int = -1
+const ALLY_MSG_S: float = 3.0
+const STALL_TOP_FRAC: float = 0.16
+const LOCAL_DOWN_TOP_FRAC: float = 0.30
+const BANNER_HEIGHT_FRAC: float = 0.07
+const BANNER_FONT_PX: int = 28
 const COLOR_TEXT: Color = Color("#F4EFE6")
 const COLOR_GOOD: Color = Color("#3FAF5A")
 const COLOR_WARN: Color = Color("#F2C12E")
@@ -45,6 +65,17 @@ var _probe_t: float = 0.0
 var _thermal: bool = false
 var _last_ammo_text: String = ""
 var _last_item_text: String = ""
+var _hunter_names: Dictionary = {}   # slot -> display name seen on hunter_joined (the roster forgets who left)
+var _stall_banner: Label = null
+var _down_banner: Label = null
+var _spectate_banner: Label = null
+var _spectate_hint: Label = null
+var _spectate_slot: int = NO_SLOT     # the ally the spectator camera follows, NO_SLOT when not spectating
+var _local_down: bool = false         # the "knocked down, wait" banner is wanted whenever nothing replaces it
+var _ally_points: PackedVector3Array = PackedVector3Array()
+var _ally_colors: PackedColorArray = PackedColorArray()
+var _ally_yaws: PackedFloat32Array = PackedFloat32Array()
+var _ally_down: PackedByteArray = PackedByteArray()
 
 var _root: Control = Control.new()
 var _scope: ScopeOverlay = ScopeOverlay.new()
@@ -314,6 +345,31 @@ func _build_messages() -> void:
 	_place_message(_dog_msg, "DogMessage", 0.58, 0.08, 28)
 	_dog_msg.set_color(COLOR_WARN)
 	_place_message(_end_msg, "EndMessage", 0.38, 0.14, 44)
+	_stall_banner = _make_banner("StallBanner", STALL_TEXT, STALL_TOP_FRAC, COLOR_WARN)
+	_down_banner = _make_banner("DownBanner", LOCAL_DOWN_TEXT, LOCAL_DOWN_TOP_FRAC, COLOR_DANGER)
+	_spectate_banner = _make_banner("SpectateBanner", "", LOCAL_DOWN_TOP_FRAC, COLOR_TEXT)
+	_spectate_hint = _make_banner("SpectateHint", SPECTATE_HINT_KEYS, LOCAL_DOWN_TOP_FRAC + BANNER_HEIGHT_FRAC, COLOR_TEXT)
+	_spectate_hint.add_theme_font_size_override("font_size", SPECTATE_HINT_FONT_PX)
+
+
+## Persistent (non-fading) centered text, hidden until a state turns it on.
+func _make_banner(node_name: String, text: String, top_frac: float, color: Color) -> Label:
+	var l: Label = _label(text, BANNER_FONT_PX, color, &"HudBigLabel")
+	l.name = node_name
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.anchor_left = 0.1
+	l.anchor_right = 0.9
+	l.anchor_top = top_frac
+	l.anchor_bottom = top_frac + BANNER_HEIGHT_FRAC
+	l.offset_left = 0.0
+	l.offset_right = 0.0
+	l.offset_top = 0.0
+	l.offset_bottom = 0.0
+	l.visible = false
+	_root.add_child(l)
+	return l
 
 
 func _place_message(msg: KillMessage, node_name: String, top_frac: float, height_frac: float, font_px: int) -> void:
@@ -348,6 +404,12 @@ func _connect_events() -> void:
 	GameEvents.item_used.connect(_on_item_used)
 	GameEvents.thermal_vision_changed.connect(_on_thermal)
 	GameEvents.hunt_ended.connect(_on_hunt_ended)
+	GameEvents.hunter_joined.connect(_on_hunter_joined)
+	GameEvents.hunter_left.connect(_on_hunter_left)
+	GameEvents.hunter_died.connect(_on_hunter_died)
+	GameEvents.player_died.connect(_on_player_died)
+	GameEvents.net_stall_changed.connect(_on_net_stall_changed)
+	GameEvents.spectate_changed.connect(_on_spectate_changed)
 
 
 func _apply_touch_layout(is_touch: bool) -> void:
@@ -357,6 +419,8 @@ func _apply_touch_layout(is_touch: bool) -> void:
 		_bottomright_margin.add_theme_constant_override("margin_right",
 			TOUCH_BOTTOM_RIGHT_MARGIN_PX if is_touch else MARGIN_PX)
 	_refresh_item_text()   # touch mode shows the item on its button instead
+	if _spectate_hint != null:
+		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +435,10 @@ func _process(delta: float) -> void:
 	_update_scope_and_crosshair()
 	var origin: Vector3 = _player.global_position
 	var yaw: float = _player.rotation.y
-	_compass.update_state(origin, yaw, _marks)
+	var view: PlayerBase = _view_hunter()   # the map is centred on whoever the camera is looking through
+	var view_origin: Vector3 = view.global_position
+	var view_yaw: float = view.rotation.y
+	_compass.update_state(view_origin, view_yaw, _marks)
 	_damage.set_player_state(origin, yaw)
 	_damage.low_health = _player.is_alive() and \
 		_player.get_health() / maxf(_player.get_max_health(), 1.0) <= float(
@@ -393,12 +460,27 @@ func _process(delta: float) -> void:
 		if _reveal_left > 0.0:
 			_reveal_left = maxf(_reveal_left - POLL_INTERVAL_S, 0.0)
 		_poll_world()
-		_minimap.update_player(origin, yaw)
+		_minimap.update_player(view_origin, view_yaw)
 
 
 ## QA hook for the Web build: window.huntProbe = {x, z, yaw_deg, pitch_deg, touch_mode, ammo_mag, health,
-## joystick_active, sprinting, look_active, run_locked, t_ms}, refreshed 10 times per second.
+## joystick_active, sprinting, look_active, run_locked, t_ms, slot, role, path, boars_alive,
+## allies: [{slot, x, z}]}, refreshed 10 times per second. Solo: slot 0, role "offline", path "none", no allies.
 func _publish_probe() -> void:
+	var allies: Array[Dictionary] = []
+	var link_slot: int = -1
+	var boars_alive: int = 0
+	if _world != null:
+		boars_alive = _world.get_alive_boar_ids().size()
+		for hunter: PlayerBase in _world.get_hunters():
+			if hunter.is_local():
+				continue
+			allies.append({"slot": hunter.slot, "x": snappedf(hunter.global_position.x, 0.001),
+				"z": snappedf(hunter.global_position.z, 0.001)})
+			if link_slot < 0:
+				link_slot = hunter.slot
+	if not Net.is_host():
+		link_slot = 0   # a client's only link is the host
 	var state: Dictionary = {
 		"x": snappedf(_player.global_position.x, 0.001),
 		"z": snappedf(_player.global_position.z, 0.001),
@@ -412,6 +494,11 @@ func _publish_probe() -> void:
 		"look_active": _touch.look_pad.is_active(),
 		"run_locked": _touch.joystick.run_locked,
 		"t_ms": Time.get_ticks_msec(),
+		"slot": _player.slot,
+		"role": PROBE_ROLES[clampi(Net.get_role(), 0, PROBE_ROLES.size() - 1)],
+		"path": PROBE_PATHS[clampi(Net.get_link_path(link_slot), 0, PROBE_PATHS.size() - 1)] if link_slot >= 0 else "none",
+		"boars_alive": boars_alive,
+		"allies": allies,
 	}
 	JavaScriptBridge.eval("window.huntProbe = " + JSON.stringify(state) + ";", true)
 
@@ -503,6 +590,49 @@ func _poll_world() -> void:
 	for b: Dictionary in _baits:
 		_bait_points.append(b["pos"])
 	_minimap.baits = _bait_points
+	_poll_allies()
+
+
+## Whose eyes the compass and the minimap follow: the hunter the spectator camera is on, otherwise the local one.
+func _view_hunter() -> PlayerBase:
+	if _spectate_slot != NO_SLOT and _world != null:
+		var followed: PlayerBase = _world.get_hunter(_spectate_slot)
+		if followed != null and followed.slot == _spectate_slot:
+			return followed
+	return _player
+
+
+## Allies on the minimap and the compass (docs/multiplayer.md 6.7): one marker per hunter other than the one in the
+## centre, in the slot colour; the fallen are marked apart. While spectating, the local hunter's body shows as fallen.
+func _poll_allies() -> void:
+	_ally_points.resize(0)
+	_ally_colors.resize(0)
+	_ally_yaws.resize(0)
+	_ally_down.resize(0)
+	for i: int in range(_marks.size() - 1, -1, -1):   # also called outside the 10 Hz poll: never stack the marks
+		if _marks[i]["kind"] == &"ally":
+			_marks.remove_at(i)
+	var standing: int = 0
+	var spectating: bool = _spectate_slot != NO_SLOT
+	for hunter: PlayerBase in _world.get_hunters():
+		if hunter.is_local() and not spectating:
+			continue   # solo, or the centre of the map
+		if spectating and hunter.slot == _spectate_slot:
+			continue   # the ally in the centre of the map
+		var down: bool = not hunter.is_alive()
+		var color: Color = HunterVisualBase.slot_color(hunter.slot)
+		if not hunter.is_local() and not down:
+			standing += 1
+		_ally_points.append(hunter.global_position)
+		_ally_colors.append(color)
+		_ally_yaws.append(hunter.rotation.y)
+		_ally_down.append(1 if down else 0)
+		_marks.append({"pos": hunter.global_position, "kind": &"ally", "color": color, "down": down})
+	_minimap.allies = _ally_points
+	_minimap.ally_colors = _ally_colors
+	_minimap.ally_yaws = _ally_yaws
+	_minimap.ally_down = _ally_down
+	_spectate_hint.visible = spectating and not _ended and standing > 0
 
 
 func _refresh_item_text() -> void:
@@ -531,10 +661,12 @@ func _on_player_damaged(amount: float, source_position: Vector3, _health_after: 
 
 
 func _on_player_healed(amount: float, _health_after: float) -> void:
-	_ctx_msg.show_text("+%d de vida" % int(round(amount)), HEAL_MSG_S)
+	_show_ctx("+%d de vida" % int(round(amount)), HEAL_MSG_S)
 
 
 func _on_boar_hit(_boar_id: int, _zone: StringName, _damage_amount: float, _pos: Vector3, shot_id: int) -> void:
+	if NetCodec.shot_slot(shot_id) != Net.get_local_slot():
+		return   # an ally's hit: no marker, no sound
 	if shot_id == _last_hit_shot:
 		return   # shotgun pellets of one shot count once
 	_last_hit_shot = shot_id
@@ -544,6 +676,9 @@ func _on_boar_hit(_boar_id: int, _zone: StringName, _damage_amount: float, _pos:
 
 func _on_boar_killed(kill: KillInfo) -> void:
 	var type_name: String = String(Data.get_boar_type(kill.type_id).get("name", "Javali"))
+	if kill.killer_slot != Net.get_local_slot():
+		_show_ally_kill(kill, type_name)
+		return
 	var text: String = "%s abatido — %d kg · %s" % [type_name, int(round(kill.weight_kg)), _money(kill.reward_money)]
 	if kill.clean_kill:
 		text += " · Tiro limpo!"
@@ -552,6 +687,20 @@ func _on_boar_killed(kill: KillInfo) -> void:
 	_kill_msg.show_text(text, float(Data.get_game().get("hunt", {}).get("kill_message_s", 3.0)))
 	_crosshair.flash_hit(true)
 	Sfx.play(&"kill_confirm")
+
+
+## Context-line message for a kill made by another hunter, tinted with that hunter's slot color.
+func _show_ally_kill(kill: KillInfo, type_name: String) -> void:
+	var peer: NetPeerInfo = Net.get_peer(kill.killer_slot)
+	var who: String = peer.display_name if peer != null and peer.display_name != "" else ALLY_NAME_FALLBACK
+	_show_ctx(ALLY_KILL_TEXT % [who, type_name, int(round(kill.weight_kg))],
+		float(Data.get_game().get("hunt", {}).get("kill_message_s", 3.0)),
+		HunterVisualBase.slot_color(kill.killer_slot))
+
+
+func _show_ctx(text: String, duration_s: float, color: Color = COLOR_TEXT) -> void:
+	_ctx_msg.set_color(color)
+	_ctx_msg.show_text(text, duration_s)
 
 
 func _on_counts(killed: int, total: int) -> void:
@@ -595,7 +744,7 @@ func _on_dog_command(command: StringName) -> void:
 
 
 func _on_message(text: String, duration_s: float) -> void:
-	_ctx_msg.show_text(text, duration_s)
+	_show_ctx(text, duration_s)
 
 
 func _on_item_used(item_id: StringName, _position: Vector3) -> void:
@@ -607,9 +756,79 @@ func _on_thermal(active: bool) -> void:
 	_thermal = active
 
 
+## Roster name first, then the one seen on hunter_joined, then the hunter node, then a generic fallback.
+func _hunter_name(slot: int) -> String:
+	var peer: NetPeerInfo = Net.get_peer(slot)
+	if peer != null and peer.display_name != "":
+		return peer.display_name
+	var known: String = String(_hunter_names.get(slot, ""))
+	if known != "":
+		return known
+	if _world != null:
+		var hunter: PlayerBase = _world.get_hunter(slot)
+		if hunter != null and hunter.slot == slot and hunter.get_display_name() != "":
+			return hunter.get_display_name()
+	return ALLY_NAME_FALLBACK
+
+
+func _on_hunter_joined(slot: int, display_name: String) -> void:
+	if display_name != "":
+		_hunter_names[slot] = display_name
+
+
+func _on_hunter_left(slot: int) -> void:
+	if _ended:
+		return
+	_show_ctx(HUNTER_LEFT_TEXT % _hunter_name(slot), ALLY_MSG_S, HunterVisualBase.slot_color(slot))
+
+
+func _on_hunter_died(slot: int) -> void:
+	if _ended or slot == Net.get_local_slot():
+		return   # the local fall has its own persistent banner (_on_player_died)
+	_show_ctx(HUNTER_DOWN_TEXT % _hunter_name(slot), ALLY_MSG_S, HunterVisualBase.slot_color(slot))
+
+
+## Local hunter fell. Online with an ally still up, the hunt goes on without input: say so until it ends.
+func _on_player_died() -> void:
+	if _ended or _world == null:
+		return   # solo has no allies, so the loop below never shows the banner there
+	for hunter: PlayerBase in _world.get_hunters():
+		if not hunter.is_local() and hunter.is_alive():
+			_local_down = true
+			_down_banner.visible = _spectate_slot == NO_SLOT
+			return
+
+
+## The spectator camera started following an ally, changed ally, or let go (NO_SLOT). While it is on: the weapon
+## panel and the crosshair step aside, the banner names who is being watched and the map moves to that hunter.
+func _on_spectate_changed(slot: int) -> void:
+	_spectate_slot = slot
+	var on: bool = slot != NO_SLOT and not _ended
+	_spectate_banner.visible = on
+	if on:
+		_spectate_banner.text = SPECTATE_TEXT % _hunter_name(slot)
+		_spectate_banner.add_theme_color_override("font_color", HunterVisualBase.slot_color(slot))
+	_down_banner.visible = _local_down and not on and not _ended
+	_bottomright_margin.visible = not on
+	_crosshair.visible = not on
+	_minimap.center_color = HunterVisualBase.slot_color(slot) if slot != NO_SLOT else Minimap.COLOR_PLAYER
+	if _world != null:
+		_poll_allies()
+		var view: PlayerBase = _view_hunter()
+		if view != null:
+			_minimap.update_player(view.global_position, view.rotation.y)
+	else:
+		_spectate_hint.visible = false
+
+
+func _on_net_stall_changed(stalled: bool) -> void:
+	_stall_banner.visible = stalled and not _ended
+
+
 func _on_hunt_ended(result: HuntResult) -> void:
 	var text: String = ""
 	var color: Color = COLOR_TEXT
+	var online: bool = Net.get_role() != Net.Role.OFFLINE
 	match result.outcome:
 		HuntResult.Outcome.VICTORY:
 			text = "Missão cumprida!"
@@ -618,8 +837,15 @@ func _on_hunt_ended(result: HuntResult) -> void:
 			text = "A lavoura foi destruída!"
 			color = COLOR_DANGER
 		HuntResult.Outcome.DEFEAT_DEATH:
-			text = "Você foi abatido!"
+			text = ALL_DOWN_TEXT if online else "Você foi abatido!"
 			color = COLOR_DANGER
+		HuntResult.Outcome.DISCONNECTED:
+			text = DISCONNECTED_TEXT
+			color = COLOR_DANGER
+	_stall_banner.visible = false
+	_down_banner.visible = false
+	_spectate_banner.visible = false
+	_spectate_hint.visible = false
 	if text != "":
 		_end_msg.set_color(color)
 		_end_msg.show_text(text, END_MSG_S)

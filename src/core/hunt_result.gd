@@ -2,7 +2,7 @@ class_name HuntResult
 extends RefCounted
 ## What the hunt returns. Applied once by Profile.apply_hunt_result.
 
-enum Outcome { VICTORY, DEFEAT_CROP, DEFEAT_DEATH, ABANDONED }
+enum Outcome { VICTORY, DEFEAT_CROP, DEFEAT_DEATH, ABANDONED, DISCONNECTED }
 
 var outcome: Outcome = Outcome.ABANDONED
 var map_id: StringName = &""
@@ -17,6 +17,10 @@ var duration_s: float = 0.0
 var shots_fired: int = 0
 var shots_hit: int = 0
 var consumables_used: Dictionary = {}   # StringName -> int
+var counts_for_progression: bool = true
+var player_count: int = 1
+var team_kills: int = 0
+var scoreboard: Array[Dictionary] = []   # {slot, name, kills, money}; empty in solo
 
 
 func is_victory() -> bool:

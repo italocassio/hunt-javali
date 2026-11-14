@@ -87,4 +87,10 @@ func _on_start() -> void:
 	Sfx.unlock_audio()
 	if DisplayServer.is_touchscreen_available() or InputSetup.is_touch_mode():
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	# Invite link (?sala=CODE): straight to the lobby, which joins the room by itself.
+	var invite_code: String = Net.take_url_room_code()
+	if invite_code != "":
+		Router.set_meta(Lobby.INVITE_META, invite_code)
+		Router.goto(ScenePaths.LOBBY)
+		return
 	Router.goto(ScenePaths.MAIN_MENU)

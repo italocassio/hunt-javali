@@ -10,8 +10,6 @@ const DOG_SIDE_OFFSET_M: float = 1.5
 const DEFAULT_END_DELAY_S: float = 2.5
 const AMBIENCE_LOOPS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop"]
 const AMBIENCE_DB: float = -6.0
-## Per-loop override of AMBIENCE_DB: the cerrado loop (cicadas) is much quieter so it does not grate.
-const AMBIENCE_DB_BY_ID: Dictionary = {&"amb_cerrado_loop": -15.0}
 const MSG_GROUP: String = "Uma vara saiu da mata!"
 const MSG_LONER: String = "Um javali solitário saiu da mata!"
 const MSG_ALPHA: String = "O cachaço alfa entrou na área!"
@@ -293,7 +291,7 @@ func _assemble() -> void:
 	GameEvents.boar_hit.connect(_on_boar_hit)
 	_result.boars_total = spawner.get_total()
 	for id: StringName in AMBIENCE_LOOPS:
-		Sfx.play_loop(id, float(AMBIENCE_DB_BY_ID.get(id, AMBIENCE_DB)))
+		Sfx.play_loop(id, AMBIENCE_DB)
 	GameEvents.boar_counts_changed.emit(0, spawner.get_total())
 	GameEvents.crop_health_changed.emit(100.0)
 	_ready_flag = true
@@ -320,7 +318,7 @@ func _finish_assembly_client() -> void:
 	GameEvents.shot_fired.connect(_on_shot_fired)
 	GameEvents.boar_hit.connect(_on_boar_hit)
 	for id: StringName in AMBIENCE_LOOPS:
-		Sfx.play_loop(id, float(AMBIENCE_DB_BY_ID.get(id, AMBIENCE_DB)))
+		Sfx.play_loop(id, AMBIENCE_DB)
 	GameEvents.boar_counts_changed.emit(0, 0)
 	GameEvents.crop_health_changed.emit(100.0)
 	_ready_flag = true

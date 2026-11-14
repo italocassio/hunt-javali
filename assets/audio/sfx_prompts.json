@@ -41,7 +41,7 @@
     {"id": "dog_yelp", "duration_s": 0.6, "prompt": "Dog yelping in pain, short sharp yelp"},
     {"id": "dog_whine", "duration_s": 1.0, "prompt": "Dog whining softly, short anxious whimper"},
     {"id": "bait_drop", "duration_s": 0.6, "prompt": "Bag of corn grain dropped on the ground, soft thump and grains scattering"},
-    {"id": "amb_cerrado_loop", "duration_s": 20.0, "loop": true, "prompt": "Brazilian cerrado savanna daytime ambience, cicadas, distant tropical birds, light breeze in dry grass, seamless loop, no people"},
+    {"id": "amb_cerrado_loop", "duration_s": 20.0, "loop": true, "prompt": "Calm Brazilian cerrado savanna daytime ambience: a few soft, distant tropical birds calling now and then, a light breeze moving through dry grass and low shrubs, gentle natural rustle. Open, quiet, sparse landscape. No insects, no cicadas, no crickets, no buzzing or high-pitched drone, no people, no music, no nearby animals. Seamless loop."},
     {"id": "amb_wind_loop", "duration_s": 15.0, "loop": true, "prompt": "Steady gentle wind over open grassland, soft gusts, seamless loop, no birds, no people"},
     {"id": "victory_sting", "duration_s": 3.0, "prompt": "Short triumphant rustic sting, acoustic guitar and accordion flourish, Brazilian country style, ends cleanly"},
     {"id": "defeat_sting", "duration_s": 3.0, "prompt": "Short sad rustic sting, slow descending acoustic guitar notes, Brazilian country style, ends cleanly"},

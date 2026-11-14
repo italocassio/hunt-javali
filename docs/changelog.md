@@ -3,6 +3,22 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.6 — 14/11/2026
+
+**Som do cerrado novo, sem cigarras.**
+
+O que mudou para o jogador:
+
+- O som ambiente do cerrado foi refeito: agora é só brisa no capim e pássaros distantes, sem o barulho
+  de cigarra que irritava. O volume voltou ao normal (igual ao do vento).
+
+O que mudou no projeto:
+
+- `assets/audio/sfx/amb_cerrado_loop.mp3` regerado (ElevenLabs) com o prompt novo de
+  `assets/audio/sfx_prompts.json`.
+- `src/hunt/hunt_controller.gd`: removida a constante `AMBIENCE_DB_BY_ID` da 0.4.5; os dois loops
+  voltam a tocar em `AMBIENCE_DB` (-6 dB).
+
 ## 0.4.5 — 14/11/2026
 
 **Som do cerrado mais baixo na caçada.**

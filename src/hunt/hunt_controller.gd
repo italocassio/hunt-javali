@@ -21,6 +21,7 @@ const SNAPSHOT_DOG_BYTES: int = 8
 const CROP_WIRE_SCALE: float = 100.0
 const SNAP_FLAG_CROP_ATTACK: int = 1         # H_SNAPSHOT flags b0: boars at the crop
 ## EV_MESSAGE msg 0..2 (docs/multiplayer.md section 4.5): same texts as the host's group announcements.
+## msg 3..5 are the dog's (Dog.MESSAGES).
 const NET_MESSAGES: Array[String] = [MSG_GROUP, MSG_LONER, MSG_ALPHA]
 const NET_MSG_GROUP: int = 0
 const NET_MSG_LONER: int = 1
@@ -53,7 +54,9 @@ var spawner: BoarSpawner = null
 var _request: HuntRequest = null
 var _map: MapRoot = null
 var _player: PlayerBase = null
-var _dog: Dog = null
+var _dog: Dog = null                    # the dog of this machine's hunter (offline and host)
+var _dogs: Dictionary = {}              # slot -> Dog (offline and host)
+var _dog_list: Array[Dog] = []
 var _env: MapEnvironmentBase = null
 var _ready_flag: bool = false
 var _over: bool = false
@@ -256,20 +259,10 @@ func _assemble() -> void:
 	if not await _next_frame():
 		return
 
-	# 5. Dog
-	if _request.dog_id != &"" and _net_role != Net.Role.CLIENT:
+	# 5. Dogs: offline the local hunter's; host one per hunter that brought one; client: puppets (replica)
+	if _net_role != Net.Role.CLIENT and not _dog_breeds().is_empty():
 		t = Time.get_ticks_msec()
-		var dog_scene: PackedScene = load(ScenePaths.DOG) as PackedScene
-		var dog_node: Node = dog_scene.instantiate() if dog_scene != null else null
-		_dog = dog_node as Dog
-		if _dog != null:
-			_dog.name = "Dog"
-			add_child(_dog)
-			_dog.setup(_request.dog_id, self, spawn_pos + _player.global_transform.basis.x * DOG_SIDE_OFFSET_M)
-		else:
-			push_error("HuntController: %s root is not a Dog" % ScenePaths.DOG)
-			if dog_node != null:
-				dog_node.free()
+		_create_dogs()
 		t = _lap("dog", t)
 
 	# 6. Boars and start
@@ -309,6 +302,8 @@ func _finish_assembly_client() -> void:
 	_replica.name = "HuntReplica"
 	add_child(_replica)
 	_replica.setup(self, heightmap, _map_rect, crop)
+	_replica.set_dog_breeds(_dog_breeds())
+	_replica.dog_mark_received.connect(_on_dog_mark)
 	_replica.kill_confirmed.connect(_on_replica_kill)
 	_replica.bait_received.connect(_on_bait_received)
 	_replica.message_received.connect(_on_net_message)
@@ -625,6 +620,7 @@ func _credit_kill(kill: KillInfo) -> void:
 
 ## Client: a boar died on the host (EV_BOAR_DEATH). Same order of signals as the host.
 func _on_replica_kill(kill: KillInfo, killed: int, total: int) -> void:
+	_marks.erase(kill.boar_id)
 	if _over:
 		return
 	kill.time_s = _elapsed
@@ -709,8 +705,12 @@ func _on_group_entered(leader_type: StringName, count: int) -> void:
 
 ## Client: EV_MESSAGE from the host (group announcements).
 func _on_net_message(msg: int) -> void:
-	if not _over and msg >= 0 and msg < NET_MESSAGES.size():
+	if _over:
+		return
+	if msg >= 0 and msg < NET_MESSAGES.size():
 		GameEvents.hud_message_requested.emit(NET_MESSAGES[msg], MSG_S)
+	elif Dog.MESSAGES.has(msg):
+		GameEvents.hud_message_requested.emit(String(Dog.MESSAGES[msg]), MSG_S)
 
 
 # --- Bait ----------------------------------------------------------------------------------------
@@ -779,6 +779,91 @@ func find_bait(from: Vector2, boar_id: int) -> Bait:
 		if bait.active and from.distance_to(bait.get_xz()) <= bait.attract_radius_m and bait.try_reserve(boar_id):
 			return bait
 	return null
+
+
+# --- Dogs (docs/multiplayer.md section 6.5) -------------------------------------------------------
+
+## Breed of each slot that brought a dog: slot -> dog id. Offline: the local request. Network: the roster
+## (Net fills NetPeerInfo.dog_id from the lobby records); this machine's own request wins for its own slot.
+func _dog_breeds() -> Dictionary:
+	var out: Dictionary = {}
+	if _net_role != Net.Role.OFFLINE:
+		for info: NetPeerInfo in _roster():
+			if info.dog_id != &"":
+				out[info.slot] = info.dog_id
+	if _request != null and _request.dog_id != &"":
+		out[_local_slot] = _request.dog_id
+	return out
+
+
+## Offline and host: one simulated Dog per hunter with a dog, beside its owner.
+func _create_dogs() -> void:
+	var dog_scene: PackedScene = load(ScenePaths.DOG) as PackedScene
+	var breeds: Dictionary = _dog_breeds()
+	for slot: int in breeds:
+		var owner_hunter: PlayerBase = get_hunter(slot)
+		var dog_node: Node = dog_scene.instantiate() if dog_scene != null else null
+		var dog: Dog = dog_node as Dog
+		if dog == null or owner_hunter == null:
+			push_error("HuntController: no Dog for slot %d (%s)" % [slot, ScenePaths.DOG])
+			if dog_node != null:
+				dog_node.free()
+			continue
+		dog.name = "Dog" if slot == _local_slot else "Dog_%d" % slot
+		add_child(dog)
+		dog.setup(breeds[slot] as StringName, self,
+			owner_hunter.global_position + owner_hunter.global_transform.basis.x * DOG_SIDE_OFFSET_M, slot)
+		_dogs[slot] = dog
+		_dog_list.append(dog)
+	_dog = _dogs.get(_local_slot) as Dog
+
+
+## Host (and offline): every simulated dog.
+func get_dogs() -> Array[Dog]:
+	return _dog_list
+
+
+func get_dog_of(for_slot: int) -> Dog:
+	return _dogs.get(for_slot) as Dog
+
+
+## The owner left the hunt: its dog goes too (host: simulated Dog; client: puppet).
+func _remove_dog(for_slot: int) -> void:
+	var dog: Dog = _dogs.get(for_slot) as Dog
+	if dog != null:
+		_dogs.erase(for_slot)
+		_dog_list.erase(dog)
+		if _dog == dog:
+			_dog = null
+		dog.leave()
+	if _replica != null:
+		_replica.remove_dog(for_slot)
+
+
+## Dog -> host sync (no-ops offline and on a client): command executed, boar marked, HUD message for a remote owner.
+func report_dog_command(owner_slot: int, cmd: StringName) -> void:
+	if _host_sync != null:
+		_host_sync.queue_dog_command(owner_slot, cmd)
+
+
+func report_dog_mark(owner_slot: int, boar_id: int, duration_s: float) -> void:
+	if _host_sync != null:
+		_host_sync.queue_dog_mark(owner_slot, boar_id, duration_s)
+
+
+func report_dog_message(owner_slot: int, code: int) -> void:
+	if _host_sync != null:
+		_host_sync.queue_message(owner_slot, code)
+
+
+## Client: EV_DOG_MARK. The mark helps the whole team: it shows on the minimap/compass of every machine.
+func _on_dog_mark(boar_id: int, duration_s: float) -> void:
+	if _over:
+		return
+	mark_boar(boar_id, duration_s)
+	var at: Vector3 = get_boar_position(boar_id)
+	if at.is_finite():
+		GameEvents.dog_marked_boar.emit(at, duration_s)
 
 
 # --- Dog marks -----------------------------------------------------------------------------------
@@ -873,26 +958,45 @@ func get_marked_boar_positions() -> PackedVector3Array:
 		if float(_marks[id]) < _elapsed:
 			_marks.erase(id)
 			continue
+		if _replica != null:
+			var puppet: BoarPuppet = _replica.get_puppet(id)
+			if puppet != null and puppet.alive and puppet.is_inside_tree():
+				_marked_out.append(puppet.global_position)
+			continue
 		var b: Boar = spawner.get_boar(id) if spawner != null else null
 		if b != null and b.is_alive():
 			_marked_out.append(b.global_position)
 	return _marked_out
 
 
+## The dog of the hunter of this machine: the simulated Dog (offline, host) or its puppet (client).
 func has_dog() -> bool:
-	return _dog != null
+	return _dog != null or _local_dog_puppet() != null
 
 
 func get_dog_position() -> Vector3:
-	return _dog.global_position if _dog != null else Vector3.INF
+	if _dog != null:
+		return _dog.global_position
+	var puppet: DogPuppet = _local_dog_puppet()
+	return puppet.global_position if puppet != null else Vector3.INF
 
 
 func get_dog_state() -> StringName:
-	return _dog.state if _dog != null else &""
+	if _dog != null:
+		return _dog.state
+	var puppet: DogPuppet = _local_dog_puppet()
+	return puppet.state if puppet != null else &""
 
 
 func get_dog_health_pct() -> float:
-	return _dog.get_health_pct() if _dog != null else 0.0
+	if _dog != null:
+		return _dog.get_health_pct()
+	var puppet: DogPuppet = _local_dog_puppet()
+	return puppet.get_health_pct() if puppet != null else 0.0
+
+
+func _local_dog_puppet() -> DogPuppet:
+	return _replica.get_local_dog() if _replica != null else null
 
 
 func get_player() -> PlayerBase:
@@ -983,10 +1087,13 @@ func net_write_snapshot(out: StreamPeerBuffer) -> void:
 		_host_sync.write_boars(out)
 	else:
 		out.put_u8(0)           # n_boars
-	out.put_u8(0)               # n_dogs (F7)
+	if _host_sync != null:
+		_host_sync.write_dogs(out)
+	else:
+		out.put_u8(0)           # n_dogs
 
 
-## Client: moves the remote hunters and the boar puppets; the dog section is skipped by length until F7.
+## Client: moves the remote hunters, the boar puppets and the dog puppets.
 ## Team kills come from EV_BOAR_DEATH only (so boar_killed always precedes its count); the total also
 ## comes from here.
 func net_apply_snapshot(inp: StreamPeerBuffer) -> void:
@@ -1023,8 +1130,11 @@ func net_apply_snapshot(inp: StreamPeerBuffer) -> void:
 			_replica.apply_snapshot_boars(inp, _net_t_ms)
 		inp.seek(mini(boars_at + 1 + n_boars * SNAPSHOT_BOAR_BYTES, inp.get_size()))
 	if inp.get_available_bytes() >= 1:
-		var n_dogs: int = inp.get_u8()
-		inp.seek(mini(inp.get_position() + n_dogs * SNAPSHOT_DOG_BYTES, inp.get_size()))
+		var dogs_at: int = inp.get_position()
+		var n_dogs: int = inp.data_array[dogs_at]
+		if _replica != null:
+			_replica.apply_snapshot_dogs(inp, _net_t_ms)
+		inp.seek(mini(dogs_at + 1 + n_dogs * SNAPSHOT_DOG_BYTES, inp.get_size()))
 
 
 ## Host: EV_* records queued since the last tick.
@@ -1055,6 +1165,7 @@ func net_peer_left(for_slot: int) -> void:
 	var h: PlayerBase = _remotes.get(for_slot) as PlayerBase
 	if h == null:
 		return
+	_remove_dog(for_slot)
 	_remotes.erase(for_slot)
 	_hunters_list.erase(h)
 	h.queue_free()

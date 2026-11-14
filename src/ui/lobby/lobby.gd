@@ -227,6 +227,7 @@ func _build_room() -> HBoxContainer:
 		detail.name = "Detail"
 		detail.modulate = Color(1, 1, 1, 0.7)
 		detail.clip_text = true
+		detail.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		info_box.add_child(detail)
 		var role: Label = UiKit.label("")
 		role.name = "Role"
@@ -273,7 +274,8 @@ func _build_room() -> HBoxContainer:
 	right.add_child(loadout_scroll[0])
 	var panel: LoadoutPanel = LoadoutPanel.new()
 	loadout_scroll[1].add_child(panel)
-	panel.setup(self, "Cães em rede: em breve.")
+	panel.setup(self)
+	panel.changed.connect(_refresh_roster)
 	return columns
 
 
@@ -357,10 +359,15 @@ func _refresh_roster() -> void:
 		var parts: PackedStringArray = []
 		if info.weapon_id != &"":
 			parts.append(UiKit.item_name(info.weapon_id))
+		# The local player's own choice is always known; remote dogs come from the roster (empty until the wire carries them).
+		var dog_id: StringName = Profile.get_loadout_dog() if slot == local_slot else info.dog_id
+		if dog_id != &"":
+			parts.append(dog_label(dog_id))
 		var link: String = "" if slot == local_slot else path_text(info.path if info.path != Net.Path.NONE else Net.get_link_path(slot))
 		if link != "":
 			parts.append(link)
 		detail.text = "  |  ".join(parts)
+		detail.tooltip_text = detail.text
 		role.text = status_text(info)
 		role.add_theme_color_override("font_color", UiKit.MONEY_COLOR if info.is_host or info.ready else UiKit.GOLD_COLOR)
 
@@ -438,6 +445,10 @@ func _boar_total(contract: Dictionary) -> int:
 static func player_label(info: NetPeerInfo, slot: int, is_local: bool) -> String:
 	var text: String = info.display_name if info.display_name != "" else "Caçador %d" % (slot + 1)
 	return text + (" (você)" if is_local else "")
+
+
+static func dog_label(dog_id: StringName) -> String:
+	return "Cão: %s" % UiKit.item_name(dog_id)
 
 
 static func status_text(info: NetPeerInfo) -> String:
@@ -557,5 +568,5 @@ func _begin_hunt() -> void:
 	var request: HuntRequest = Profile.build_hunt_request(map_id, Net.get_selected_contract_index())
 	request.player_count = Net.get_player_count()
 	request.rng_seed = Net.get_hunt_seed()
-	request.dog_id = &""   # dogs join the network in phase F7; the panel shows the choice as locked
+	request.dog_id = Profile.get_loadout_dog()
 	Router.start_hunt(request)

@@ -1149,6 +1149,18 @@ jogador, regenera `regen_per_s`, não obedece "Pega!" até `return_health_frac`)
 caso contrário → `return` + `CMD_RECALL` + "Volta!". Caramelo também alimenta a bússola continuamente
 (`get_nearest_boar_position`). O cão nunca morre.
 
+**Em rede (F7; detalhe em `docs/multiplayer.md` §6.5).** O anfitrião simula um `Dog` por slot com cão
+(`owner_slot`; raça do roster, `NetPeerInfo.dog_id`); o cliente só tem `DogPuppet` (réplica interpolada, seção
+`DOG` do snapshot). O cão segue `get_hunter(owner_slot)`; dono morto: larga o javali, ignora comandos e fica
+onde está; dono saiu: `leave()`. `command()` é público: só o cão do slot local conecta
+`dog_command_requested` e emite `dog_state_changed`, `dog_health_changed` e `dog_command_executed`; o comando
+do cliente vai por `C_DOG_CMD` e o "Pega!" aparece no HUD dele depois da ida e volta (`EV_DOG_CMD`), sem
+predição local. Mensagens de HUD do cão: no barramento se o dono é local, senão `EV_MESSAGE` ao dono (códigos
+3–5, `Dog.NET_MSG_*`/`Dog.MESSAGES`). Marcação: todos emitem `dog_marked_boar` (o anfitrião envia
+`EV_DOG_MARK`). `Boar.apply_dog_damage` credita o abate ao dono do cão. `HuntController`: `get_dogs()`,
+`get_dog_of(slot)`; `has_dog`/`get_dog_*` respondem pelo cão do jogador local. Limitação conhecida (balanceamento
+de vários cães): se dois cães pegam o mesmo javali, o primeiro a soltar libera o javali para os dois.
+
 ### 8.11 Itens (A, com efeito no mundo pelo B)
 | Item | Tipo | Efeito | Dono do efeito |
 |---|---|---|---|
@@ -1804,8 +1816,9 @@ vive no `Router.goto` (§6.6) e na configuração `game.music` (§9.1); as telas
 
 `%BackButton` só na tela de entrada. `Lobby` tem `class_name`. O `Net` escolhe o contrato padrão; o lobby só
 chama `Net.host_select_contract` quando o anfitrião escolhe, e `_begin_hunt` usa `Net.get_hunt_seed()`. O
-cliente aperta `%ReadyButton` (o pronto automático da F2 acabou). Cão desabilitado com "Cães em rede: em
-breve." até a F7. `LoadoutPanel` (`src/ui/common/loadout_panel.gd`, `class_name LoadoutPanel`,
+cliente aperta `%ReadyButton` (o pronto automático da F2 acabou). Cão liberado desde a F7: o detalhe de cada
+jogador mostra "Cão: <nome>" (`Lobby.dog_label(id)`) e `request.dog_id = Profile.get_loadout_dog()` vale também
+em rede. `LoadoutPanel` (`src/ui/common/loadout_panel.gd`, `class_name LoadoutPanel`,
 `VBoxContainer`): `setup(root: Control, dog_locked_text: String = "")`, sinal `changed`; usado pela Preparação
 (mesmos nós `%`) e pelo lobby.
 
@@ -1825,8 +1838,8 @@ caído = X, fora do alcance = seta na borda. Bússola: losango na cor do slot (o
 rede pode abrir a pausa (P) para sair; no solo continua recusando. Loja aberta a partir da sala volta para o
 `LOBBY`. Na sala, dica fixa: "Quem cria a sala deve ter o melhor aparelho e conexão. Se o anfitrião sair do
 jogo, a partida termina para todos." Conexão ao servidor tem prazo `net.connect_timeout_s`; nenhuma tela
-bloqueia esperando rede. Até a fase dos cães, o lobby mostra "Cães ainda não entram no modo com amigos" e
-`dog` vai 255. Textos de erro: `Net.room_error` (§6.11). Resultado em rede: "Seus abates: 7 · Equipe: 21 de
+bloqueia esperando rede. O cão de cada peer trafega no resumo de loadout (`L_READY`, `L_LOBBY`, `L_START`;
+255 = sem cão); a constante `DOGS_IN_COOP` foi removida. Textos de erro: `Net.room_error` (§6.11). Resultado em rede: "Seus abates: 7 · Equipe: 21 de
 25", placar por jogador (`HuntResult.scoreboard`) e, para `DISCONNECTED`, "Conexão perdida: a caçada foi
 encerrada"; com `counts_for_progression == false`: "Este contrato ainda não estava liberado para você: os
 prêmios foram pagos, mas o progresso não avança."
@@ -2067,7 +2080,7 @@ de resultado e é publicável (a entrada do menu é visível para todos desde a 
 | F4 — javalis replicados e tiro (caminho crítico) | os dois veem os mesmos javalis, atiram, veem abates e são investidos | B (Fable: IA dos javalis), A e qa (Sonnet) | N3: anfitrião + cliente no contrato 0 com seed fixa, bot do cliente mata ≥ 3 javalis atirando nas réplicas, `VICTORY` nos dois, soma dos abates = total, cada abate em um só resultado; snapshot → réplica com erro ≤ 1 cm; hash das posições de tronco igual em low/medium/high com `sync_layout`; `playthrough` sem mudança; banda ≤ 5 kB/s de download por cliente no contrato 5; fps do anfitrião em desktop ≥ 60 com 26 javalis e 3 remotos |
 | F5 — lavoura, itens, fim de caçada e economia | uma caçada cooperativa completa, do lobby ao resultado, com dinheiro certo | B (Fable: fluxo da caçada), A, N, systems, qa (Sonnet) | N4: cliente termina `DISCONNECTED` em ≤ `host_timeout_s` + 2 s com os próprios abates creditados e sem progressão; N5: anfitrião segue e vence sozinho; `apply_hunt_result` com `counts_for_progression = false` credita dinheiro e não desbloqueia; `scale_groups` dá 14 e 23 para o contrato 1 com 2 e 4 jogadores; canteiros comidos iguais nos dois peers |
 | F6 — lobby completo, aliados no HUD, espectador: beta (concluída em 2026-11-14 (sessão manual com 3 aparelhos reais ainda pendente)) | "Jogar com amigos (beta)" visível para todos | systems, A, art-director, qa (Sonnet) | `flow_test` sem mudança; abrir `?sala=CODE` entra na sala sem digitar; servidor inacessível → `server_unreachable` em ≤ 9 s e "Voltar" funciona; morrer com aliado vivo mostra a câmera de espectador e "Assistindo: <Nome>"; sessão manual de 3 jogadores (PC, Android, iPhone) relatada; `mobile_probe.py` verde |
-| F7 — cães em rede | cada jogador leva o seu cão e manda "Pega!"/"Volta!" | B, qa (Sonnet) | N6: comando do cliente muda o estado só do cão dele; sinais de cão só no HUD do dono; marcação aparece para os dois; solo sem mudança |
+| F7 — cães em rede (concluída em 2026-11-14) | cada jogador leva o seu cão e manda "Pega!"/"Volta!" | B, qa (Sonnet) | N6: comando do cliente muda o estado só do cão dele; sinais de cão só no HUD do dono; marcação aparece para os dois; solo sem mudança |
 | F8 — robustez móvel | cair e voltar na mesma página sem perder a caçada | N e B (Fable), qa (Sonnet) | derrubar o WebSocket do cliente por 5 s: ele volta no mesmo slot com os mesmos javalis vivos e o mesmo resultado parcial; relatório de fps e banda em celular intermediário como anfitrião de 4 |
 
 ---

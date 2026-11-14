@@ -23,6 +23,9 @@ const MAX_PATCHES_PER_RECORD: int = 255
 const CROP_WIRE_SCALE: float = 100.0     # crop u16 in 0.01 %
 const MAX_U8: int = 255
 const MAX_U16: int = 65535
+const MARK_WIRE_SCALE: float = 10.0      # EV_DOG_MARK duration u8 in 0.1 s
+const DOG_CMD_ATTACK: int = 0            # EV_DOG_CMD cmd: 0 "Pega!", 1 "Volta!"
+const DOG_CMD_RECALL: int = 1
 const DEFAULT_CLAIM_TOLERANCE_M: float = 12.0
 ## Rounding slack of the u16 fields when comparing a claim with the weapon limits.
 const DAMAGE_SLACK: float = 1.0 / DAMAGE_WIRE_SCALE
@@ -45,6 +48,8 @@ var hits_rejected: int = 0
 var shots_heard: int = 0
 var charge_claims_accepted: int = 0
 var charge_claims_rejected: int = 0
+var dog_commands_applied: int = 0
+var dog_commands_ignored: int = 0
 
 
 func setup(world: HuntController, spawner: BoarSpawner) -> void:
@@ -72,6 +77,20 @@ func write_boars(out: StreamPeerBuffer) -> void:
 		NetCodec.put_xz(out, _rect, b.position.x, b.position.z)
 		out.put_u8(NetCodec.angle_to_u8(b.get_yaw()))
 		out.put_u8(b.net_state_byte())
+
+
+## Dog section of H_SNAPSHOT: n u8, n x { owner u8, xz 2 x u16, yaw u8, st u8, health u8 (%) }.
+func write_dogs(out: StreamPeerBuffer) -> void:
+	var dogs: Array[Dog] = _world.get_dogs()
+	var n: int = mini(dogs.size(), MAX_U8)
+	out.put_u8(n)
+	for i: int in n:
+		var d: Dog = dogs[i]
+		out.put_u8(d.owner_slot & MAX_U8)
+		NetCodec.put_xz(out, _rect, d.position.x, d.position.z)
+		out.put_u8(NetCodec.angle_to_u8(d.get_yaw()))
+		out.put_u8(d.net_state_byte())
+		out.put_u8(clampi(roundi(d.get_health_pct()), 0, MAX_U8))
 
 
 # --- Events (host -> clients) --------------------------------------------------------------------
@@ -119,6 +138,23 @@ func queue_message(target_slot: int, msg: int) -> void:
 	var at: int = _begin(NetCodec.EV_MESSAGE)
 	_events.put_u8(target_slot & MAX_U8)
 	_events.put_u8(msg & MAX_U8)
+	_end(at)
+
+
+## EV_DOG_MARK: owner u8, boar u8, duration u8 (x0.1 s). The mark is good for the whole team.
+func queue_dog_mark(owner_slot: int, boar_id: int, duration_s: float) -> void:
+	var at: int = _begin(NetCodec.EV_DOG_MARK)
+	_events.put_u8(owner_slot & MAX_U8)
+	_events.put_u8(boar_id & MAX_WIRE_ID)
+	_events.put_u8(clampi(roundi(duration_s * MARK_WIRE_SCALE), 0, MAX_U8))
+	_end(at)
+
+
+## EV_DOG_CMD: owner u8, cmd u8 (0 "Pega!", 1 "Volta!"). cmd is Ids.CMD_ATTACK or Ids.CMD_RECALL.
+func queue_dog_command(owner_slot: int, cmd: StringName) -> void:
+	var at: int = _begin(NetCodec.EV_DOG_CMD)
+	_events.put_u8(owner_slot & MAX_U8)
+	_events.put_u8(DOG_CMD_ATTACK if cmd == Ids.CMD_ATTACK else DOG_CMD_RECALL)
 	_end(at)
 
 
@@ -222,6 +258,14 @@ func apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) 
 					charge_claims_accepted += 1
 				else:
 					charge_claims_rejected += 1
+		NetCodec.C_DOG_CMD:
+			# C_DOG_CMD: no body. The dog of that slot gets the command as if its owner had pressed the key here.
+			var dog: Dog = _world.get_dog_of(from_slot)
+			if dog != null and not dog.is_local_owner():
+				dog.command()
+				dog_commands_applied += 1
+			else:
+				dog_commands_ignored += 1
 		NetCodec.C_BAIT:
 			# C_BAIT: xz 2 x u16. The host places it (it attracts its boars) and tells everybody (EV_BAIT).
 			var placer: PlayerBase = _world.get_hunter(from_slot)

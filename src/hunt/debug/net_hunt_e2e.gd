@@ -14,6 +14,10 @@ extends Node
 ##   host_freeze  N4 by deadline: the host process stays up but its Net stops (socket open, no snapshots) ->
 ##                client DISCONNECTED by net.host_timeout_s, within host_timeout_s + 2 s.
 ##   client_drop  N5: the client process is killed -> the host sees hunter_left and wins alone.
+##   dogs         N6 (F7): each player brings a dog (host caramelo, client foxhound). Phase 1: the client's dog
+##                follows the client, the client sends "Pega!" (C_DOG_CMD) and "Volta!": only ITS dog changes
+##                state, only ITS HUD hears the dog signals, the host's dog and HUD stay quiet, the boar mark
+##                shows on both machines. Phase 2: the same the other way round, from the host.
 ##
 ## Run (from the project root; Bun on PATH, in BUN or ~/.bun/bin, or -- --bun=<path>):
 ##   tools/godot.sh --headless --path . res://src/hunt/debug/net_hunt_e2e.tscn [-- --scenario=all]
@@ -25,7 +29,7 @@ const CODE_ARG: String = "--hunt-code="
 const SCENARIO_ARG: String = "--scenario="
 const BUN_ARG: String = "--bun="
 const SERVER_ARG: String = "--server="   # read by the autoload Net in the children
-const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop"]
+const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop", "dogs"]
 
 const HOST_ADDR: String = "127.0.0.1"
 const PORT_MIN: int = 20000
@@ -57,6 +61,15 @@ const SPAWN_WAIT_MS: int = 8000
 const DEAD_CHECK_MS: int = 3000
 const LEFT_WAIT_MS: int = 40000
 const KILL_DAMAGE: float = 100000.0
+const HOST_DOG: StringName = &"caramelo"
+const CLIENT_DOG: StringName = &"foxhound"
+const DOG_MONEY: int = 50000
+const DOG_NEAR_M: float = 8.0
+const DOG_BOAR_M: float = 60.0
+const DOG_EDGE_M: float = 8.0
+const DOG_WAIT_MS: int = 90000
+const DOG_PHASE_MS: int = 150000
+const DOG_SETTLE_MS: int = 1500
 
 # Bot (same idea as tests/bot/hunt_bot.gd, kept here so package B owns its scenario).
 const STAND_M: float = 14.0
@@ -87,6 +100,11 @@ var _died: Array = []                   # hunter_died slots heard here
 var _left: Array = []                   # hunter_left slots heard here
 var _errors: Array = []
 var _money0: int = 0
+var _dog_states: Array = []             # dog_state_changed heard here (this machine's HUD)
+var _dog_cmds: Array = []               # dog_command_executed heard here
+var _dog_marks: int = 0                 # dog_marked_boar heard here (any dog: marks are for the team)
+var _dog_marked_seen: int = 0           # most marked boars listed by the world at a dog_marked_boar
+var _dog_texts: Array = []              # hud messages about dogs
 
 
 ## Peer mode: the scene itself is replaced by hunt.tscn, so the peer runs as a copy under the root.
@@ -185,6 +203,11 @@ func _run_scenario(url: String) -> void:
 		"host_freeze":
 			_ok(await _wait(_has_file.bind("result_client.json"), RESULTS_MS), "[host_freeze] cliente escreveu o resultado")
 			_check_host_drop("host_frozen")
+		"dogs":
+			var both_dogs: bool = await _wait(func() -> bool:
+				return _has_file("result_host.json") and _has_file("result_client.json"), DOG_PHASE_MS * 2)
+			_ok(both_dogs, "[dogs] os dois processos escreveram o resultado")
+			_check_dogs()
 		"client_drop":
 			if not _ok(await _wait(_has_file.bind("client_ready"), DROP_WAIT_MS), "[client_drop] cliente entrou na caçada"):
 				return
@@ -353,6 +376,42 @@ func _check_client_drop() -> void:
 		"anfitrião venceu sozinho (%s, %d de %s)" % [str(host.get("outcome")), (host.get("credited", []) as Array).size(), str(host.get("total"))])
 
 
+func _check_dogs() -> void:
+	var pair: Array[Dictionary] = _both()
+	var host: Dictionary = pair[0]
+	var client: Dictionary = pair[1]
+	if host.is_empty() or client.is_empty():
+		return
+	_ok(int(host.get("dogs_simulated", -1)) == 2 and int(client.get("dogs_simulated", -1)) == 0,
+		"anfitrião simula 2 cães, cliente nenhum (%s / %s)" % [str(host.get("dogs_simulated")), str(client.get("dogs_simulated"))])
+	_ok(bool(host.get("has_dog", false)) and bool(client.get("has_dog", false)) and client.get("breed") == String(CLIENT_DOG)
+		and host.get("breed") == String(HOST_DOG), "cada um tem o seu cão (%s / %s)" % [str(host.get("breed")), str(client.get("breed"))])
+	_ok(float(client.get("dog_near_m", 99.0)) <= DOG_NEAR_M and float(host.get("client_dog_near_m", 99.0)) <= DOG_NEAR_M,
+		"o cão do cliente segue o cliente (cliente vê %.1f m, anfitrião vê %.1f m)"
+		% [float(client.get("dog_near_m", 99.0)), float(host.get("client_dog_near_m", 99.0))])
+	# Phase 1: the client commands.
+	var cs: Array = client.get("states_p1", [])
+	_ok(cs.has("seek") and (cs.has("bay") or cs.has("point")), "cliente: o cão dele foi a seek e à habilidade (%s)" % str(cs))
+	_ok(client.get("cmds_p1", []) == ["attack", "recall"], "cliente: HUD recebeu Pega! e Volta! (%s)" % str(client.get("cmds_p1")))
+	_ok(host.get("states_p1", []) == ["follow"] and (host.get("cmds_p1", []) as Array).is_empty(),
+		"anfitrião: HUD e cão dele quietos durante o comando do cliente (%s %s)" % [str(host.get("states_p1")), str(host.get("cmds_p1"))])
+	_ok(int(host.get("marks_p1", 0)) >= 1 and int(host.get("marked_seen_p1", 0)) >= 1,
+		"marcação do cão do cliente aparece no anfitrião (%s eventos, %s javalis marcados)"
+		% [str(host.get("marks_p1")), str(host.get("marked_seen_p1"))])
+	_ok(int(client.get("marks_p1", 0)) >= 1 and int(client.get("marked_seen_p1", 0)) >= 1,
+		"marcação aparece no cliente (%s eventos, %s javalis marcados)" % [str(client.get("marks_p1")), str(client.get("marked_seen_p1"))])
+	# Phase 2: the host commands.
+	var hs: Array = host.get("states_end", [])
+	_ok(hs.has("seek") and host.get("cmds_end", []) == ["attack", "recall"],
+		"anfitrião: o cão dele obedeceu e o HUD dele ouviu (%s %s)" % [str(hs), str(host.get("cmds_end"))])
+	_ok(client.get("states_end", []) == client.get("states_p1", []) and client.get("cmds_end", []) == client.get("cmds_p1", []),
+		"cliente: HUD não ouviu o cão do anfitrião (%s)" % str(client.get("states_end")))
+	_ok(int(client.get("marks_end", 0)) > int(client.get("marks_p1", 0)) and int(client.get("marked_seen_end", 0)) >= 1,
+		"marcação do cão do anfitrião aparece no cliente (%s -> %s eventos)" % [str(client.get("marks_p1")), str(client.get("marks_end"))])
+	_ok(int(client.get("puppets", -1)) == 2,
+		"cliente vê as duas réplicas (%s)" % str(client.get("puppets")))
+
+
 ## JSON numbers come back as floats: Array.has(int) would never match them.
 func _has_int(values: Array, wanted: int) -> bool:
 	for v: Variant in values:
@@ -494,6 +553,9 @@ func _run_peer() -> void:
 	Profile.set_save_path("user://net_hunt_e2e_%s.json" % _role)   # never the player's save
 	Profile.reset_progress()
 	Profile.set_setting("player_name", "N %s" % _role)
+	if _scenario == "dogs":
+		_equip_dog()
+		_hook_dog_signals()   # before the hunt assembles: the first dog_state_changed comes with the dog's setup
 	Net.room_error.connect(func(c: StringName, m: String) -> void:
 		_errors.append(str(c))
 		_log("room_error %s: %s" % [c, m]))
@@ -554,6 +616,11 @@ func _run_peer() -> void:
 				await _wait_to_be_killed(world)
 			else:
 				await _host_client_drop(world)
+		"dogs":
+			if client:
+				await _client_dogs(world)
+			else:
+				await _host_dogs(world)
 		_:
 			_peer_finish("unknown scenario " + _scenario)
 
@@ -729,6 +796,121 @@ func _wait_to_be_killed(world: HuntController) -> void:
 	if _role == "client":
 		_write("client_ready", "1")
 	await _until(func() -> bool: return false, PEER_LIMIT_MS, "", false)
+
+
+# --- Dogs scenario (peer side) ---
+
+## Every player owns one dog and has it in the loadout, so Net's request carries it and the lobby records too.
+func _equip_dog() -> void:
+	var breed: StringName = CLIENT_DOG if _role == "client" else HOST_DOG
+	Profile.add_money(DOG_MONEY)
+	Profile.buy(breed)
+	Profile.set_loadout_dog(breed)
+
+
+func _hook_dog_signals() -> void:
+	GameEvents.dog_state_changed.connect(func(s: StringName) -> void: _dog_states.append(String(s)))
+	GameEvents.dog_command_executed.connect(func(c: StringName) -> void: _dog_cmds.append(String(c)))
+	GameEvents.hud_message_requested.connect(func(t: String, _s: float) -> void:
+		if t.contains("cão") or t.contains("Cão"):
+			_dog_texts.append(t))
+	GameEvents.dog_marked_boar.connect(func(_p: Vector3, _d: float) -> void:
+		_dog_marks += 1
+		var w: HuntController = get_tree().current_scene as HuntController
+		if w != null:
+			_dog_marked_seen = maxi(_dog_marked_seen, w.get_marked_boar_positions().size()))
+
+
+func _dog_basics(world: HuntController) -> void:
+	_result["dogs_simulated"] = world.get_dogs().size()
+	_result["has_dog"] = world.has_dog()
+	_result["breed"] = String(CLIENT_DOG if _role == "client" else HOST_DOG)
+	_result["puppets"] = 0 if world.debug_replica() == null else \
+		int(world.debug_replica().get_dog_puppet(HOST_SLOT) != null) + int(world.debug_replica().get_dog_puppet(CLIENT_SLOT) != null)
+
+
+## The commander walks to a spot DOG_BOAR_M from the nearest boar, waits for its dog to come beside it, then sends
+## "Pega!" (through the bus, like the key does), waits for a mark and sends "Volta!".
+func _dog_round(world: HuntController, player: PlayerBase, tag: String) -> bool:
+	if not await _until(func() -> bool: return not world.get_alive_boar_ids().is_empty() and world.has_dog(), DOG_WAIT_MS, "boar and dog (%s)" % tag):
+		return false
+	var boar: Vector3 = world.get_nearest_boar_position(player.global_position)
+	var rect: Rect2 = world.get_map_rect().grow(-DOG_EDGE_M)
+	var away: Vector2 = (world.get_map_rect().get_center() - Vector2(boar.x, boar.z)).normalized()
+	var xz: Vector2 = Vector2(boar.x, boar.z) + away * DOG_BOAR_M
+	xz = Vector2(clampf(xz.x, rect.position.x, rect.end.x), clampf(xz.y, rect.position.y, rect.end.y))
+	player.bot_set_enabled(true)
+	player.bot_teleport(Vector3(xz.x, world.get_height(xz.x, xz.y) + 0.1, xz.y))
+	var beside: Callable = func() -> bool:
+		return world.get_dog_position().is_finite() and world.get_dog_position().distance_to(player.global_position) <= DOG_NEAR_M
+	if not await _until(beside, DOG_WAIT_MS, "dog beside owner (%s)" % tag):
+		return false
+	_result["dog_near_m"] = world.get_dog_position().distance_to(player.global_position)
+	await _sleep(DOG_SETTLE_MS)
+	var marks0: int = _dog_marks
+	player.bot_dog_command()
+	if not await _until(func() -> bool: return _dog_marks > marks0 and _dog_states.has("seek"), DOG_PHASE_MS, "dog marks a boar (%s)" % tag):
+		return false
+	await _sleep(DOG_SETTLE_MS)
+	player.bot_dog_command()
+	if not await _until(func() -> bool: return _dog_cmds.size() >= 2, DOG_WAIT_MS, "recall executed (%s)" % tag):
+		return false
+	# The whole cycle (follow, seek, ability, return, follow) is over before the next phase starts.
+	return await _until(func() -> bool: return world.get_dog_state() == Ids.DS_FOLLOW, DOG_WAIT_MS, "dog back to follow (%s)" % tag)
+
+
+func _client_dogs(world: HuntController) -> void:
+	var player: PlayerBase = world.get_player()
+	if not await _until(func() -> bool: return world.has_dog(), DOG_WAIT_MS, "client dog puppet"):
+		return
+	_dog_basics(world)
+	if not await _dog_round(world, player, "client"):
+		return
+	_result["states_p1"] = _dog_states.duplicate()
+	_result["cmds_p1"] = _dog_cmds.duplicate()
+	_result["marks_p1"] = _dog_marks
+	_result["marked_seen_p1"] = _dog_marked_seen
+	_write("client_p1_done", "1")
+	# Phase 2 belongs to the host: whatever its dog does must not reach this HUD.
+	if not await _until(func() -> bool: return _has_file("host_p2_done"), DOG_PHASE_MS * 2, "host phase 2"):
+		return
+	await _sleep(DOG_SETTLE_MS)
+	_result["states_end"] = _dog_states.duplicate()
+	_result["cmds_end"] = _dog_cmds.duplicate()
+	_result["marks_end"] = _dog_marks
+	_result["marked_seen_end"] = _dog_marked_seen
+	_result["dog_texts"] = _dog_texts
+	_dog_basics(world)
+	_result["ok"] = true
+	_peer_finish("")
+
+
+func _host_dogs(world: HuntController) -> void:
+	var player: PlayerBase = world.get_player()
+	_park(world, player)
+	_dog_basics(world)
+	if not await _until(func() -> bool: return _has_file("client_p1_done"), DOG_PHASE_MS * 2, "client phase 1"):
+		return
+	var client_dog: Dog = world.get_dog_of(CLIENT_SLOT)
+	var client_hunter: PlayerBase = world.get_hunter(CLIENT_SLOT)
+	var near_host_view: Callable = func() -> bool:
+		return client_dog.global_position.distance_to(client_hunter.global_position) <= DOG_NEAR_M
+	await _until(near_host_view, DOG_WAIT_MS, "", false)
+	if client_dog != null and client_hunter != null:
+		_result["client_dog_near_m"] = client_dog.global_position.distance_to(client_hunter.global_position)
+	_result["states_p1"] = _dog_states.duplicate()
+	_result["cmds_p1"] = _dog_cmds.duplicate()
+	_result["marks_p1"] = _dog_marks
+	_result["marked_seen_p1"] = _dog_marked_seen
+	if not await _dog_round(world, player, "host"):
+		return
+	_result["states_end"] = _dog_states.duplicate()
+	_result["cmds_end"] = _dog_cmds.duplicate()
+	_result["dog_texts"] = _dog_texts
+	_write("host_p2_done", "1")
+	await _stay_for_client()
+	_result["ok"] = true
+	_peer_finish("")
 
 
 # --- Peer helpers ---

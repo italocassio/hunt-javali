@@ -3,6 +3,28 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.8 — 14/11/2026
+
+**Cães na caçada com amigos.**
+
+O que mudou para o jogador:
+
+- No modo "Jogar com amigos", cada jogador pode levar o próprio cão. A lista da sala mostra a arma e o cão de
+  cada um.
+- "Pega!" e "Volta!" comandam só o seu cão, e só você vê os avisos dele. Quando qualquer cão marca um javali,
+  a marca aparece para todos.
+- O abate feito pelo cão paga o dono do cão.
+- Se o dono cai, o cão fica parado esperando; se o dono sai da partida, o cão sai junto.
+- O modo solo não mudou.
+
+O que mudou no projeto:
+
+- `src/dogs/dog.gd` com dono (`owner_slot`) e `command()` público; réplica nova `src/dogs/dog_puppet.gd`.
+- `hunt_controller.gd`, `hunt_host_sync.gd`, `hunt_replica.gd`: um cão por jogador no anfitrião, seção `DOG`
+  do snapshot, comandos e marcações pela rede.
+- `src/net/net_session.gd`: o cão de cada jogador trafega no resumo de equipamento.
+- Teste novo: cenário `dogs` no `tests/net_test.tscn` e sandbox `net_dogs` no `tests/net_unit.tscn`.
+
 ## 0.4.7 — 14/11/2026
 
 **Contador de FPS na caçada.**

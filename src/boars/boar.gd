@@ -395,7 +395,7 @@ func apply_dog_damage(amount: float) -> void:
 	if state == Ids.BS_DEAD or amount <= 0.0:
 		return
 	_dog_damaged = true
-	killer_slot = _world.get_local_slot()   # dogs only run on this machine (section 6.5)
+	killer_slot = (_dog as Dog).owner_slot if _dog is Dog else _world.get_local_slot()   # a dog's kills go to its owner (section 6.5)
 	health -= amount
 	if health <= 0.0:
 		_die(Ids.ZONE_DOG)

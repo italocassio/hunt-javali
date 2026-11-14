@@ -16,10 +16,11 @@ extends Node
 ##   host_drop         net_hunt_e2e (N4): the host process dies -> client DISCONNECTED within host_timeout_s + 2 s
 ##   host_freeze       net_hunt_e2e (N4): the host stays up but its Net stops -> client DISCONNECTED by timeout
 ##   client_drop       net_hunt_e2e (N5): the client process dies -> the host sees hunter_left and wins alone
+##   dogs              net_hunt_e2e (N6, F7): each player brings a dog; puppets, commands, marks, messages, owner leaves
 ## Without Bun (PATH, $BUN, ~/.bun/bin or -- --bun=<path>) every selected scenario is reported as SKIP, explicitly.
 ## Exit code 1 if any scenario fails, times out or the child dies without its summary line.
 ##
-## Run (all, ~6 min): tools/godot.sh --headless --path . res://tests/net_test.tscn
+## Run (all, ~8 min): tools/godot.sh --headless --path . res://tests/net_test.tscn
 ## Subset:              ... res://tests/net_test.tscn -- --only=victory,crop     (short names, or the groups
 ##                      "relay" and "hunt"; an unknown name is a FAIL, never a silent pass)
 ## Other user args:     --bun=<bun executable>
@@ -33,7 +34,8 @@ const ONLY_ARG: String = "--only="
 const WATCHDOG_SLACK_S: float = 30.0
 ## "limit_s" is the per-scenario limit, about 2x the time measured on 2026-11-13 (full run: 353 s; relay_normal 15 s,
 ## relay_host_drops 16, deadlines 82, victory 71, crop 23, death 25, host_drop 14, host_freeze 34, client_drop 72).
-## The global watchdog is the sum of the limits of the selected scenarios plus WATCHDOG_SLACK_S (790 s for all),
+## The dogs scenario was added in F7 (about 100 s measured, limit 200 s).
+## The global watchdog is the sum of the limits of the selected scenarios plus WATCHDOG_SLACK_S (990 s for all),
 ## so a filtered run gets a proportionally short watchdog.
 const SCENARIOS: Array[Dictionary] = [
 	{"name": "relay_normal", "group": "relay", "scene": E2E_SCENE, "args": [], "limit_s": 40.0},
@@ -45,6 +47,7 @@ const SCENARIOS: Array[Dictionary] = [
 	{"name": "host_drop", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=host_drop"], "limit_s": 40.0},
 	{"name": "host_freeze", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=host_freeze"], "limit_s": 80.0},
 	{"name": "client_drop", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=client_drop"], "limit_s": 150.0},
+	{"name": "dogs", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=dogs"], "limit_s": 200.0},
 ]
 
 var _totals: Dictionary = {}

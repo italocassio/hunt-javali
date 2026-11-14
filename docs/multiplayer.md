@@ -45,7 +45,7 @@ Identificadores em inglês; texto do jogador em PT-BR. Referências `arquivo:lin
 | D5 | Anfitrião caiu = fim para todos (sem migração). Cliente caiu = caçador some, partida segue. |
 | D6 | Abate paga quem matou; bônus para todos; progressão só para quem já tinha o contrato; consumíveis por jogador; nº de javalis escala por dados. |
 | D7 | Morto vira espectador. Derrota = lavoura 0% ou todos mortos. Vitória = todos os javalis abatidos. |
-| D8 | Cada jogador leva o seu cão; anfitrião simula; dono comanda pela rede (fase própria). |
+| D8 | Cada jogador leva o seu cão; anfitrião simula; dono comanda pela rede (F7, concluída). |
 | D9 | Aliado visto por `HunterVisualBase` / `ScenePaths.HUNTER_VISUAL` (asset já entregue). |
 | D10 | `server/` em JavaScript: lógica em módulo neutro de runtime (`rooms.js`, `bun test`), entrada de produção Worker + Durable Object, entrada local Bun para desenvolvimento e testes; deploy com `wrangler`. |
 | D11 | `config/version` diferente não entra na mesma sala. |
@@ -610,7 +610,12 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | `C_DOG_CMD` | C→H | E | por comando | — | 0 |
 
 `msg` de `EV_MESSAGE`: 0 vara entrou, 1 solitário, 2 cachaço (`hunt_controller.gd:13–15`); 3 cão não
-farejou, 4 cão recuou, 5 cão pronto (`dog.gd:36–38`). O texto continua no pacote B.
+farejou, 4 cão recuou, 5 cão pronto (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`, `NET_MSG_RECOVERED`; texto em
+`Dog.MESSAGES`). O texto continua no pacote B.
+
+O cão de cada peer trafega no resumo de loadout: campo `dog` de `L_READY` (índice em `Data.get_dog_ids()`, 255 =
+sem cão), de `L_LOBBY` e `dog[4]` de `L_START` (por slot). O `Net` preenche `NetPeerInfo.dog_id` com eles; é
+dali que o `HuntController` tira a raça de cada slot (§6.5). A constante `DOGS_IN_COOP` foi removida.
 
 **`HUNTER_STATE` (14 bytes):** `xz 2×u16, y i16 (cm), yaw u16, pitch i8 (graus), speed u8 (×0,05 m/s),
 flags u8 (NetCodec.HF_*), weapon u8, health u8 (ceil), shot_seq u8` (contador de disparos: quem recebe
@@ -937,19 +942,36 @@ Lavoura no cliente: o `CropManager` é o mesmo, sem comedores registrados (o `_p
 `crop_health_changed` sai com o mesmo passo do solo. `crop_under_attack` é reemitido pela réplica quando o
 bit b0 do snapshot muda. No anfitrião, `_eat_patch` emite `patch_eaten(index)` para o `HuntHostSync`.
 
-### 6.5 Cães (fase própria)
+### 6.5 Cães (F7, implementada)
 
-| `dog.gd` | Hoje | Em rede |
+| `dog.gd` | Antes | Em rede (implementado) |
 |---|---|---|
-| 97, 174–181 | segue `_world.get_player()` | segue `get_hunter(owner_slot)`; dono morto: fica onde está; dono saiu: cão removido |
-| 101–102 | todo cão ouve `GameEvents.dog_command_requested` | só o cão do slot local conecta; os outros recebem `command()` via `C_DOG_CMD` |
-| 103–104, 137, 142, 382, 397 | emite sinais de cão no barramento | só o cão do jogador local emite; os demais vão no registro `DOG` do snapshot e o cliente dono reemite |
-| 208, 220, 374 | mensagens de HUD | `EV_MESSAGE` endereçado ao dono |
-| 336–339 | marca javali | marca vale para o time: `EV_DOG_MARK`; todos emitem `dog_marked_boar` |
+| `setup` | `setup(p_breed_id, world, spawn_position)` | `setup(p_breed_id, world, spawn_position, p_owner_slot: int = 0)`; `owner_slot`; offline = slot 0 = caçador local |
+| seguir o dono | segue `_world.get_player()` | segue `get_hunter(owner_slot)`; dono morto: larga o javali, ignora comandos e fica onde está; dono saiu: `leave()` (cão removido no anfitrião e na réplica) |
+| comando | todo cão ouve `GameEvents.dog_command_requested` | `command()` público; só o cão do slot local conecta o sinal; os outros recebem `command()` via `C_DOG_CMD` |
+| sinais de HUD | emite sinais de cão no barramento | só o cão do slot local emite `dog_state_changed`, `dog_health_changed` e `dog_command_executed`; os demais vão no registro `DOG` do snapshot |
+| mensagens de HUD | barramento | dono local: barramento; dono remoto: `EV_MESSAGE` ao dono (códigos 3–5, `Dog.NET_MSG_*`/`Dog.MESSAGES`) |
+| marcação | marca javali | todos emitem `dog_marked_boar`; o anfitrião envia `EV_DOG_MARK` |
+| membros novos | — | `net_state_byte()`, `get_yaw()`, `is_local_owner()` |
 
-Cliente: `DogPuppet` (visual + interpolação; `play_point`, `play_bite`, `set_retreating`, latidos por
-temporizador local). `has_dog()`/`get_dog_*` respondem pelo cão do jogador local. Até a fase dos cães, o
-lobby mostra "Cães ainda não entram no modo com amigos" e `dog` vai 255.
+`HuntController`: um `Dog` por slot com cão (offline e anfitrião), com a raça vinda do roster
+(`NetPeerInfo.dog_id`); o cliente só tem réplicas. API: `get_dogs() -> Array[Dog]`, `get_dog_of(slot) -> Dog`;
+internos de B (chamados por `Dog`): `report_dog_command(owner_slot, cmd)`, `report_dog_mark(owner_slot, boar_id,
+duration_s)`, `report_dog_message(owner_slot, code)`. O snapshot ganha a seção `DOG` (§4.5);
+`has_dog()`/`get_dog_*` respondem pelo cão do jogador local (o `Dog` ou o `DogPuppet`).
+
+Comando: o cliente emite `dog_command_requested`; a `HuntReplica` envia `C_DOG_CMD`; o `HuntHostSync` chama
+`command()` no cão daquele slot (ignorado se o cão é do anfitrião ou não existe); o cão executa e o anfitrião
+emite `EV_DOG_CMD` para todos. O cliente dono reemite `dog_command_executed`, então o "Pega!" do cliente
+aparece no HUD dele depois da ida e volta, sem predição local.
+
+Cliente: `DogPuppet` (`src/dogs/dog_puppet.gd`, `class_name DogPuppet`; interpolação com o relógio da
+`HuntReplica`, sem extrapolar; `play_point`, `play_bite` e `set_retreating` no visual a partir do byte `st`;
+latidos e rosnados por temporizador local; `set_local_owner` reemite `dog_state_changed` e
+`dog_health_changed` quando o cão é do jogador local). `Boar.apply_dog_damage` credita o abate ao dono do cão.
+
+Limitação conhecida (fica para o balanceamento de vários cães): se dois cães pegam o mesmo javali, o primeiro a
+soltar libera o javali para os dois.
 
 ### 6.6 Itens
 
@@ -1061,8 +1083,9 @@ lê `Net.take_url_room_code()`; se não vazio, vai ao `LOBBY` guardando o códig
 `host_select_contract` quando o anfitrião escolhe outro, e `_begin_hunt` usa `Net.get_hunt_seed()`. O pronto
 automático da F2 acabou: o cliente aperta `%ReadyButton`. O `LoadoutPanel` (`src/ui/common/loadout_panel.gd`,
 `class_name LoadoutPanel`, `VBoxContainer`; `setup(root: Control, dog_locked_text: String = "")`, sinal
-`changed`) é compartilhado com a Preparação (mesmos nós `%`). Cão desabilitado no lobby com "Cães em rede: em
-breve." até a F7. Cada peer troca para a caçada ao receber `room_state_changed(LOADING)`. Resultado e loja em
+`changed`) é compartilhado com a Preparação (mesmos nós `%`). Desde a F7 o cão está liberado no lobby
+(`dog_locked_text` fica vazio), o detalhe de cada jogador mostra "Cão: <nome>" (`Lobby.dog_label(id)`) e
+`request.dog_id = Profile.get_loadout_dog()` vale também em rede. Cada peer troca para a caçada ao receber `room_state_changed(LOADING)`. Resultado e loja em
 sala: "Voltar à sala" → `LOBBY`; "Menu" chama `Net.leave_room()`.
 
 Espectador e aliados no HUD (F6): ao morrer com aliado vivo, o `Player` cria uma `SpectatorCamera`
@@ -1352,7 +1375,11 @@ Status: concluída em 2026-11-14 (sessão manual com 3 aparelhos reais ainda pen
 - **Fora:** cães, reconexão.
 
 ### F7 — Cães em rede
+Status: concluída em 2026-11-14
 - **Objetivo jogável:** cada jogador leva o seu cão e manda "Pega!"/"Volta!".
+- **Implementado:** ver §6.5 (`Dog` com `owner_slot`, `DogPuppet`, seção `DOG` do snapshot, `EV_DOG_*`,
+  `EV_MESSAGE` 3–5, cão no resumo de loadout) e §6.11 (lobby). Testes: `net_hunt_e2e --scenario=dogs` (N6, no
+  `net_test`) e o sandbox `src/hunt/debug/net_dogs_test.tscn` (no `net_unit`).
 - **Arquivos:** B: `dog.gd` (§6.5), `dog_puppet.gd`, registro `DOG`, `EV_DOG_*`, `EV_MESSAGE`; lobby libera
   o cão; qa: cenário N6.
 - **Dono / modelo:** game-developer B (Sonnet), qa-tester (Sonnet).
@@ -1433,7 +1460,9 @@ Sigo todas como decididas; registro o que mudaria.
 - **D1 (código de sala).** Objeção aceita pela coordenação: o código passou a 5 caracteres (33,5 milhões).
   A v1 continua sem expulsão de jogador.
 - **D8 (um cão por jogador).** Quatro cães de agarre seguram quatro javalis ao mesmo tempo. É
-  balanceamento, não arquitetura: fica para a fase dos cães, em dados.
+  balanceamento, não arquitetura: fica para o balanceamento de vários cães, em dados. A F7 entregou o
+  mecanismo; limitação conhecida: se dois cães pegam o mesmo javali, o primeiro a soltar libera o javali
+  para os dois.
 - **D9 (visual do aliado).** Sem objeção à API. Faltavam orçamento e as quatro regras de §7.11; 10 malhas
   por aliado somam até 30 draw calls, por isso a linha nova no orçamento. `play_death(_instant: bool =
   false)` e o fallback na cor do slot foram aceitos; a coordenação aplica em `hunter_visual_base.gd`.

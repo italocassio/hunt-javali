@@ -11,6 +11,8 @@ signal kill_confirmed(kill: KillInfo, killed: int, total: int)
 signal bait_received(at: Vector3, duration_s: float)
 ## EV_MESSAGE addressed to this machine (or everyone). msg: index of docs/multiplayer.md section 4.5.
 signal message_received(msg: int)
+## A dog marked a boar (EV_DOG_MARK): good for the whole team, whoever owns the dog.
+signal dog_mark_received(boar_id: int, duration_s: float)
 ## The host ended the hunt. entries: Array of {slot, kills, money}.
 signal hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)
 
@@ -19,6 +21,11 @@ const HIT_BYTES: int = 8
 const ATTACK_BYTES: int = 2
 const DEATH_BYTES: int = 15
 const SNAP_BOAR_BYTES: int = 7
+const SNAP_DOG_BYTES: int = 8
+const DOG_MARK_BYTES: int = 3
+const DOG_CMD_BYTES: int = 2
+const MARK_WIRE_SCALE: float = 10.0      # EV_DOG_MARK duration u8 in 0.1 s
+const DOG_CMD_ATTACK: int = 0            # EV_DOG_CMD cmd: 0 "Pega!", 1 "Volta!"
 const CLAIM_HEADER_BYTES: int = 12
 const CLAIM_HIT_BYTES: int = 6
 const WEIGHT_WIRE_SCALE: float = 100.0   # weight u16 in 0.01 kg
@@ -59,6 +66,9 @@ var _thermal_on: bool = false
 var _thermal_range: float = DEFAULT_THERMAL_RANGE_M
 var _thermal_timer: float = 0.0
 var _eaten_scratch: PackedInt32Array = PackedInt32Array()
+var _dogs: Dictionary = {}              # owner slot -> DogPuppet
+var _dogs_seen: PackedInt32Array = PackedInt32Array()
+var _dog_breeds: Dictionary = {}        # owner slot -> breed id (roster); no entry = that slot has no dog
 
 # Counters for tests and diagnostics.
 var baits_claimed: int = 0
@@ -66,6 +76,7 @@ var patches_applied: int = 0
 var shots_claimed: int = 0
 var hits_claimed: int = 0
 var charge_hits: int = 0
+var dog_commands_claimed: int = 0
 
 
 func setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void:
@@ -82,9 +93,18 @@ func setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropMa
 		GameEvents.shot_fired.connect(_on_shot_fired)
 	if not GameEvents.thermal_vision_changed.is_connected(_on_thermal_changed):
 		GameEvents.thermal_vision_changed.connect(_on_thermal_changed)
+	if not GameEvents.dog_command_requested.is_connected(request_dog_command):
+		GameEvents.dog_command_requested.connect(request_dog_command)
+
+
+## Which slots brought which dog (the roster). The snapshot only says "slot N has a dog".
+func set_dog_breeds(breeds: Dictionary) -> void:
+	_dog_breeds = breeds
 
 
 func _exit_tree() -> void:
+	if GameEvents.dog_command_requested.is_connected(request_dog_command):
+		GameEvents.dog_command_requested.disconnect(request_dog_command)
 	if GameEvents.shot_fired.is_connected(_on_shot_fired):
 		GameEvents.shot_fired.disconnect(_on_shot_fired)
 	if GameEvents.thermal_vision_changed.is_connected(_on_thermal_changed):
@@ -109,6 +129,8 @@ func _process(delta: float) -> void:
 		if not over and local != null and p.try_charge_hit(local):
 			charge_hits += 1
 			_queue_charge_claim(id)
+	for slot: int in _dogs:
+		(_dogs[slot] as DogPuppet).update_pose(t, delta)
 
 
 # --- Clock ---------------------------------------------------------------------------------------
@@ -148,6 +170,85 @@ func apply_snapshot_boars(inp: StreamPeerBuffer, t_ms: int) -> void:
 			p.push_sample(float(t_ms), xz, yaw, st)
 
 
+## Dog section of H_SNAPSHOT: n u8, n x { owner u8, xz 2 x u16, yaw u8, st u8, health u8 (%) }. Reads exactly that
+## section (stops at a truncated entry). A dog appears the first time its slot is listed; a slot with no breed in
+## the roster is ignored.
+func apply_snapshot_dogs(inp: StreamPeerBuffer, t_ms: int) -> void:
+	if inp.get_available_bytes() < 1:
+		return
+	var n: int = inp.get_u8()
+	_dogs_seen.clear()
+	for i: int in n:
+		if inp.get_available_bytes() < SNAP_DOG_BYTES:
+			return
+		var owner_slot: int = inp.get_u8()
+		var xz: Vector2 = NetCodec.get_xz(inp, _rect)
+		var yaw: float = NetCodec.u8_to_angle(inp.get_u8())
+		var st: int = inp.get_u8()
+		var health: float = float(inp.get_u8())
+		var p: DogPuppet = _dogs.get(owner_slot) as DogPuppet
+		if p == null:
+			p = _create_dog(owner_slot, xz, yaw, health)
+		if p != null:
+			p.push_sample(float(t_ms), xz, yaw, st, health)
+			_dogs_seen.append(owner_slot)
+	# A complete section that no longer lists a dog: the host removed it (its owner left).
+	for slot: int in _dogs.keys():
+		if not _dogs_seen.has(slot):
+			remove_dog(slot)
+
+
+func _create_dog(owner_slot: int, xz: Vector2, yaw: float, health: float) -> DogPuppet:
+	var breed: StringName = _dog_breeds.get(owner_slot, &"") as StringName
+	if breed == &"" or _hm == null:
+		return null
+	var p: DogPuppet = DogPuppet.new()
+	p.setup(owner_slot, breed, xz, yaw, _hm)
+	p.health_pct = health
+	add_child(p)
+	_dogs[owner_slot] = p
+	p.set_local_owner(_world != null and owner_slot == _world.get_local_slot())
+	return p
+
+
+## The owner left the hunt: its dog goes with it.
+func remove_dog(owner_slot: int) -> void:
+	var p: DogPuppet = _dogs.get(owner_slot) as DogPuppet
+	if p == null:
+		return
+	_dogs.erase(owner_slot)
+	p.queue_free()
+
+
+func get_dog_puppet(owner_slot: int) -> DogPuppet:
+	return _dogs.get(owner_slot) as DogPuppet
+
+
+## The dog of this machine's hunter (null until the first snapshot lists it, or if there is none).
+func get_local_dog() -> DogPuppet:
+	return _dogs.get(_world.get_local_slot()) as DogPuppet if _world != null else null
+
+
+## C_DOG_CMD (no body): the local hunter pressed the dog key. Only if this hunter has a dog in the hunt.
+func request_dog_command() -> void:
+	if _world == null or _world.is_hunt_over() or get_local_dog() == null:
+		return
+	var at: int = _begin_claim(NetCodec.C_DOG_CMD)
+	_end_claim(at)
+	dog_commands_claimed += 1
+
+
+## EV_DOG_CMD: owner u8, cmd u8. The owner's HUD gets dog_command_executed; the puppet barks on "Pega!".
+func _on_dog_command(inp: StreamPeerBuffer) -> void:
+	var owner_slot: int = inp.get_u8()
+	var cmd: int = inp.get_u8()
+	var p: DogPuppet = _dogs.get(owner_slot) as DogPuppet
+	if p != null:
+		p.play_command(cmd)
+	if _world != null and owner_slot == _world.get_local_slot():
+		GameEvents.dog_command_executed.emit(Ids.CMD_ATTACK if cmd == DOG_CMD_ATTACK else Ids.CMD_RECALL)
+
+
 # --- Events (host -> client) ---------------------------------------------------------------------
 
 func apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void:
@@ -170,6 +271,14 @@ func apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void:
 			if length >= BAIT_BYTES:
 				var xz: Vector2 = NetCodec.get_xz(inp, _rect)
 				bait_received.emit(Vector3(xz.x, 0.0, xz.y), float(inp.get_u8()))
+		NetCodec.EV_DOG_MARK:
+			if length >= DOG_MARK_BYTES:
+				inp.get_u8()   # owner: the mark is for everybody
+				var marked: int = inp.get_u8()
+				dog_mark_received.emit(marked, float(inp.get_u8()) / MARK_WIRE_SCALE)
+		NetCodec.EV_DOG_CMD:
+			if length >= DOG_CMD_BYTES:
+				_on_dog_command(inp)
 		NetCodec.EV_MESSAGE:
 			if length >= MESSAGE_BYTES:
 				var target: int = inp.get_u8()

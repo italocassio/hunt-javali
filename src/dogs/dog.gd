@@ -3,6 +3,8 @@ extends Node3D
 ## Hunting dog (docs/arquitetura.md section 8.10). Kinematic steering over the heightmap, no physics
 ## body. Obeys GameEvents.dog_command_requested: "Pega!" from follow, "Volta!" otherwise.
 ## Abilities by breed data: point (caramelo), bay (foxhound), hold (dogo). Never dies.
+## Network (docs/multiplayer.md section 6.5): the host simulates one Dog per hunter that brought one
+## (owner_slot); a client sees DogPuppet replicas. Offline = owner_slot 0 = the local hunter, as before.
 
 # --- Rules the contract fixes in text (not present in data/) ---
 const POINT_DISTANCE_M: float = 15.0
@@ -37,8 +39,18 @@ const MSG_NO_BOAR: String = "O cão não farejou nenhum javali por perto."
 const MSG_RETREAT: String = "Seu cão se feriu e recuou!"
 const MSG_RECOVERED: String = "Seu cão está pronto de novo."
 const MSG_S: float = 3.0
+## EV_MESSAGE codes 3..5 (docs/multiplayer.md section 4.5) -> the text the owner reads.
+const NET_MSG_NO_BOAR: int = 3
+const NET_MSG_RETREAT: int = 4
+const NET_MSG_RECOVERED: int = 5
+const MESSAGES: Dictionary = {NET_MSG_NO_BOAR: MSG_NO_BOAR, NET_MSG_RETREAT: MSG_RETREAT, NET_MSG_RECOVERED: MSG_RECOVERED}
+## Snapshot state byte (docs/multiplayer.md section 4.5): b0-2 index in NetCodec.DOG_STATES, b3 retreating, b4 biting.
+const NET_ST_STATE_MASK: int = 7
+const NET_ST_RETREATING: int = 8
+const NET_ST_BITING: int = 16
 
 var breed_id: StringName = &""
+var owner_slot: int = 0
 var state: StringName = Ids.DS_FOLLOW
 var health: float = 100.0
 var max_health: float = 100.0
@@ -70,11 +82,14 @@ var _retarget_timer: float = 0.0
 var _hurt_timer: float = 0.0
 var _orbit_angle: float = 0.0
 var _last_pct_sent: int = -1
+var _local: bool = true                # this dog belongs to the hunter of this machine (always true offline)
 
 
-func setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector3) -> void:
+func setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector3, p_owner_slot: int = 0) -> void:
 	breed_id = p_breed_id
+	owner_slot = p_owner_slot
 	_world = world
+	_local = _world.get_local_slot() == owner_slot
 	var def: Dictionary = Data.get_dog(breed_id)
 	_ability = StringName(String(def.get("ability", "point")))
 	max_health = maxf(float(def.get("max_health", 100.0)), MIN_HEALTH)
@@ -94,14 +109,16 @@ func setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector
 	_build_visual()
 	var p: Vector2 = _world.obstacles.resolve(Vector2(spawn_position.x, spawn_position.z), BODY_RADIUS_M)
 	position = Vector3(p.x, _world.get_height(p.x, p.y), p.y)
-	var player: PlayerBase = _world.get_player()
-	if player != null:
-		_yaw = player.rotation.y
+	var owner_hunter: PlayerBase = _world.get_hunter(owner_slot)
+	if owner_hunter != null:
+		_yaw = owner_hunter.rotation.y
 	rotation.y = _yaw
-	if not GameEvents.dog_command_requested.is_connected(_on_command):
-		GameEvents.dog_command_requested.connect(_on_command)
-	GameEvents.dog_state_changed.emit(state)
-	_send_health(true)
+	if _local:
+		# Only the dog of this machine's hunter obeys the local command and talks to this machine's HUD.
+		if not GameEvents.dog_command_requested.is_connected(command):
+			GameEvents.dog_command_requested.connect(command)
+		GameEvents.dog_state_changed.emit(state)
+		_send_health(true)
 
 
 func get_health_pct() -> float:
@@ -110,6 +127,30 @@ func get_health_pct() -> float:
 
 func get_xz() -> Vector2:
 	return Vector2(position.x, position.z)
+
+
+func get_yaw() -> float:
+	return _yaw
+
+
+func is_local_owner() -> bool:
+	return _local
+
+
+## Host: stops what it is doing and leaves the world (its owner left the hunt).
+func leave() -> void:
+	_release_target()
+	queue_free()
+
+
+## State byte of the H_SNAPSHOT DOG record (docs/multiplayer.md section 4.5).
+func net_state_byte() -> int:
+	var b: int = maxi(NetCodec.DOG_STATES.find(state), 0) & NET_ST_STATE_MASK
+	if state == Ids.DS_RETREAT:
+		b |= NET_ST_RETREATING
+	if state == Ids.DS_HOLD:
+		b |= NET_ST_BITING
+	return b
 
 
 ## Damage from boars. The dog never dies: health stops at MIN_HEALTH and it retreats.
@@ -128,18 +169,26 @@ func take_damage(amount: float) -> void:
 
 # --- Commands ------------------------------------------------------------------------------------
 
-func _on_command() -> void:
-	if _world == null or _world.is_hunt_over():
+## "Pega!" from follow, "Volta!" otherwise. The local dog gets it from GameEvents.dog_command_requested;
+## the others from the host's HuntHostSync (C_DOG_CMD of their owner).
+func command() -> void:
+	if _world == null or _world.is_hunt_over() or not _owner_alive():
 		return
 	if state == Ids.DS_FOLLOW:
 		_target = _world.spawner.find_nearest_alive(get_xz(), _search_radius)
 		_set_state(Ids.DS_SEEK)
-		GameEvents.dog_command_executed.emit(Ids.CMD_ATTACK)
+		_report_command(Ids.CMD_ATTACK)
 		Sfx.play_3d(&"dog_bark", global_position)
 		return
 	if state != Ids.DS_RETREAT:
 		_enter_return()
-	GameEvents.dog_command_executed.emit(Ids.CMD_RECALL)
+	_report_command(Ids.CMD_RECALL)
+
+
+func _report_command(cmd: StringName) -> void:
+	if _local:
+		GameEvents.dog_command_executed.emit(cmd)
+	_world.report_dog_command(owner_slot, cmd)
 
 
 # --- Frame ---------------------------------------------------------------------------------------
@@ -150,6 +199,8 @@ func _process(delta: float) -> void:
 	_state_time += delta
 	_speed = 0.0
 	_hurt_timer = maxf(_hurt_timer - delta, 0.0)
+	if state != Ids.DS_FOLLOW and state != Ids.DS_RETURN and state != Ids.DS_RETREAT and not _owner_alive():
+		_enter_return()   # the owner died: let go of the boar and stay put
 	match state:
 		Ids.DS_FOLLOW:
 			_tick_follow(delta)
@@ -171,9 +222,15 @@ func _process(delta: float) -> void:
 	_visual.set_locomotion(_speed)
 
 
+func _owner_alive() -> bool:
+	var hunter: PlayerBase = _world.get_hunter(owner_slot)
+	return hunter != null and hunter.is_alive()
+
+
+## Behind and beside the owner. A dead (or gone) owner leaves the dog where it is.
 func _follow_point() -> Vector2:
-	var player: PlayerBase = _world.get_player()
-	if player == null:
+	var player: PlayerBase = _world.get_hunter(owner_slot)
+	if player == null or not player.is_alive():
 		return get_xz()
 	var fwd: Vector2 = Steering.dir_from_yaw(player.rotation.y)
 	var right: Vector2 = Vector2(-fwd.y, fwd.x)
@@ -205,7 +262,7 @@ func _tick_retreat(delta: float) -> void:
 	if health >= max_health * _return_frac:
 		_visual.set_retreating(false)
 		_set_state(Ids.DS_FOLLOW)
-		GameEvents.hud_message_requested.emit(MSG_RECOVERED, MSG_S)
+		_say(NET_MSG_RECOVERED)
 
 
 func _tick_seek(delta: float) -> void:
@@ -217,7 +274,7 @@ func _tick_seek(delta: float) -> void:
 			_target = nearest
 	if not _target_alive():
 		_target = null
-		GameEvents.hud_message_requested.emit(MSG_NO_BOAR, MSG_S)
+		_say(NET_MSG_NO_BOAR)
 		_enter_return()
 		return
 	var dist: float = get_xz().distance_to(_target.get_xz())
@@ -336,7 +393,8 @@ func _take_boar_damage(delta: float) -> void:
 func _mark_target() -> void:
 	_mark_timer = _mark_duration * REMARK_FRAC
 	_world.mark_boar(_target.boar_id, _mark_duration)
-	GameEvents.dog_marked_boar.emit(_target.global_position, _mark_duration)
+	GameEvents.dog_marked_boar.emit(_target.global_position, _mark_duration)   # a mark is good for the whole team
+	_world.report_dog_mark(owner_slot, _target.boar_id, _mark_duration)
 
 
 func _tick_mark(delta: float) -> void:
@@ -371,7 +429,7 @@ func _enter_retreat() -> void:
 	_visual.set_retreating(true)
 	Sfx.play_3d(&"dog_whine", global_position)
 	_set_state(Ids.DS_RETREAT)
-	GameEvents.hud_message_requested.emit(MSG_RETREAT, MSG_S)
+	_say(NET_MSG_RETREAT)
 
 
 func _set_state(new_state: StringName) -> void:
@@ -379,10 +437,19 @@ func _set_state(new_state: StringName) -> void:
 		return
 	state = new_state
 	_state_time = 0.0
-	GameEvents.dog_state_changed.emit(state)
+	if _local:
+		GameEvents.dog_state_changed.emit(state)
 
 
 # --- Helpers -------------------------------------------------------------------------------------
+
+## HUD message for the owner: straight to the bus on this machine, EV_MESSAGE for a remote owner.
+func _say(code: int) -> void:
+	if _local:
+		GameEvents.hud_message_requested.emit(String(MESSAGES[code]), MSG_S)
+	else:
+		_world.report_dog_message(owner_slot, code)
+
 
 func _regen(delta: float) -> void:
 	if health < max_health:
@@ -394,7 +461,8 @@ func _send_health(force: bool) -> void:
 	var pct: int = int(round(get_health_pct()))
 	if force or pct != _last_pct_sent:
 		_last_pct_sent = pct
-		GameEvents.dog_health_changed.emit(get_health_pct())
+		if _local:
+			GameEvents.dog_health_changed.emit(get_health_pct())
 
 
 func _steer(desired: Vector2, speed: float, delta: float) -> void:

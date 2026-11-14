@@ -273,7 +273,20 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "Steering", "path": "res://src/boars/steering.gd", "base": "RefCounted", "pkg": "B"},
 	{"name": "Boar", "path": "res://src/boars/boar.gd", "base": "Node3D", "pkg": "B"},
 	{"name": "BoarHerd", "path": "res://src/boars/boar_herd.gd", "base": "RefCounted", "pkg": "B"},
-	{"name": "Dog", "path": "res://src/dogs/dog.gd", "base": "Node3D", "pkg": "B"},
+	# docs/multiplayer.md 3.7 / 6.5 (F7): one Dog per slot with a dog on the host; owner_slot 0 offline.
+	{"name": "Dog", "path": "res://src/dogs/dog.gd", "base": "Node3D", "pkg": "B",
+		"props": ["owner_slot"],
+		"methods": ["setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector3, p_owner_slot: int = 0) -> void",
+			"command() -> void", "net_state_byte() -> int", "get_yaw() -> float", "is_local_owner() -> bool",
+			"get_xz() -> Vector2", "get_health_pct() -> float", "leave() -> void"]},
+	# docs/multiplayer.md 6.5 (F7): the client replica of a host dog. Visual only.
+	{"name": "DogPuppet", "path": "res://src/dogs/dog_puppet.gd", "base": "Node3D", "pkg": "B",
+		"props": ["owner_slot", "breed_id", "state", "health_pct"],
+		"methods": ["setup(p_owner_slot: int, p_breed_id: StringName, xz: Vector2, yaw: float, hm: Heightmap) -> void",
+			"get_xz() -> Vector2", "get_yaw() -> float", "get_health_pct() -> float", "is_local_owner() -> bool",
+			"set_local_owner(on: bool) -> void",
+			"push_sample(t_ms: float, xz: Vector2, yaw: float, st: int, health: float) -> void",
+			"update_pose(render_t_ms: float, delta: float) -> void", "play_command(cmd: int) -> void"]},
 	# --- game-systems ---
 	{"name": "Wallet", "path": "res://src/systems/wallet.gd", "base": "RefCounted", "pkg": "S",
 		"props": ["money", "gold"],
@@ -324,7 +337,8 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["setup(root: Control, dog_locked_text: String = \"\") -> void", "refresh() -> void"]},
 	{"name": "Lobby", "path": "res://src/ui/lobby/lobby.gd", "base": "Control", "pkg": "S",
 		"methods": ["player_label(info: NetPeerInfo, slot: int, is_local: bool) -> String",
-			"status_text(info: NetPeerInfo) -> String", "path_text(path: int) -> String"]},
+			"status_text(info: NetPeerInfo) -> String", "path_text(path: int) -> String",
+			"dog_label(dog_id: StringName) -> String"]},
 	# --- package N (src/net, internal: the contract of section 3.3 only names the classes; these are the entry
 	# points that Net, the sandboxes and the tests call, so a rename shows up here) ---
 	{"name": "NetSession", "path": "res://src/net/net_session.gd", "base": "RefCounted", "pkg": "N",
@@ -365,10 +379,11 @@ const CLASSES: Array[Dictionary] = [
 ## Classes the multiplayer contract plans (docs/multiplayer.md section 3.3) that may not exist yet.
 ## Only the names matter: they feed the layering rule of check_scripts (section 3.2) even before the file exists.
 ## Once a class is delivered, move it to CLASSES with its signatures (RemoteHunter, HuntHostSync, HuntReplica,
-## BoarPuppet and the five classes of package N were moved in F4/F5; SpectatorCamera and LoadoutPanel in F6).
+## BoarPuppet and the five classes of package N were moved in F4/F5; SpectatorCamera and LoadoutPanel in F6;
+## DogPuppet in F7).
 const PLANNED_NET_CLASSES: Array[String] = []
 const PLANNED_A_CLASSES: Array[String] = []
-const PLANNED_B_CLASSES: Array[String] = ["DogPuppet"]
+const PLANNED_B_CLASSES: Array[String] = []
 const PLANNED_S_CLASSES: Array[String] = []
 
 ## Additions of docs/multiplayer.md section 3.6 to src/core (the core classes themselves are listed in

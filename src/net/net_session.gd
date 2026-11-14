@@ -24,7 +24,6 @@ const STATE_IN_HUNT: int = 4
 const HOST_ID: int = 1            # peer id of the host; slot = id - 1
 const CREATE_RETRIES: int = 3     # "create" that lands on a code in use (section 4.2)
 const NO_INDEX: int = 255         # "none" for weapon / dog / map indices on the wire
-const DOGS_IN_COOP: bool = false  # dogs join the network in their own phase (F7); until then dog = 255
 const CODE_MAX_CHARS: int = 16
 const L_READY_BYTES: int = 8
 const L_LOBBY_HEADER_BYTES: int = 4
@@ -571,7 +570,7 @@ func _refresh_local_info() -> void:
 		return
 	var request: HuntRequest = Profile.build_hunt_request(_map_id, _contract_index)
 	me.weapon_id = request.weapon_ids[0] if not request.weapon_ids.is_empty() else &""
-	me.dog_id = request.dog_id if DOGS_IN_COOP else &""
+	me.dog_id = request.dog_id
 
 
 func _pick_default_contract() -> void:
@@ -1034,7 +1033,7 @@ func _on_ready(from_slot: int, body: PackedByteArray) -> void:
 		return
 	info.ready = body[0] != 0
 	info.weapon_id = _id_at(Data.get_weapon_ids(), body[1])
-	info.dog_id = _id_at(Data.get_dog_ids(), body[3]) if DOGS_IN_COOP else &""
+	info.dog_id = _id_at(Data.get_dog_ids(), body[3])
 	_broadcast_lobby()
 	roster_changed.emit()
 

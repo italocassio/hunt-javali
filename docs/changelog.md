@@ -3,6 +3,24 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.7 — 14/11/2026
+
+**Contador de FPS na caçada.**
+
+O que mudou para o jogador:
+
+- A opção "Mostrar quadros por segundo" das configurações agora funciona: com ela ligada, aparece o número
+  de FPS no canto superior esquerdo da tela, abaixo da vida. Dá para ligar e desligar a qualquer momento,
+  inclusive com o jogo pausado.
+
+O que mudou no projeto:
+
+- Causa do bug: a configuração `show_fps` era salva, mas nenhum código do HUD a lia.
+- Novo `src/hud/fps_counter.gd` (`FpsCounter`, um `Label`): lê `Profile.get_setting("show_fps")`, segue
+  `GameEvents.settings_changed`, atualiza a cada 0,5 s e não processa nada enquanto está oculto.
+- `src/hud/hud.gd`: cria o contador e o coloca no canto superior esquerdo.
+- `src/hud/debug/hud_net_test.gd`: 8 verificações novas para o contador.
+
 ## 0.4.6 — 14/11/2026
 
 **Som do cerrado novo, sem cigarras.**

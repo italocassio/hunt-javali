@@ -51,6 +51,7 @@ func _ready() -> void:
 	await _test_net_messages()
 	await _test_spectate_hud()
 	await _test_pause()
+	await _test_fps_counter()
 	print("RESULT: %d passed, %d failed, 0 skipped" % [_passed, _failed])
 	get_tree().quit(0 if _failed == 0 else 1)
 
@@ -247,6 +248,29 @@ func _test_spectate_hud() -> void:
 	_check("spectate_silent_after_end", not banner.visible and not hint.visible and not down.visible)
 	hud.queue_free()
 	world.queue_free()
+
+
+func _test_fps_counter() -> void:
+	var hud: Hud = Hud.new()
+	add_child(hud)
+	await get_tree().process_frame
+	var fps: FpsCounter = hud.get("_fps_counter") as FpsCounter
+	var shown_by_default: bool = bool(Profile.get_setting("show_fps"))
+	_check("fps_follows_saved_setting", fps.visible == shown_by_default and fps.is_processing() == shown_by_default)
+	GameEvents.settings_changed.emit("show_fps", true)
+	_check("fps_shown_on_setting", fps.visible and fps.is_processing())
+	_check("fps_text_pt_br", fps.text.ends_with(" FPS") and fps.text.split(" ")[0].is_valid_int(), fps.text)
+	_check("fps_ignores_input", fps.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	GameEvents.settings_changed.emit("volume_sfx", 0.5)
+	_check("fps_ignores_other_keys", fps.visible)
+	get_tree().paused = true
+	_check("fps_runs_while_paused", fps.can_process() and fps.is_processing())
+	GameEvents.settings_changed.emit("show_fps", false)
+	get_tree().paused = false
+	_check("fps_hidden_and_idle_when_off", not fps.visible and not fps.is_processing())
+	GameEvents.settings_changed.emit("show_fps", true)
+	_check("fps_shown_again", fps.visible and fps.is_processing())
+	hud.queue_free()
 
 
 func _on_abandon() -> void:

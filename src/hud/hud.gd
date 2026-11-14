@@ -83,6 +83,7 @@ var _damage: DamageIndicator = DamageIndicator.new()
 var _crosshair: HudCrosshair = HudCrosshair.new()
 var _compass: Compass = Compass.new()
 var _minimap: Minimap = Minimap.new()
+var _fps_counter: FpsCounter = FpsCounter.new()
 var _kill_msg: KillMessage = KillMessage.new()
 var _ctx_msg: KillMessage = KillMessage.new()
 var _dog_msg: KillMessage = KillMessage.new()
@@ -267,6 +268,7 @@ func _build_top_left() -> void:
 	_vest_label.visible = false
 	inner.add_child(_vest_label)
 	box.add_child(_panel(inner))
+	box.add_child(_fps_counter)   # under the health panel: inherits the touch left margin, clear of minimap and buttons
 
 
 func _build_top_center() -> void:

@@ -3,6 +3,25 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.10 — 15/11/2026
+
+**Rolagem por arraste nos menus no celular.**
+
+O que mudou para o jogador:
+
+- No celular, as listas dos menus (lobby, Mapas, Preparação, Loja, Resultado, Doação, Configurações) rolam
+  arrastando o dedo em qualquer ponto, inclusive em cima de botões e cartões. Antes só rolava pela barra.
+- Um toque simples continua acionando o botão; um arraste não aciona nada. Arrasto rápido desliza um pouco
+  depois de soltar.
+- Nos controles de volume, arrastar para o lado muda o volume e arrastar para cima ou para baixo rola a lista.
+- No computador nada mudou.
+
+O que mudou no projeto:
+
+- `src/ui/common/touch_scroll_container.gd` (novo): ScrollContainer com arraste por toque; `UiKit.scroll_list()`
+  passa a usá-lo, sem mudar a assinatura.
+- `README.md`: como rodar a versão Web localmente, no celular pela rede e com o servidor de salas local.
+
 ## 0.4.9 — 15/11/2026
 
 **Reconexão na caçada com amigos.**

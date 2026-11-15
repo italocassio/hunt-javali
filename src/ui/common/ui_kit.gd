@@ -15,6 +15,8 @@ const MUTED_COLOR: Color = Color(0.78, 0.74, 0.68)
 const PAGE_MARGIN_H: int = 40
 const PAGE_MARGIN_V: int = 24
 
+const _TouchScroll: GDScript = preload("res://src/ui/common/touch_scroll_container.gd")
+
 const _FALLBACK_SIZES: Dictionary = {
 	"TitleLabel": 40, "HeaderLabel": 28, "MoneyLabel": 24, "GoldLabel": 24,
 	"PrimaryButton": 26, "SecondaryButton": 22, "DangerButton": 22,
@@ -81,8 +83,9 @@ static func spacer(horizontal: bool = true) -> Control:
 
 
 ## Vertical scroll area that fills the remaining space. Returns [scroll, content_vbox].
+## On touch the list scrolls by dragging anywhere on it, also over buttons (see touch_scroll_container.gd).
 static func scroll_list(separation: int = 12) -> Array:
-	var scroll: ScrollContainer = ScrollContainer.new()
+	var scroll: ScrollContainer = _TouchScroll.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

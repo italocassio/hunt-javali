@@ -22,6 +22,17 @@ const TIPS: Dictionary = {
 	HuntResult.Outcome.ABANDONED: "Os abates feitos foram pagos. O bônus do contrato só sai na vitória.",
 	HuntResult.Outcome.DISCONNECTED: "O anfitrião saiu. Seus abates foram pagos.",
 }
+const HORDE_TITLES: Dictionary = {
+	HuntResult.Outcome.VICTORY: "Celeiro defendido!",
+	HuntResult.Outcome.DEFEAT_CROP: "O celeiro foi devorado",
+	HuntResult.Outcome.DEFEAT_DEATH: "Derrota: os caçadores caíram",
+	HuntResult.Outcome.ABANDONED: "Horda abandonada",
+}
+const HORDE_TIPS: Dictionary = {
+	HuntResult.Outcome.DEFEAT_CROP: "Os abates feitos foram pagos. Fiquem perto do celeiro e derrubem primeiro quem já está comendo o milho. A ceva de milho afasta parte da horda.",
+	HuntResult.Outcome.DEFEAT_DEATH: "Os abates feitos foram pagos. Machos e cachaços raspam o chão antes de investir: saia da linha da corrida. O colete de couro reduz o dano.",
+	HuntResult.Outcome.ABANDONED: "Os abates feitos foram pagos. O bônus de defesa só sai na vitória.",
+}
 const NO_PROGRESS_TEXT: String = "Este contrato ainda não estava liberado para você: os prêmios foram pagos, mas o progresso não avança."
 const SCORE_NAME_FALLBACK: String = "Caçador %d"
 const SCORE_SWATCH_PX: float = 18.0
@@ -37,6 +48,8 @@ func _ready() -> void:
 	var title: String = "Resultado da caçada"
 	if _result != null:
 		title = TITLES.get(_result.outcome, title)
+		if _result.is_horde():
+			title = HORDE_TITLES.get(_result.outcome, title)
 	var page: Dictionary = UiKit.build_page(self, title)
 	var body: VBoxContainer = page["body"]
 	if _result == null:
@@ -66,7 +79,12 @@ func _build_body(body: VBoxContainer) -> void:
 	left.size_flags_stretch_ratio = 1.25
 	left.add_theme_constant_override("separation", 8)
 	columns.add_child(left)
-	if _is_network():
+	if _is_horde():
+		var kills_text: String = "Abates: %d" % _result.kills.size()
+		if _is_network():
+			kills_text = "Seus abates: %d · Equipe: %d" % [_result.kills.size(), _result.team_kills]
+		left.add_child(UiKit.label(kills_text, "HeaderLabel"))
+	elif _is_network():
 		left.add_child(UiKit.label("Seus abates: %d · Equipe: %d de %d" % [_result.kills.size(), _result.team_kills, maxi(_result.boars_total, _result.team_kills)], "HeaderLabel"))
 	else:
 		left.add_child(UiKit.label("Abates: %d de %d javalis" % [_result.kills.size(), maxi(_result.boars_total, _result.kills.size())], "HeaderLabel"))
@@ -86,6 +104,16 @@ func _build_body(body: VBoxContainer) -> void:
 		right.add_child(_build_scoreboard_card())
 	right.add_child(_build_payment_card())
 	right.add_child(_build_stats_card())
+
+
+func _is_horde() -> bool:
+	return _result != null and _result.is_horde()
+
+
+func _horde_map_name() -> String:
+	if Data.get_map_ids().has(_result.map_id):
+		return str(Data.get_map(_result.map_id).get("name", _result.map_id))
+	return str(_result.map_id)
 
 
 func _is_network() -> bool:
@@ -185,11 +213,16 @@ func _build_payment_card() -> Control:
 	box.add_child(_value_row("Abates", UiKit.money_text(_result.money_from_kills)))
 	var contract: Dictionary = _contract()
 	var bonus_max: int = int(contract.get("bonus_money", 0))
+	var horde: bool = _is_horde()
+	var bonus_caption: String = "Bônus de defesa" if horde else "Bônus do contrato"
+	var stock_caption: String = "Celeiro" if horde else "Lavoura"
+	if horde:
+		bonus_max = int(Data.get_horde().get("victory_bonus_money", 0))
 	if _result.is_victory():
-		box.add_child(_value_row("Bônus do contrato", UiKit.money_text(_result.contract_bonus)))
-		box.add_child(UiKit.muted("Lavoura em %d%% de %s" % [int(roundf(_result.crop_health_pct)), UiKit.money_text(bonus_max)]))
+		box.add_child(_value_row(bonus_caption, UiKit.money_text(_result.contract_bonus)))
+		box.add_child(UiKit.muted("%s em %d%% de %s" % [stock_caption, int(roundf(_result.crop_health_pct)), UiKit.money_text(bonus_max)]))
 	else:
-		box.add_child(_value_row("Bônus do contrato", UiKit.money_text(0)))
+		box.add_child(_value_row(bonus_caption, UiKit.money_text(0)))
 		box.add_child(UiKit.muted("Só na vitória (até %s)" % UiKit.money_text(bonus_max)))
 	box.add_child(HSeparator.new())
 	var total_row: HBoxContainer = HBoxContainer.new()
@@ -212,7 +245,9 @@ func _build_stats_card() -> Control:
 	var box: VBoxContainer = VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	card.add_child(box)
-	box.add_child(_value_row("Lavoura preservada", "%d%%" % int(roundf(clampf(_result.crop_health_pct, 0.0, 100.0)))))
+	if _is_horde():
+		box.add_child(_value_row("Ondas vencidas", "%d de %d" % [_result.horde_waves_cleared, _result.horde_wave_count]))
+	box.add_child(_value_row("Celeiro preservado" if _is_horde() else "Lavoura preservada", "%d%%" % int(roundf(clampf(_result.crop_health_pct, 0.0, 100.0)))))
 	if _result.shots_fired > 0:
 		var pct: int = int(roundf(clampf(100.0 * float(_result.shots_hit) / float(_result.shots_fired), 0.0, 100.0)))
 		box.add_child(_value_row("Tiros certeiros", "%d%% (%d tiros)" % [pct, _result.shots_fired]))
@@ -259,7 +294,7 @@ func _build_footer(footer: HBoxContainer) -> void:
 	UiKit.mark(retry, self, "RetryButton")
 	footer.add_child(retry)
 	retry.pressed.connect(_on_retry)
-	retry.visible = not _in_room()
+	retry.visible = not _in_room() and not _is_horde()
 	footer.add_child(UiKit.spacer())
 	var cont: Button = UiKit.button("Voltar à sala" if _in_room() else "Continuar para a loja", "PrimaryButton", 80)
 	cont.custom_minimum_size.x = 360
@@ -305,6 +340,8 @@ func _contract() -> Dictionary:
 
 
 func _contract_line() -> String:
+	if _is_horde():
+		return "Horda Javali  |  %s" % _horde_map_name()
 	var contract: Dictionary = _contract()
 	if contract.is_empty():
 		return ""
@@ -313,6 +350,10 @@ func _contract_line() -> String:
 
 
 func _progress_text() -> String:
+	if _is_horde():
+		if _result.is_victory():
+			return ""
+		return HORDE_TIPS.get(_result.outcome, TIPS.get(_result.outcome, ""))
 	if _result.is_victory() and not _result.counts_for_progression:
 		return NO_PROGRESS_TEXT
 	if not _result.is_victory():

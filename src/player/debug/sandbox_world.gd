@@ -2,12 +2,18 @@ class_name SandboxWorld
 extends HuntWorld
 ## Package A sandbox: flat 200x200 ground (layer 1), three shootable targets with HitZones and a
 ## kill counter. Stands in for the hunt so the player, weapons and HUD run without Package B.
-## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo
+## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde
+## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
+## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
 const GROUND_SIZE_M: float = 200.0
 const TARGET_DISTANCES_M: Array[float] = [10.0, 30.0, 60.0]
 const TARGET_WEIGHT_KG: float = 100.0
 const TARGET_HEALTH_PER_KG: float = 1.2
+const HORDE_WAVE_COUNT: int = 3
+const HORDE_FIRST_DELAY_S: float = 12.0
+const HORDE_INTERMISSION_S: float = 6.0
+const HORDE_OBJECTIVE: Vector3 = Vector3(0.0, 0.0, -40.0)
 const ZONE_BOXES: Dictionary = {
 	"head": [Vector3(0.0, 0.75, -0.55), Vector3(0.3, 0.3, 0.3)],
 	"vital": [Vector3(0.0, 0.6, -0.2), Vector3(0.45, 0.4, 0.5)],
@@ -18,6 +24,18 @@ const ZONE_BOXES: Dictionary = {
 var player: Player = null
 var killed: int = 0
 var crop_pct: float = 87.0
+## Horde state (docs/horda.md section 4.2). The sandbox runs a toy wave loop; tests may set horde_auto = false and
+## write these fields (and emit the signals) by hand.
+var horde_mode: bool = false
+var horde_auto: bool = true
+var horde_wave: int = 0
+var horde_wave_count: int = 0
+var horde_phase: StringName = &""
+var horde_countdown_s: float = 0.0
+var horde_wave_total: int = 0
+var horde_wave_remaining: int = 0
+var horde_waves_cleared: int = 0
+var horde_objective: Vector3 = HORDE_OBJECTIVE
 var kill_log: Array[KillInfo] = []
 var hit_log: Array[HitInfo] = []
 var _targets: Dictionary = {}     # id -> {node, health, zones, last_shot, one_shot, alive}
@@ -29,6 +47,8 @@ var _args: Dictionary = {}
 
 func _ready() -> void:
 	_args = _parse_args()
+	if _args.has("horde"):
+		horde_mode = true
 	_multipliers = Data.get_boar_rules().get("zone_multipliers", {})
 	_build_ground()
 	add_child(MapEnvironmentBase.create_fallback())
@@ -39,10 +59,42 @@ func _ready() -> void:
 	GameEvents.boar_counts_changed.emit(0, _targets.size())
 	GameEvents.crop_health_changed.emit(crop_pct)
 	GameEvents.hunt_started.emit(_request())
+	if horde_mode and horde_auto:
+		horde_wave = 1
+		horde_wave_count = HORDE_WAVE_COUNT
+		horde_phase = Ids.HP_INTERMISSION
+		horde_countdown_s = HORDE_FIRST_DELAY_S
+		GameEvents.horde_wave_changed.emit(horde_wave, horde_wave_count, horde_phase, horde_countdown_s)
 
 
 func _process(delta: float) -> void:
 	_elapsed += delta
+	if horde_mode and horde_auto and horde_phase == Ids.HP_INTERMISSION:
+		horde_countdown_s = maxf(horde_countdown_s - delta, 0.0)
+		if horde_countdown_s <= 0.0:
+			_horde_begin_wave()
+
+
+func _horde_begin_wave() -> void:
+	horde_phase = Ids.HP_WAVE
+	horde_countdown_s = 0.0
+	horde_wave_total = get_alive_boar_ids().size()
+	horde_wave_remaining = horde_wave_total
+	GameEvents.horde_wave_changed.emit(horde_wave, horde_wave_count, horde_phase, 0.0)
+	GameEvents.horde_wave_progress.emit(horde_wave_remaining, horde_wave_total)
+
+
+func _horde_after_kill() -> void:
+	horde_wave_remaining = get_alive_boar_ids().size()
+	GameEvents.horde_wave_progress.emit(horde_wave_remaining, horde_wave_total)
+	if horde_wave_remaining > 0:
+		return
+	horde_waves_cleared = horde_wave
+	if horde_wave < horde_wave_count:
+		horde_wave += 1
+		horde_phase = Ids.HP_INTERMISSION
+		horde_countdown_s = HORDE_INTERMISSION_S
+		GameEvents.horde_wave_changed.emit(horde_wave, horde_wave_count, horde_phase, horde_countdown_s)
 
 
 func _parse_args() -> Dictionary:
@@ -55,7 +107,7 @@ func _parse_args() -> Dictionary:
 
 
 func _request() -> HuntRequest:
-	var r: HuntRequest = HuntRequest.make_debug()
+	var r: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE if horde_mode else Ids.MODE_CONTRACT)
 	r.weapon_ids = [Ids.W_CARBINE_22, Ids.W_SHOTGUN_12]
 	r.item_ids = [Ids.I_BINOCULARS, Ids.I_LEATHER_VEST, Ids.I_MEDKIT, Ids.I_CORN_BAIT]
 	r.item_counts = {Ids.I_MEDKIT: 2, Ids.I_CORN_BAIT: 1}
@@ -229,9 +281,52 @@ func _kill(id: int, zone: StringName) -> void:
 	GameEvents.boar_state_changed.emit(id, Ids.BS_DEAD)
 	GameEvents.boar_killed.emit(kill)
 	GameEvents.boar_counts_changed.emit(killed, _targets.size())
+	if horde_mode and horde_auto and horde_phase == Ids.HP_WAVE:
+		_horde_after_kill()
 
 
 # --- HuntWorld overrides ---
+func get_mode() -> StringName:
+	return Ids.MODE_HORDE if horde_mode else Ids.MODE_CONTRACT
+
+
+func get_objective_position() -> Vector3:
+	return horde_objective if horde_mode else Vector3.INF
+
+
+func get_horde_wave() -> int:
+	return horde_wave
+
+
+func get_horde_wave_count() -> int:
+	return horde_wave_count
+
+
+func get_horde_phase() -> StringName:
+	return horde_phase
+
+
+func get_horde_countdown_s() -> float:
+	return horde_countdown_s
+
+
+func get_horde_wave_total() -> int:
+	return horde_wave_total
+
+
+func get_horde_wave_remaining() -> int:
+	return horde_wave_remaining
+
+
+func get_horde_waves_cleared() -> int:
+	return horde_waves_cleared
+
+
+func debug_horde_start_next_wave() -> void:
+	if horde_mode and horde_phase == Ids.HP_INTERMISSION:
+		horde_countdown_s = 0.0
+
+
 func is_world_ready() -> bool:
 	return _ready_flag
 

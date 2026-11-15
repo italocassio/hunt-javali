@@ -34,6 +34,22 @@ const SPECTATE_HINT_TOUCH: String = "Toque em Tiro para trocar de caçador"
 const SPECTATE_HINT_KEYS: String = "Clique ou F para trocar de caçador"
 const SPECTATE_HINT_FONT_PX: int = 20
 const NO_SLOT: int = -1
+const HORDE_CROP_TEXT: String = "Celeiro %d%%"
+const HORDE_ALERT_TEXT: String = "Javalis no celeiro!"
+const HORDE_LABEL_WAVE: String = "Onda %d/%d · faltam %d"
+const HORDE_LABEL_INTERMISSION: String = "Onda %d/%d em %d s"
+const HORDE_LABEL_NONE: String = "Onda –"
+const HORDE_BANNER_FIRST: String = "Defenda o celeiro! A horda chega em %d s"
+const HORDE_BANNER_WAVE: String = "Onda %d de %d"
+const HORDE_BANNER_LAST: String = "Última onda! Onda %d de %d"
+const HORDE_BANNER_CLEARED: String = "Onda %d vencida!"
+const HORDE_AMMO_TEXT: String = "%d | ∞"
+const HORDE_WON_TEXT: String = "Celeiro defendido!"
+const HORDE_LOST_TEXT: String = "O celeiro foi devorado!"
+const HORDE_BANNER_S: float = 3.0
+const HORDE_BANNER_TOP_FRAC: float = 0.18
+const SOUND_WAVE_START: StringName = &"horde_wave_start"
+const SOUND_WAVE_CLEAR: StringName = &"horde_wave_clear"
 const ALLY_MSG_S: float = 3.0
 const STALL_TOP_FRAC: float = 0.16
 const LOCAL_DOWN_TOP_FRAC: float = 0.30
@@ -83,6 +99,16 @@ var _ally_points: PackedVector3Array = PackedVector3Array()
 var _ally_colors: PackedColorArray = PackedColorArray()
 var _ally_yaws: PackedFloat32Array = PackedFloat32Array()
 var _ally_down: PackedByteArray = PackedByteArray()
+var _horde: bool = false              # horde layout on (docs/horda.md section 8); contract mode never turns it on
+var _wave: int = 0
+var _wave_count: int = 0
+var _wave_phase: StringName = &""
+var _wave_countdown_s: float = 0.0
+var _wave_total: int = 0
+var _wave_remaining: int = 0
+var _banner_left_s: float = 0.0
+var _crop_pct: float = 100.0
+var _objective_icon: Texture2D = null
 
 var _root: Control = Control.new()
 var _scope: ScopeOverlay = ScopeOverlay.new()
@@ -104,6 +130,8 @@ var _crop_bar: ProgressBar = ProgressBar.new()
 var _crop_label: Label = null
 var _crop_alert: Label = null
 var _count_label: Label = null
+var _wave_label: Label = null
+var _wave_banner: Label = null
 var _dog_panel: PanelContainer = null
 var _dog_label: Label = null
 var _dog_bar: ProgressBar = ProgressBar.new()
@@ -167,7 +195,17 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 	_vest_label.visible = items != null and items.damage_reduction > 0.0
 	if _world != null:
 		_minimap.map_rect = _world.get_map_rect()
-		_minimap.crop_rects = _world.get_crop_rects()
+		if _world.is_horde():
+			_enter_horde_layout()
+			_wave = _world.get_horde_wave()
+			_wave_count = _world.get_horde_wave_count()
+			_wave_phase = _world.get_horde_phase()
+			_wave_countdown_s = _world.get_horde_countdown_s()
+			_wave_total = _world.get_horde_wave_total()
+			_wave_remaining = _world.get_horde_wave_remaining()
+			_refresh_wave_label()
+		else:
+			_minimap.crop_rects = _world.get_crop_rects()
 		_on_crop_health(_world.get_crop_health_pct())
 		_on_counts(_world.get_boars_killed(), _world.get_boars_total())
 	_refresh_item_text()
@@ -302,11 +340,19 @@ func _build_top_center() -> void:
 func _build_top_right() -> void:
 	var parts: Array = _corner("TopRight", Control.SIZE_SHRINK_END, Control.SIZE_SHRINK_BEGIN)
 	var box: VBoxContainer = parts[1]
+	# Keep the minimap at its minimum width so a wider WaveLabel does not stretch or shift it.
+	_minimap.size_flags_horizontal = Control.SIZE_SHRINK_END
 	box.add_child(_minimap)
 	_count_label = _label("Javalis 0/0", 24)
 	_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	box.add_child(_count_label)
+	_wave_label = _label(HORDE_LABEL_NONE, 24)
+	_wave_label.name = "WaveLabel"
+	_wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_wave_label.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_wave_label.visible = false
+	box.add_child(_wave_label)
 	var inner: VBoxContainer = VBoxContainer.new()
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_dog_label = _label("Cão", 18)
@@ -360,6 +406,7 @@ func _build_messages() -> void:
 	_spectate_banner = _make_banner("SpectateBanner", "", LOCAL_DOWN_TOP_FRAC, COLOR_TEXT)
 	_spectate_hint = _make_banner("SpectateHint", SPECTATE_HINT_KEYS, LOCAL_DOWN_TOP_FRAC + BANNER_HEIGHT_FRAC, COLOR_TEXT)
 	_spectate_hint.add_theme_font_size_override("font_size", SPECTATE_HINT_FONT_PX)
+	_wave_banner = _make_banner("WaveBanner", "", HORDE_BANNER_TOP_FRAC, COLOR_TEXT)
 
 
 ## Persistent (non-fading) centered text, hidden until a state turns it on.
@@ -422,6 +469,8 @@ func _connect_events() -> void:
 	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
 	GameEvents.hunter_away_changed.connect(_on_hunter_away_changed)
 	GameEvents.spectate_changed.connect(_on_spectate_changed)
+	GameEvents.horde_wave_changed.connect(_on_horde_wave_changed)
+	GameEvents.horde_wave_progress.connect(_on_horde_wave_progress)
 
 
 func _apply_touch_layout(is_touch: bool) -> void:
@@ -466,6 +515,10 @@ func _process(delta: float) -> void:
 		if _probe_t <= 0.0:
 			_probe_t = PROBE_INTERVAL_S
 			_publish_probe()
+	if _banner_left_s > 0.0:
+		_banner_left_s -= delta
+		if _banner_left_s <= 0.0:
+			_wave_banner.visible = false
 	_poll_t -= delta
 	if _poll_t <= 0.0:
 		_poll_t = POLL_INTERVAL_S
@@ -527,7 +580,8 @@ func _update_weapon() -> void:
 	var w: Weapon = _player.get_weapon()
 	if w == null:
 		return
-	var text: String = "%d | %d" % [w.ammo_in_mag, w.ammo_reserve]
+	var text: String = (HORDE_AMMO_TEXT % w.ammo_in_mag) if _player.has_infinite_reserve() \
+		else ("%d | %d" % [w.ammo_in_mag, w.ammo_reserve])
 	if text != _last_ammo_text:
 		_last_ammo_text = text
 		_ammo_label.text = text
@@ -595,6 +649,8 @@ func _poll_world() -> void:
 			if bp.is_finite():
 				_revealed.append(bp)
 	_minimap.revealed = _revealed
+	if _horde:
+		_poll_horde()
 	_bait_points.resize(0)
 	for i: int in range(_baits.size() - 1, -1, -1):
 		if float(_baits[i]["until"]) < now_s:
@@ -720,8 +776,9 @@ func _on_counts(killed: int, total: int) -> void:
 
 
 func _on_crop_health(pct: float) -> void:
+	_crop_pct = pct
 	_crop_bar.value = pct
-	_crop_label.text = "Lavoura %d%%" % int(round(pct))
+	_crop_label.text = (HORDE_CROP_TEXT if _horde else "Lavoura %d%%") % int(round(pct))
 	_crop_bar.modulate = COLOR_GOOD if pct > CROP_WARN_PCT else (COLOR_WARN if pct > CROP_DANGER_PCT else COLOR_DANGER)
 
 
@@ -730,6 +787,86 @@ func _on_crop_attack(active: bool) -> void:
 	_crop_alert.visible = active
 	_crop_alert.modulate.a = 1.0
 	_alarm_t = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Horde mode (docs/horda.md section 8)
+# ---------------------------------------------------------------------------
+
+## Idempotent: switches the top bar, alert, counter and map to the barn layout.
+func _enter_horde_layout() -> void:
+	if _horde:
+		return
+	_horde = true
+	_count_label.visible = false
+	_wave_label.visible = true
+	_crop_alert.text = HORDE_ALERT_TEXT
+	_minimap.crop_rects = []
+	if _objective_icon == null and AssetLoader.exists(ScenePaths.icon(&"barn")):
+		_objective_icon = AssetLoader.load_resource(ScenePaths.icon(&"barn")) as Texture2D
+	_minimap.objective_icon = _objective_icon
+	_compass.objective_icon = _objective_icon
+	_on_crop_health(_crop_pct)
+	_refresh_wave_label()
+
+
+func _poll_horde() -> void:
+	var objective: Vector3 = _world.get_objective_position()
+	_minimap.objective = objective
+	_compass.objective = objective
+	if _wave_phase == Ids.HP_INTERMISSION:
+		_wave_countdown_s = _world.get_horde_countdown_s()
+	_refresh_wave_label()
+
+
+func _refresh_wave_label() -> void:
+	if _wave_label == null:
+		return
+	if _wave_phase == Ids.HP_WAVE:
+		_wave_label.text = HORDE_LABEL_WAVE % [_wave, _wave_count, _wave_remaining]
+	elif _wave_phase == Ids.HP_INTERMISSION:
+		_wave_label.text = HORDE_LABEL_INTERMISSION % [_wave, _wave_count, ceili(_wave_countdown_s)]
+	else:
+		_wave_label.text = HORDE_LABEL_NONE
+
+
+func _show_wave_banner(text: String) -> void:
+	_wave_banner.text = text
+	_wave_banner.visible = not _ended
+	_banner_left_s = HORDE_BANNER_S
+
+
+func _play_wave_sound(id: StringName) -> void:
+	if Sfx.has_sound(id):
+		Sfx.play(id)
+
+
+func _on_horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float) -> void:
+	_enter_horde_layout()
+	_wave = wave
+	_wave_count = wave_count
+	_wave_phase = phase
+	_wave_countdown_s = countdown_s
+	if phase == Ids.HP_WAVE:
+		_wave_remaining = _wave_total   # until the progress signal of this wave arrives
+	_refresh_wave_label()
+	if _ended:
+		return
+	if phase == Ids.HP_WAVE:
+		_show_wave_banner((HORDE_BANNER_LAST if wave == wave_count else HORDE_BANNER_WAVE) % [wave, wave_count])
+		_play_wave_sound(SOUND_WAVE_START)
+	elif wave <= 1:
+		_show_wave_banner(HORDE_BANNER_FIRST % ceili(countdown_s))
+	else:
+		_show_wave_banner(HORDE_BANNER_CLEARED % (wave - 1))
+		_play_wave_sound(SOUND_WAVE_CLEAR)
+
+
+func _on_horde_wave_progress(remaining: int, wave_total: int) -> void:
+	_enter_horde_layout()
+	_wave_remaining = remaining
+	_wave_total = wave_total
+	_refresh_wave_label()
 
 
 func _on_bait_placed(position: Vector3, duration_s: float) -> void:
@@ -869,10 +1006,10 @@ func _on_hunt_ended(result: HuntResult) -> void:
 	var online: bool = Net.get_role() != Net.Role.OFFLINE
 	match result.outcome:
 		HuntResult.Outcome.VICTORY:
-			text = "Missão cumprida!"
+			text = HORDE_WON_TEXT if _horde else "Missão cumprida!"
 			color = COLOR_GOOD
 		HuntResult.Outcome.DEFEAT_CROP:
-			text = "A lavoura foi destruída!"
+			text = HORDE_LOST_TEXT if _horde else "A lavoura foi destruída!"
 			color = COLOR_DANGER
 		HuntResult.Outcome.DEFEAT_DEATH:
 			text = ALL_DOWN_TEXT if online else "Você foi abatido!"
@@ -890,6 +1027,8 @@ func _on_hunt_ended(result: HuntResult) -> void:
 		_end_msg.show_text(text, END_MSG_S)
 	_crop_alert.visible = false
 	_crop_attack = false
+	_wave_banner.visible = false
+	_banner_left_s = 0.0
 
 
 static func _money(amount: int) -> String:

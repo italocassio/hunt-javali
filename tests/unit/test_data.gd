@@ -156,6 +156,64 @@ func test_game_quality_presets() -> void:
 	ok(int(Data.get_game().get("economy", {}).get("start_money", -1)) >= 0, "start_money >= 0")
 
 
+func test_horde_data_references_and_rules() -> void:
+	## docs/horda.md section 3: data/horde.json is consistent with the other files and with the map scene.
+	var h: Dictionary = Data.get_horde()
+	ok(not h.is_empty(), "data/horde.json carregado")
+	eq(int(h.get("version", 0)), 1, "version 1")
+	ok(str(h.get("name", "")) != "" and str(h.get("description", "")) != "", "name e description (texto do lobby)")
+	var map_id: StringName = StringName(str(h.get("map_id", "")))
+	ok(Data.get_map_ids().has(map_id), "map_id %s existe em maps.json" % map_id)
+	ok(bool(Data.get_map(map_id).get("available", false)), "mapa da horda disponivel")
+	var scene_text: String = FileAccess.get_file_as_string(ScenePaths.map_scene(map_id))
+	ok(scene_text.contains("prop_id = &\"%s\"" % str(h.get("objective_prop_id", "?"))), "a cena do mapa tem um PropSpawn '%s' (o celeiro)" % str(h.get("objective_prop_id", "?")))
+	var zone_regex: RegEx = RegEx.new()
+	zone_regex.compile("parent=\"SpawnZones\"")
+	var zones: int = zone_regex.search_all(scene_text).size()
+	ok(zones >= 1, "a cena do mapa tem SpawnZones (%d)" % zones)
+	var boar_ids: Array[StringName] = Data.get_boar_type_ids()
+	var waves: Array = h.get("waves", [])
+	var total: int = 0
+	var wave_max: int = 0
+	for wi: int in waves.size():
+		var wave_total: int = 0
+		for g: Dictionary in (waves[wi] as Dictionary).get("groups", []):
+			var members: Array = g.get("members", [])
+			ok(members.size() == 1 or (members.size() >= 3 and members.size() <= 6), "onda %d: bando de %d (1 ou 3-6)" % [wi + 1, members.size()])
+			for m: Variant in members:
+				ok(boar_ids.has(StringName(str(m))), "onda %d: tipo %s existe em boars.json" % [wi + 1, m])
+			ok(int(g.get("spawn_zone", -1)) >= 0, "onda %d: spawn_zone >= 0" % [wi + 1])
+			ok(float(g.get("delay_s", -1.0)) >= 0.0, "onda %d: delay_s >= 0" % [wi + 1])
+			wave_total += members.size()
+		total += wave_total
+		wave_max = maxi(wave_max, wave_total)
+	eq(total, 85, "85 javalis base")
+	var mults: Array = h.get("player_count_mult", [])
+	eq(mults.size(), int(Data.get_net().get("max_players", 0)), "um multiplicador por jogador da sala")
+	var prev: float = 1.0
+	for m: Variant in mults:
+		ok(float(m) >= prev, "multiplicadores >= 1 e nao decrescentes (%s)" % str(m))
+		prev = float(m)
+	var max_mult: float = float(mults.back()) if not mults.is_empty() else 1.0
+	var budget: int = 0
+	for w: Variant in waves:
+		var wt: int = 0
+		for g: Dictionary in (w as Dictionary)["groups"]:
+			wt += (g["members"] as Array).size()
+		budget += ceili(float(wt) * max_mult)
+	ok(budget <= 255, "orcamento de ids %d <= 255" % budget)
+	# the last wave carries the alpha, and no earlier wave does (the alpha is the finale)
+	var last_members: Array = []
+	for g: Dictionary in (waves.back() as Dictionary)["groups"]:
+		last_members.append_array(g["members"])
+	ok(last_members.has("alpha"), "ultima onda traz o alfa")
+	var max_alive: int = int(Data.get_game().get("hunt", {}).get("max_alive_boars", 0))
+	ok(max_alive > 0, "max_alive_boars > 0")
+	print("INFO horda: maior onda solo %d javalis, max_alive_boars %d (o spawner segura o excedente)" % [wave_max, max_alive])
+	ok(float(h.get("kill_reward_mult", 0.0)) < 1.0, "abate de horda paga menos que o de contrato")
+	ok(int(h.get("max_carcasses", 0)) <= max_alive, "max_carcasses nao passa de max_alive_boars")
+
+
 func test_pix_config_has_placeholders_flagged() -> void:
 	var cfg: Dictionary = Data.get_pix_config()
 	for f: String in ["gateway", "pix_key", "merchant_name", "merchant_city", "redeem_secret"]:

@@ -27,6 +27,8 @@ var weapon_id: StringName = &""
 var def: Dictionary = {}
 var ammo_in_mag: int = 0
 var ammo_reserve: int = 0
+## Horde mode: reloading never spends the reserve (docs/horda.md section 7).
+var infinite_reserve: bool = false
 
 var _cooldown_s: float = 0.0
 var _cycle_delay_left: float = -1.0
@@ -43,14 +45,17 @@ static func peek_next_shot_id() -> int:
 	return _next_shot_id
 
 
-func setup(id: StringName, reserve_mult: float = 1.0) -> bool:
+func setup(id: StringName, reserve_mult: float = 1.0, p_infinite_reserve: bool = false) -> bool:
 	weapon_id = id
+	infinite_reserve = p_infinite_reserve
 	def = Data.get_weapon(id)
 	_rng.randomize()
 	if def.is_empty():
 		return false
 	ammo_in_mag = int(def["mag_size"])
 	ammo_reserve = int(round(float(def["reserve_ammo"]) * reserve_mult))
+	if infinite_reserve:
+		ammo_reserve = maxi(ammo_reserve, int(def["mag_size"]))
 	return true
 
 
@@ -166,7 +171,8 @@ func _finish_reload() -> void:
 	var missing: int = int(def["mag_size"]) - ammo_in_mag
 	var moved: int = mini(missing, ammo_reserve)
 	ammo_in_mag += moved
-	ammo_reserve -= moved
+	if not infinite_reserve:
+		ammo_reserve -= moved
 	reload_finished.emit()
 	ammo_changed.emit()
 

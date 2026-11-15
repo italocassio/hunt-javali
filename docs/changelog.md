@@ -3,6 +3,32 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.5.0 — 15/11/2026
+
+**Novo modo na caçada com amigos: Horda Javali.**
+
+O que mudou para o jogador:
+
+- Na sala, o anfitrião escolhe o modo: "Contrato" (como antes) ou "Horda Javali". Vale com 1 a 4 caçadores.
+- Na horda, os caçadores defendem o celeiro da sede em Mato Grosso. Javalis chegam em 8 ondas, cada vez
+  maiores, a última com o cachaço alfa, e correm direto para o milho. Ninguém foge: machos e alfa investem
+  contra quem chega perto.
+- Vitória: abater todas as ondas. Derrota: o estoque de milho do celeiro chega a 0% ou todos os caçadores morrem.
+- Todas as armas ficam disponíveis (teclas 1 a 5; no celular, o botão Trocar passa por todas) e a munição de
+  reserva é infinita.
+- HUD de horda: "Celeiro 87%", "Javalis no celeiro!", "Onda 3/8", anúncio de cada onda e marcador do celeiro
+  no minimapa e na bússola. O milho do celeiro diminui à vista conforme é comido.
+- O abate paga menos que na campanha, a vitória paga um bônus de defesa e a horda não libera contratos.
+- O modo contrato, no solo e com amigos, não mudou.
+
+O que mudou no projeto:
+
+- Contrato do modo em `docs/horda.md`; dados em `data/horde.json`.
+- `HordeDirector` (novo) planeja e libera as ondas; o `CropManager` vira o estoque do celeiro em modo horda;
+  a IA dos javalis ganhou 7 desvios só para a horda.
+- Rede: byte de modo no fim de `L_LOBBY`/`L_START`; evento novo `EV_HORDE_WAVE`; o protocolo continua 1.
+- Assets procedurais: `barn_corn` (5 estágios), sons `horde_wave_start`/`horde_wave_clear`, ícone `barn`.
+
 ## 0.4.10 — 15/11/2026
 
 **Rolagem por arraste nos menus no celular.**

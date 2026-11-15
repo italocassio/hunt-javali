@@ -11,11 +11,17 @@ const COLOR_NORTH: Color = Color("#D9452B")
 const COLOR_TICK: Color = Color(0.96, 0.94, 0.90, 0.55)
 const COLOR_DOG: Color = Color("#F2C12E")
 const COLOR_BOAR: Color = Color("#D9452B")
+const COLOR_OBJECTIVE: Color = Color("#F2C12E")
+const OBJECTIVE_PX: float = 20.0
 const FONT_SIZE: int = 20
 const ALLY_HALF_PX: float = 6.0
 const ALLY_FALLEN_WIDTH_PX: float = 3.0
 const ALLY_FALLEN_ALPHA: float = 0.85
 const CARDINALS: Dictionary = {0: "N", 90: "L", 180: "S", 270: "O"}
+
+## Horde objective (the barn): Vector3.INF = none. Always on the strip, at the edge when behind the hunter.
+var objective: Vector3 = Vector3.INF
+var objective_icon: Texture2D = null
 
 var _yaw: float = 0.0
 var _origin: Vector3 = Vector3.ZERO
@@ -65,11 +71,26 @@ func _draw() -> void:
 		else:
 			var tick_h: float = h * 0.28 if wrapped % 45 == 0 else h * 0.16
 			draw_line(Vector2(x, h - tick_h), Vector2(x, h), COLOR_TICK, 2.0)
+	if objective.is_finite():
+		_draw_objective(heading_deg, w, h)
 	for mark: Dictionary in _marks:
 		_draw_marker(mark, heading_deg, w, h)
 	# Centre pointer.
 	draw_colored_polygon(PackedVector2Array([Vector2(w * 0.5 - 6.0, 0.0), Vector2(w * 0.5 + 6.0, 0.0),
 		Vector2(w * 0.5, 9.0)]), COLOR_TEXT)
+
+
+func _draw_objective(heading_deg: float, w: float, h: float) -> void:
+	var bearing_deg: float = rad_to_deg(bearing_of(objective.x - _origin.x, objective.z - _origin.z))
+	var rel: float = clampf(wrapf(bearing_deg - heading_deg, -180.0, 180.0), -VISIBLE_SPAN_DEG * 0.5, VISIBLE_SPAN_DEG * 0.5)
+	var half: float = OBJECTIVE_PX * 0.5
+	var x: float = clampf(w * 0.5 + rel / VISIBLE_SPAN_DEG * w, half, w - half)
+	var y: float = h - half - 2.0
+	if objective_icon != null:
+		draw_texture_rect(objective_icon, Rect2(Vector2(x - half, y - half), Vector2.ONE * OBJECTIVE_PX), false)
+	else:
+		draw_rect(Rect2(Vector2(x - half - 1.5, y - half - 1.5), Vector2.ONE * (OBJECTIVE_PX + 3.0)), Color.BLACK)
+		draw_rect(Rect2(Vector2(x - half, y - half), Vector2.ONE * OBJECTIVE_PX), COLOR_OBJECTIVE)
 
 
 func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> void:

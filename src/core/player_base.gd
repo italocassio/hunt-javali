@@ -66,6 +66,14 @@ func is_reloading() -> bool:
 	return false
 
 
+func get_weapon_count() -> int:           # weapons carried (horde: every weapon of data/weapons.json)
+	return 0
+
+
+func has_infinite_reserve() -> bool:      # horde: reloading never spends the reserve (docs/horda.md section 7)
+	return false
+
+
 func setup_remote(_slot: int, _display_name: String, _weapon_id: StringName, _world: HuntWorld) -> void:
 	pass
 

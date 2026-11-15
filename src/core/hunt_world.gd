@@ -118,6 +118,47 @@ func get_result() -> HuntResult:
 	return null
 
 
+# --- Game mode and horde state (docs/horda.md section 4). Defaults = contract mode ---
+func get_mode() -> StringName:                 # Ids.MODE_CONTRACT | Ids.MODE_HORDE
+	return &"contract"
+
+
+func is_horde() -> bool:
+	return get_mode() == Ids.MODE_HORDE
+
+
+func get_objective_position() -> Vector3:      # horde: barn origin on the ground; Vector3.INF = no objective
+	return Vector3.INF
+
+
+func get_horde_wave() -> int:                  # 1-based wave being fought or announced; 0 = not horde
+	return 0
+
+
+func get_horde_wave_count() -> int:            # waves of the plan; 0 = not horde
+	return 0
+
+
+func get_horde_phase() -> StringName:          # Ids.HP_INTERMISSION | Ids.HP_WAVE; &"" = not horde
+	return &""
+
+
+func get_horde_countdown_s() -> float:         # intermission: seconds until the wave starts; otherwise 0
+	return 0.0
+
+
+func get_horde_wave_total() -> int:            # boars of that wave, already scaled by player count
+	return 0
+
+
+func get_horde_wave_remaining() -> int:        # wave phase: boars of it not killed yet (spawned or not); else 0
+	return 0
+
+
+func get_horde_waves_cleared() -> int:         # waves whose every boar died
+	return 0
+
+
 # --- Debug hooks (tests) ---
 func debug_kill_boar(_boar_id: int) -> void:
 	pass
@@ -128,6 +169,10 @@ func debug_set_crop_health(_pct: float) -> void:
 
 
 func debug_force_end(_outcome: HuntResult.Outcome) -> void:
+	pass
+
+
+func debug_horde_start_next_wave() -> void:   # horde: ends the current intermission now; no-op otherwise / on a client
 	pass
 
 

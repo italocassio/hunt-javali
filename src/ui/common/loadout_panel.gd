@@ -15,6 +15,7 @@ var _dog_hint: Label = null
 var _item_checks: Dictionary = {}   # StringName -> CheckButton
 var _item_hint: Label = null
 var _dog_locked_text: String = ""
+var _weapons_locked_label: Label = null
 
 
 ## `dog_locked_text`: when not empty the dog choice is disabled and this text is shown instead of the hint.
@@ -44,7 +45,23 @@ func _build_weapons() -> void:
 		var stats: Label = UiKit.muted("")
 		wbox.add_child(stats)
 		_slot_stats.append(stats)
+	_weapons_locked_label = UiKit.muted("")
+	_weapons_locked_label.visible = false
+	UiKit.mark(_weapons_locked_label, _root, "WeaponsLockedLabel")
+	wbox.add_child(_weapons_locked_label)
 	add_child(weapons_card)
+
+
+## Locks both weapon slots and shows `text` in %WeaponsLockedLabel. "" unlocks (default state).
+## Call after setup(). Preparation never calls it.
+func set_weapons_locked(text: String) -> void:
+	if _weapons_locked_label == null:
+		return
+	var locked: bool = text != ""
+	for b: Button in _slot_buttons:
+		b.disabled = locked
+	_weapons_locked_label.text = text
+	_weapons_locked_label.visible = locked
 
 
 func _build_dog() -> void:

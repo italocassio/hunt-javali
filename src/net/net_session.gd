@@ -108,6 +108,7 @@ var rejoin_refusal: StringName = &""   # error the room server answered the last
 
 var _map_id: StringName = &""
 var _contract_index: int = 0
+var _mode: StringName = Ids.MODE_CONTRACT   # game mode of the room (docs/horda.md 9.1); wire: index in NetCodec.MODES
 var _rng_seed: int = 0
 var _local_ready: bool = false
 
@@ -198,6 +199,10 @@ func get_selected_contract_index() -> int:
 	return _contract_index
 
 
+func get_selected_mode() -> StringName:
+	return _mode
+
+
 func get_rng_seed() -> int:
 	return _rng_seed
 
@@ -246,6 +251,7 @@ func get_signaling() -> NetSignaling:  # tests and diagnostics
 
 func create() -> void:
 	_role = ROLE_HOST
+	_mode = Ids.MODE_CONTRACT
 	_create_attempts = 0
 	_set_state(STATE_CONNECTING)
 	if _state == STATE_CONNECTING:
@@ -254,6 +260,7 @@ func create() -> void:
 
 func join(code: String) -> void:
 	_role = ROLE_CLIENT
+	_mode = Ids.MODE_CONTRACT
 	_code = code.strip_edges().to_upper()
 	_set_state(STATE_CONNECTING)
 	if _state != STATE_CONNECTING:
@@ -348,6 +355,7 @@ func _teardown() -> void:
 	_local_slot = 0
 	_map_id = &""
 	_contract_index = 0
+	_mode = Ids.MODE_CONTRACT
 	_rng_seed = 0
 
 
@@ -798,6 +806,60 @@ func host_select_contract(map_id: StringName, contract_index: int) -> bool:
 	return true
 
 
+## Host, LOBBY only. mode must be in NetCodec.MODES; horde also needs data/horde.json loaded and its map
+## available. Does not touch the selected map / contract (docs/horda.md 9.1).
+func host_select_mode(mode: StringName) -> bool:
+	if _role != ROLE_HOST or _state != STATE_LOBBY or not NetCodec.MODES.has(mode):
+		return false
+	if mode == Ids.MODE_HORDE and not _horde_available():
+		return false
+	if mode == _mode:
+		return true
+	_mode = mode
+	_broadcast_lobby()
+	roster_changed.emit()
+	return true
+
+
+func _horde_available() -> bool:
+	var horde: Dictionary = Data.get_horde()
+	if horde.is_empty():
+		return false
+	var map_id: StringName = StringName(str(horde.get("map_id", "")))
+	if not Data.get_map_ids().has(map_id):
+		return false
+	return bool(Data.get_map(map_id).get("available", false))
+
+
+## mode u8 of L_LOBBY / L_START: index in NetCodec.MODES; absent (old layout) or unknown = contract.
+func _mode_from_wire(body: PackedByteArray, at: int) -> StringName:
+	if at < 0 or at >= body.size() or body[at] >= NetCodec.MODES.size():
+		return Ids.MODE_CONTRACT
+	return NetCodec.MODES[body[at]]
+
+
+func _mode_to_wire() -> int:
+	return maxi(NetCodec.MODES.find(_mode), 0)
+
+
+## What must be equal on every peer, written into the HuntRequest of LOADING (docs/horda.md 9.1).
+func _fill_request(request: HuntRequest) -> void:
+	request.map_id = _map_id
+	request.contract_index = _contract_index
+	request.rng_seed = _rng_seed
+	request.player_count = _peers.size()
+	request.mode = Ids.MODE_CONTRACT
+	if _mode != Ids.MODE_HORDE:
+		return
+	var horde: Dictionary = Data.get_horde()
+	if horde.is_empty():
+		push_error("NetSession: room is in horde mode but data/horde.json is empty; the hunt stays in contract mode")
+		return
+	request.mode = Ids.MODE_HORDE
+	request.map_id = StringName(str(horde.get("map_id", "")))
+	request.contract_index = 0
+
+
 func host_start_hunt() -> bool:
 	if _role != ROLE_HOST or _state != STATE_LOBBY or not _contract_allowed(_map_id, _contract_index):
 		return false
@@ -823,6 +885,7 @@ func host_start_hunt() -> bool:
 	for slot: int in int(_cfg["max_players"]):
 		var info: NetPeerInfo = _peers.get(slot) as NetPeerInfo
 		body.put_u8(_index_of(Data.get_dog_ids(), info.dog_id) if info != null else NO_INDEX)
+	body.put_u8(_mode_to_wire())
 	var record: PackedByteArray = _record(NetCodec.L_START, body.data_array)
 	for id: int in _links:
 		var link: NetLink = _links[id]
@@ -856,10 +919,7 @@ func _enter_loading() -> void:
 	var started: bool = request != null and request != before
 	if not started:
 		request = Profile.build_hunt_request(_map_id, _contract_index)
-	request.map_id = _map_id
-	request.contract_index = _contract_index
-	request.rng_seed = _rng_seed
-	request.player_count = _peers.size()
+	_fill_request(request)
 	if not started:
 		Router.start_hunt(request)
 
@@ -1506,7 +1566,7 @@ func _on_ready(from_slot: int, body: PackedByteArray) -> void:
 	roster_changed.emit()
 
 
-## Host -> clients: state u8, map u8, contract u8, n u8, n x { slot u8, flags u8, weapon0 u8, dog u8 }.
+## Host -> clients: state u8, map u8, contract u8, n u8, n x { slot u8, flags u8, weapon0 u8, dog u8 }, mode u8.
 func _broadcast_lobby() -> void:
 	if _role != ROLE_HOST or _links.is_empty():
 		return
@@ -1534,6 +1594,7 @@ func _broadcast_lobby() -> void:
 		body.put_u8(flags)
 		body.put_u8(_index_of(weapons, info.weapon_id))
 		body.put_u8(_index_of(dogs, info.dog_id))
+	body.put_u8(_mode_to_wire())
 	_send_events_to_all(_record(NetCodec.L_LOBBY, body.data_array))
 
 
@@ -1547,6 +1608,8 @@ func _on_lobby(body: PackedByteArray) -> void:
 	var weapons: Array = Data.get_weapon_ids()
 	var dogs: Array = Data.get_dog_ids()
 	var count: int = body[3]
+	if not _in_hunt_states():
+		_mode = _mode_from_wire(body, L_LOBBY_HEADER_BYTES + count * L_LOBBY_ENTRY_BYTES)
 	var listed: Dictionary = {}
 	for i: int in count:
 		var at: int = L_LOBBY_HEADER_BYTES + i * L_LOBBY_ENTRY_BYTES
@@ -1579,7 +1642,8 @@ func _on_lobby(body: PackedByteArray) -> void:
 	roster_changed.emit()
 
 
-## Host -> clients: map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[max_players] u8.
+## Host -> clients: map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[max_players] u8,
+## mode u8 (absent in the old 12-byte layout = contract).
 func _on_start(body: PackedByteArray) -> void:
 	if body.size() < L_START_HEADER_BYTES or _state != STATE_LOBBY:
 		return
@@ -1588,6 +1652,7 @@ func _on_start(body: PackedByteArray) -> void:
 		return
 	_map_id = map_id
 	_contract_index = body[1]
+	_mode = _mode_from_wire(body, L_START_HEADER_BYTES + int(_cfg["max_players"]))
 	_rng_seed = body.decode_u32(2)
 	# The host's slots_mask is the hunt roster: drop peers whose peer_left is still on the way and add
 	# any peer this machine has not heard of yet, so every machine assembles the same hunters.

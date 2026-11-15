@@ -42,6 +42,9 @@ const GAME_EVENTS_SIGNALS: Array[String] = [
 	# docs/multiplayer.md section 4.7.9 (F8)
 	"net_reconnect_changed(active: bool)",
 	"hunter_away_changed(slot: int, away: bool)",
+	# docs/horda.md section 4.1
+	"horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)",
+	"horde_wave_progress(remaining: int, wave_total: int)",
 ]
 
 ## docs/multiplayer.md section 3.4: autoload Net.
@@ -78,6 +81,9 @@ const NET_METHODS: Array[String] = [
 	"is_reconnecting() -> bool",
 	"get_traffic() -> Dictionary",
 	"debug_cut(duration_s: float, half_open: bool = false) -> void",
+	# docs/horda.md section 9.1
+	"host_select_mode(mode: StringName) -> bool",
+	"get_selected_mode() -> StringName",
 ]
 
 const NET_SIGNALS: Array[String] = [
@@ -116,6 +122,8 @@ const DATA_METHODS: Array[String] = [
 	"get_pix_config() -> Dictionary",
 	"get_item_def(id: StringName) -> Dictionary",
 	"get_item_category(id: StringName) -> StringName",
+	# docs/horda.md section 10.1
+	"get_horde() -> Dictionary",
 ]
 
 const PROFILE_METHODS: Array[String] = [
@@ -149,6 +157,9 @@ const PROFILE_METHODS: Array[String] = [
 	"mark_code_redeemed(code: String) -> void",
 	"get_setting(key: String) -> Variant",
 	"set_setting(key: String, value: Variant) -> void",
+	# docs/horda.md section 10.1
+	"horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool) -> int",
+	"horde_bonus(stock_pct: float) -> int",
 ]
 
 const INPUT_SETUP_METHODS: Array[String] = [
@@ -203,7 +214,9 @@ const INPUT_CONSTANTS: Array[String] = ["ACTIONS"]
 const CLASSES: Array[Dictionary] = [
 	# --- Package A ---
 	{"name": "Player", "path": "res://src/player/player.gd", "base": "PlayerBase", "pkg": "A",
-		"methods": ["get_spectator() -> SpectatorCamera", "is_spectating() -> bool"]},
+		"methods": ["get_spectator() -> SpectatorCamera", "is_spectating() -> bool",
+				# docs/horda.md section 7
+				"get_weapon_count() -> int", "has_infinite_reserve() -> bool"]},
 	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
 	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
 		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
@@ -225,20 +238,39 @@ const CLASSES: Array[Dictionary] = [
 			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
 	# --- Package B ---
 	{"name": "HuntController", "path": "res://src/hunt/hunt_controller.gd", "base": "HuntWorld", "pkg": "B",
-		"props": ["route_on_finish"]},
+		"props": ["route_on_finish"],
+			# docs/horda.md sections 4.2 and 5.6
+			"methods": ["get_mode() -> StringName", "get_objective_position() -> Vector3", "get_horde_wave() -> int",
+				"get_horde_wave_count() -> int", "get_horde_phase() -> StringName", "get_horde_countdown_s() -> float",
+				"get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int", "get_horde_waves_cleared() -> int",
+				"debug_horde_start_next_wave() -> void", "get_horde_eat_point(boar_id: int) -> Vector2"]},
+	# docs/horda.md section 5.2: internal to package B.
+	{"name": "HordeDirector", "path": "res://src/hunt/horde_director.gd", "base": "Node", "pkg": "B",
+		"signals": ["wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)",
+			"wave_progress(remaining: int, wave_total: int)"],
+		"methods": ["plan_waves(horde: Dictionary, player_count: int) -> Array",
+			"setup(world: HuntController, spawner: BoarSpawner, horde: Dictionary, plan: Array) -> void",
+			"begin() -> void", "skip_intermission() -> void", "get_wave() -> int", "get_wave_count() -> int",
+			"get_phase() -> StringName", "get_countdown_s() -> float", "get_wave_total() -> int",
+			"get_wave_remaining() -> int", "get_waves_cleared() -> int", "get_killed_before() -> int"]},
 	{"name": "BoarSpawner", "path": "res://src/hunt/boar_spawner.gd", "base": "Node", "pkg": "B",
 		"methods": ["scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array",
-			"notify_shot(origin: Vector3, noise_radius_m: float) -> void"]},
+			"notify_shot(origin: Vector3, noise_radius_m: float) -> void",
+			"release_wave(wave_index: int) -> void", "get_wave_total(wave_index: int) -> int",
+			"get_wave_remaining(wave_index: int) -> int"]},
 	{"name": "HuntHostSync", "path": "res://src/hunt/hunt_host_sync.gd", "base": "Node", "pkg": "B",
 		"methods": ["setup(world: HuntController, spawner: BoarSpawner) -> void", "write_boars(out: StreamPeerBuffer) -> void",
 			"take_events(out: StreamPeerBuffer) -> void", "queue_bait(at: Vector3, duration_s: float) -> void",
 			"queue_message(target_slot: int, msg: int) -> void",
 			"queue_hunt_end(outcome: int, crop_pct: float, duration_s: float, killed: int, total: int, entries: Array) -> void",
 			"queue_death(boar: Boar, kill: KillInfo, killed: int, total: int) -> void",
-			"apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void"]},
+			"apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void",
+			"queue_horde_wave(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void",
+			"write_horde_wave_replay(out: StreamPeerBuffer, wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void"]},
 	{"name": "HuntReplica", "path": "res://src/hunt/hunt_replica.gd", "base": "Node3D", "pkg": "B",
 		"signals": ["kill_confirmed(kill: KillInfo, killed: int, total: int)", "bait_received(at: Vector3, duration_s: float)",
-			"message_received(msg: int)", "hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)"],
+			"message_received(msg: int)", "hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)",
+			"horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int)"],
 		"methods": ["setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void",
 			"render_time_ms() -> float", "apply_snapshot_boars(inp: StreamPeerBuffer, t_ms: int) -> void",
 			"apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void",
@@ -259,7 +291,8 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "FallbackPlayer", "path": "res://src/hunt/debug/fallback_player.gd", "base": "PlayerBase", "pkg": "B"},
 	{"name": "MapRoot", "path": "res://src/world/map_root.gd", "base": "Node3D", "pkg": "B",
 		"props": ["map_size_m", "grid_resolution", "terrain_seed", "height_amplitude_m", "base_flora"],
-		"methods": ["build_flora(density: float, sync_layout: bool = false) -> void"]},
+		"methods": ["build_flora(density: float, sync_layout: bool = false) -> void",
+			"find_prop_spawn(prop_id: StringName) -> PropSpawn"]},
 	{"name": "Heightmap", "path": "res://src/world/heightmap.gd", "base": "RefCounted", "pkg": "B",
 		"methods": ["get_height(x: float, z: float) -> float", "get_normal(x: float, z: float) -> Vector3"]},
 	{"name": "Terrain", "path": "res://src/world/terrain.gd", "base": "Node3D", "pkg": "B"},
@@ -267,7 +300,8 @@ const CLASSES: Array[Dictionary] = [
 		"props": ["size_m", "crop"]},
 	{"name": "CropManager", "path": "res://src/world/crop_manager.gd", "base": "Node3D", "pkg": "B",
 		"signals": ["patch_eaten(index: int)"],
-		"methods": ["apply_eaten(indices: PackedInt32Array) -> void", "set_replicated_health(pct: float) -> void"]},
+		"methods": ["apply_eaten(indices: PackedInt32Array) -> void", "set_replicated_health(pct: float) -> void",
+			"set_store_mode(on: bool) -> void", "is_store_mode() -> bool"]},
 	{"name": "PropSpawn", "path": "res://src/world/prop_spawn.gd", "base": "Marker3D", "pkg": "B",
 		"props": ["prop_id", "collision_size", "footprint_radius_m"]},
 	{"name": "WaterBody", "path": "res://src/world/water_body.gd", "base": "Marker3D", "pkg": "B",
@@ -341,7 +375,8 @@ const CLASSES: Array[Dictionary] = [
 	# --- F6 UI (docs/multiplayer.md 6.11): the loadout editor shared by Preparation and the lobby, and the lobby ---
 	{"name": "LoadoutPanel", "path": "res://src/ui/common/loadout_panel.gd", "base": "VBoxContainer", "pkg": "S",
 		"signals": ["changed()"],
-		"methods": ["setup(root: Control, dog_locked_text: String = \"\") -> void", "refresh() -> void"]},
+		"methods": ["setup(root: Control, dog_locked_text: String = \"\") -> void", "refresh() -> void",
+			"set_weapons_locked(text: String) -> void"]},
 	{"name": "Lobby", "path": "res://src/ui/lobby/lobby.gd", "base": "Control", "pkg": "S",
 		"methods": ["player_label(info: NetPeerInfo, slot: int, is_local: bool) -> String",
 			"status_text(info: NetPeerInfo) -> String", "path_text(path: int) -> String",
@@ -360,7 +395,8 @@ const CLASSES: Array[Dictionary] = [
 			"host_select_contract(map_id: StringName, contract_index: int) -> bool", "host_start_hunt() -> bool",
 			"bind_world(world: HuntWorld) -> void", "unbind_world(world: HuntWorld) -> void", "flush() -> void",
 			"is_reconnecting() -> bool", "get_traffic() -> Dictionary",
-			"debug_cut(duration_s: float, half_open: bool = false) -> void"]},
+			"debug_cut(duration_s: float, half_open: bool = false) -> void",
+			"host_select_mode(mode: StringName) -> bool", "get_selected_mode() -> StringName"]},
 	{"name": "NetSignaling", "path": "res://src/net/net_signaling.gd", "base": "RefCounted", "pkg": "N",
 		"methods": ["build_url(base: String, params: Dictionary) -> String",
 			"open(url: String, cfg: Dictionary, now_ms: int) -> bool", "is_open() -> bool", "is_closed() -> bool",
@@ -411,7 +447,7 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"L_READY": 0x10, "L_LOBBY": 0x11, "L_START": 0x12, "L_LOADED": 0x13, "L_GO": 0x14, "L_NEED_RELAY": 0x15,
 			"H_SNAPSHOT": 0x20, "EV_BOAR_SPAWN": 0x21, "EV_BOAR_HIT": 0x22, "EV_BOAR_ATTACK": 0x23,
 			"EV_BOAR_DEATH": 0x24, "EV_CROP_EATEN": 0x25, "EV_BAIT": 0x26, "EV_DOG_MARK": 0x27, "EV_DOG_CMD": 0x28,
-			"EV_MESSAGE": 0x29, "EV_HUNT_END": 0x2A, "EV_FULL_SYNC": 0x2B,
+			"EV_MESSAGE": 0x29, "EV_HUNT_END": 0x2A, "EV_FULL_SYNC": 0x2B, "EV_HORDE_WAVE": 0x2C, "MAX_BOARS_PER_HUNT": 255,
 			"C_STATE": 0x40, "C_SHOT": 0x41, "C_CHARGE_HIT": 0x42, "C_BAIT": 0x43, "C_DOG_CMD": 0x44,
 			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32, "HF_AWAY": 64}},
 	{"name": "NetPeerInfo", "path": "res://src/core/net_peer_info.gd", "base": "RefCounted",
@@ -419,15 +455,20 @@ const CORE_CLASSES: Array[Dictionary] = [
 	{"name": "HunterVisualBase", "path": "res://src/core/hunter_visual_base.gd", "base": "Node3D",
 		"methods": ["setup(slot: int, weapon_id: StringName) -> void", "play_death(instant: bool = false) -> void",
 			"slot_color(slot: int) -> Color"]},
-	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count"]},
+	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count", "mode"],
+		"methods": ["make_debug(p_map_id: StringName = &\"mato_grosso\", p_contract_index: int = 0, p_mode: StringName = &\"contract\") -> HuntRequest",
+			"is_horde() -> bool"]},
 	{"name": "HuntResult", "path": "res://src/core/hunt_result.gd", "base": "RefCounted",
-		"props": ["counts_for_progression", "player_count", "team_kills", "scoreboard"]},
+		"props": ["counts_for_progression", "player_count", "team_kills", "scoreboard", "mode", "horde_wave_count", "horde_waves_cleared"],
+		"methods": ["is_horde() -> bool"]},
 	{"name": "KillInfo", "path": "res://src/core/kill_info.gd", "base": "RefCounted", "props": ["killer_slot"]},
 	{"name": "HitInfo", "path": "res://src/core/hit_info.gd", "base": "RefCounted", "props": ["shooter_slot"]},
 	{"name": "ScenePaths", "path": "res://src/core/scene_paths.gd", "base": "RefCounted",
-		"consts": {"LOBBY": "res://src/ui/lobby/lobby.tscn", "REMOTE_HUNTER": "res://src/player/remote_hunter.tscn"}},
+		"consts": {"LOBBY": "res://src/ui/lobby/lobby.tscn", "REMOTE_HUNTER": "res://src/player/remote_hunter.tscn",
+			"BARN_CORN": "res://assets/models/props/barn_corn.tscn"}},
 	{"name": "PlayerBase", "path": "res://src/core/player_base.gd", "base": "CharacterBody3D", "props": ["slot"],
-		"methods": ["setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld) -> void",
+		"methods": ["get_weapon_count() -> int", "has_infinite_reserve() -> bool",
+			"setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld) -> void",
 			"is_local() -> bool", "is_present() -> bool", "get_display_name() -> String",
 			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
 	{"name": "HuntWorld", "path": "res://src/core/hunt_world.gd", "base": "Node3D",
@@ -439,7 +480,18 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"net_take_claims(out: StreamPeerBuffer) -> void",
 			"net_apply_claim(slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void",
 			"net_peer_left(slot: int) -> void", "net_connection_lost() -> void",
-			"net_write_full_sync(out: StreamPeerBuffer) -> void"]},
+			"net_write_full_sync(out: StreamPeerBuffer) -> void",
+			# docs/horda.md section 4.2
+			"get_mode() -> StringName", "is_horde() -> bool", "get_objective_position() -> Vector3",
+			"get_horde_wave() -> int", "get_horde_wave_count() -> int", "get_horde_phase() -> StringName",
+			"get_horde_countdown_s() -> float", "get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int",
+			"get_horde_waves_cleared() -> int", "debug_horde_start_next_wave() -> void"]},
+	{"name": "CornStockVisualBase", "path": "res://src/core/corn_stock_visual_base.gd", "base": "Node3D",
+		"methods": ["stage_for(pct: float) -> int", "setup(ring_radius_m: float) -> void", "set_stock_pct(pct: float) -> void",
+			"set_under_attack(on: bool) -> void", "create_fallback() -> CornStockVisualBase"],
+		"consts": {"STAGE_COUNT": 5, "FALLBACK_HEAPS": 6}},
+	{"name": "Ids", "path": "res://src/core/ids.gd", "base": "RefCounted",
+		"consts": {"MODE_CONTRACT": &"contract", "MODE_HORDE": &"horde", "HP_INTERMISSION": &"intermission", "HP_WAVE": &"wave"}},
 ]
 
 

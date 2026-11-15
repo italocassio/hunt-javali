@@ -16,7 +16,11 @@ const DEFAULT_MAX_ALIVE: int = 18
 var _world: HuntController = null
 var _parent: Node3D = null
 var _scene: PackedScene = null
-var _groups: Array[Dictionary] = []     # {members: Array[StringName], zone: Vector2, delay: float, herd: BoarHerd, next: int}
+## {members: Array[StringName], zone: Vector2, delay: float, herd: BoarHerd, next: int, wave: int, delay_s: float}.
+## Horde (docs/horda.md section 5.3): a group with wave >= 0 waits (delay = INF) until release_wave.
+var _groups: Array[Dictionary] = []
+var _wave_totals: Dictionary = {}       # wave index -> members of every group of that wave
+var _horde: bool = false
 var _herds: Array[BoarHerd] = []
 var _by_id: Dictionary = {}             # int -> Boar (alive and dead)
 var _alive: Array[Boar] = []
@@ -37,6 +41,7 @@ func setup(world: HuntController, parent: Node3D, contract: Dictionary, spawn_zo
 	_world = world
 	_parent = parent
 	_scene = load(ScenePaths.BOAR) as PackedScene
+	_horde = world.is_horde()
 	var hunt: Dictionary = Data.get_game().get("hunt", {})
 	_spawn_radius = float(hunt.get("spawn_radius_m", DEFAULT_SPAWN_RADIUS_M))
 	_max_alive = int(hunt.get("max_alive_boars", DEFAULT_MAX_ALIVE))
@@ -54,8 +59,13 @@ func setup(world: HuntController, parent: Node3D, contract: Dictionary, spawn_zo
 		var zone: Vector2 = Vector2.ZERO
 		if not spawn_zones.is_empty():
 			zone = spawn_zones[posmod(int(def.get("spawn_zone", 0)), spawn_zones.size())]
-		_groups.append({"members": members, "zone": zone, "delay": float(def.get("delay_s", 0.0)), "herd": null, "next": 0})
+		var delay_s: float = float(def.get("delay_s", 0.0))
+		var wave: int = int(def.get("wave", -1))
+		_groups.append({"members": members, "zone": zone, "delay": INF if wave >= 0 else delay_s, "herd": null, "next": 0,
+			"wave": wave, "delay_s": delay_s})
 		_total += members.size()
+		if wave >= 0:
+			_wave_totals[wave] = int(_wave_totals.get(wave, 0)) + members.size()
 	if not GameEvents.shot_fired.is_connected(_on_shot_fired):
 		GameEvents.shot_fired.connect(_on_shot_fired)
 	if not GameEvents.thermal_vision_changed.is_connected(_on_thermal_changed):
@@ -113,6 +123,31 @@ func get_total() -> int:
 	return _total
 
 
+## Horde: the groups of that wave start counting their delay_s from now.
+func release_wave(wave_index: int) -> void:
+	var now: float = _world.get_elapsed_s() if _world != null else 0.0
+	for g: Dictionary in _groups:
+		if int(g["wave"]) == wave_index:
+			g["delay"] = now + float(g["delay_s"])
+
+
+## Horde: boars of every group of that wave (born or not).
+func get_wave_total(wave_index: int) -> int:
+	return int(_wave_totals.get(wave_index, 0))
+
+
+## Horde: boars of that wave not born yet plus the ones alive.
+func get_wave_remaining(wave_index: int) -> int:
+	var n: int = 0
+	for g: Dictionary in _groups:
+		if int(g["wave"]) == wave_index:
+			n += (g["members"] as Array).size() - int(g["next"])
+	for b: Boar in _alive:
+		if b.wave == wave_index:
+			n += 1
+	return n
+
+
 func get_alive_ids() -> PackedInt32Array:
 	return _alive_ids
 
@@ -163,17 +198,20 @@ func _spawn_step() -> void:
 			herd = BoarHerd.new()
 			herd.herd_id = _herds.size()
 			herd.anchor = g["zone"] as Vector2
-			herd.wander_end_time = now + _world.rng.randf_range(_wander_min, _wander_max)
+			if _horde:
+				herd.wander_end_time = now   # H7: a horde herd never wanders
+			else:
+				herd.wander_end_time = now + _world.rng.randf_range(_wander_min, _wander_max)
 			g["herd"] = herd
 			_herds.append(herd)
-		_spawn_boar(members[next], herd)
+		_spawn_boar(members[next], herd, int(g["wave"]))
 		g["next"] = next + 1
 		if next + 1 == members.size():
 			group_entered.emit(members[0], members.size())
 		return
 
 
-func _spawn_boar(type_id: StringName, herd: BoarHerd) -> void:
+func _spawn_boar(type_id: StringName, herd: BoarHerd, wave: int = -1) -> void:
 	var rng: RandomNumberGenerator = _world.rng
 	var def: Dictionary = Data.get_boar_type(type_id)
 	var w_min: float = float(def.get("weight_min_kg", 50.0))
@@ -186,6 +224,7 @@ func _spawn_boar(type_id: StringName, herd: BoarHerd) -> void:
 	var id: int = _next_id
 	_next_id += 1
 	boar.setup(id, type_id, weight, herd, _world)
+	boar.wave = wave
 	boar.died.connect(_on_boar_died)
 	_parent.add_child(boar)
 	var pos: Vector2 = herd.anchor

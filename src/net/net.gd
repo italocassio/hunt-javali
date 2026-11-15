@@ -120,6 +120,12 @@ func get_selected_contract_index() -> int:
 	return _session.get_selected_contract_index() if _session != null else 0
 
 
+## (&"contract") Game mode of the room, equal on every peer (docs/horda.md 9.1). Back to contract in
+## create_room / join_room / leave_room.
+func get_selected_mode() -> StringName:
+	return _session.get_selected_mode() if _session != null else Ids.MODE_CONTRACT
+
+
 func get_link_path(slot: int) -> int:
 	return _session.get_link_path(slot) if _session != null else Path.NONE
 
@@ -191,6 +197,12 @@ func set_ready(ready: bool) -> void:
 
 func host_select_contract(map_id: StringName, contract_index: int) -> bool:
 	return _session != null and _session.host_select_contract(map_id, contract_index)
+
+
+## Host, LOBBY only; mode in NetCodec.MODES. &"horde" needs Data.get_horde() loaded and its map available.
+## Changed: L_LOBBY to everyone + roster_changed. Does not touch the selected map / contract.
+func host_select_mode(mode: StringName) -> bool:
+	return _session != null and _session.host_select_mode(mode)
 
 
 func host_start_hunt() -> bool:

@@ -21,6 +21,7 @@ var role: String = ""
 var dir: String = ""
 var code: String = ""
 var host_drops: bool = false            # the host process exits in the middle of the hunt (section 6.9)
+var horde: bool = false                 # the host picks the Horda Javali mode in the room (docs/horda.md 9.1)
 
 var _result: Dictionary = {}
 var _states: Array = []
@@ -63,6 +64,10 @@ func _run() -> void:
 		_button(lobby, "CreateRoomButton").pressed.emit()
 		if not await _until(func() -> bool: return Net.get_room_state() == Net.RoomState.LOBBY, 15000, "room created"):
 			return
+		if horde:
+			# Before the code is published, so every later joiner finds the mode already set.
+			_result["select_ok"] = Net.host_select_mode(Ids.MODE_HORDE) and Net.get_selected_mode() == Ids.MODE_HORDE
+			_log("host_select_mode(horde) = %s" % str(_result["select_ok"]))
 		_write("code", Net.get_room_code())
 		_log("room %s" % Net.get_room_code())
 		if not await _until(func() -> bool: return FileAccess.file_exists(dir.path_join("start")), 60000, "start file"):
@@ -77,6 +82,10 @@ func _run() -> void:
 		_button(lobby, "JoinButton").pressed.emit()
 		if not await _until(func() -> bool: return Net.get_room_state() == Net.RoomState.LOBBY, 15000, "room joined"):
 			return
+		# The mode of the room as the host's L_LOBBY brings it, before this client readies up (no L_START yet).
+		var want_mode: StringName = Ids.MODE_HORDE if horde else Ids.MODE_CONTRACT
+		await _until(func() -> bool: return Net.get_selected_mode() == want_mode, 15000, "", false)
+		_result["lobby_seen"] = {"mode": str(Net.get_selected_mode()), "state": Net.get_room_state()}
 		_write("joined", str(Net.get_local_slot()))
 		_button(lobby, "ReadyButton").pressed.emit()   # F6: clients declare themselves ready
 	if not await _until(func() -> bool: return _go, 60000, "hunt_go"):
@@ -129,6 +138,7 @@ func _on_room_state(state: int) -> void:
 	_result["loading"] = {
 		"map": str(Net.get_selected_map_id()),
 		"contract": Net.get_selected_contract_index(),
+		"mode": str(Net.get_selected_mode()),
 		"player_count": Net.get_player_count(),
 		"seed": Net.get_hunt_seed(),
 		"roster": roster,
@@ -150,6 +160,8 @@ func _on_hunt_go() -> void:
 		"request_seed": request.rng_seed if request != null else -1,
 		"request_players": request.player_count if request != null else -1,
 		"request_map": str(request.map_id) if request != null else "",
+		"request_mode": str(request.mode) if request != null else "",
+		"request_contract": request.contract_index if request != null else -1,
 		"link_path": Net.get_link_path(other),
 		"remote_exists": world != null and world.get_hunter(other) != null and not world.get_hunter(other).is_local(),
 		"wall_ms": _wall_ms(),

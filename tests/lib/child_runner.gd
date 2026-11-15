@@ -106,14 +106,14 @@ func run(scene: String, tag: String, engine_args: Array = [], user_args: Array =
 
 ## Understands the summary line of every child in this project (the last one wins):
 ##   "RESULT: N passed, M failed, K skipped"      suites and sandboxes of packages A / B
-##   "NET_E2E checks=N failures=M"                 and the same shape for NET_HUNT_E2E and LINK_SELFTEST
+##   "NET_E2E checks=N failures=M"                 and the same shape for NET_HUNT_E2E, LINK_SELFTEST and NET_MODE_SELFTEST
 ##   "profile_net_check: OK" / "profile_net_check: N FAILED"
 ##   "remote_sandbox: PASS (0 failures)" / "remote_sandbox: FAIL (N failures)"
 ## Also collects the lines that explain a failure.
 static func parse_summary(text: String) -> Dictionary:
 	var res: Dictionary = {"found": false, "checks": -1, "failures": -1, "fail_lines": [] as Array[String]}
 	var re_checks: RegEx = RegEx.new()
-	re_checks.compile("^(?:NET_E2E|NET_HUNT_E2E|LINK_SELFTEST) checks=(\\d+) failures=(\\d+)")
+	re_checks.compile("^(?:NET_E2E|NET_HUNT_E2E|LINK_SELFTEST|NET_MODE_SELFTEST) checks=(\\d+) failures=(\\d+)")
 	var re_result: RegEx = RegEx.new()
 	re_result.compile("^RESULT: (\\d+) passed, (\\d+) failed, (\\d+) skipped")
 	var re_profile: RegEx = RegEx.new()

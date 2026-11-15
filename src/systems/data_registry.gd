@@ -11,6 +11,7 @@ const FILES: Dictionary = {
 	"gold": "res://data/gold_packages.json",
 	"pix": "res://data/pix_config.json",
 	"net": "res://data/net.json",
+	"horde": "res://data/horde.json",
 }
 # file key -> list key inside the file
 const LISTS: Dictionary = {
@@ -61,6 +62,11 @@ func get_game() -> Dictionary:
 
 func get_net() -> Dictionary:
 	return _raw.get("net", {})
+
+
+## data/horde.json as loaded ({} if missing; the cause is then in get_load_errors()).
+func get_horde() -> Dictionary:
+	return _raw.get("horde", {})
 
 
 func get_weapon(id: StringName) -> Dictionary:
@@ -245,6 +251,119 @@ func _validate() -> void:
 	for pkg: Dictionary in get_gold_packages():
 		_require_fields(pkg, ["name", "price_brl", "gold"], str(pkg.get("id", "?")))
 	_require_fields(_raw["pix"], ["gateway", "pix_key", "merchant_name", "merchant_city", "redeem_secret"], "pix_config")
+	_validate_horde()
+
+
+# Horde mode rules (docs/horda.md §3.1). Skipped when the file could not be read (error already recorded).
+func _validate_horde() -> void:
+	var h: Dictionary = _raw.get("horde", {})
+	if h.is_empty():
+		return
+	var typed: Dictionary = {
+		"name": TYPE_STRING, "description": TYPE_STRING, "map_id": TYPE_STRING, "objective_prop_id": TYPE_STRING,
+		"first_wave_delay_s": TYPE_FLOAT, "intermission_s": TYPE_FLOAT, "barn_drain_mult": TYPE_FLOAT,
+		"eat_ring_m": TYPE_FLOAT, "to_barn_speed_frac": TYPE_FLOAT, "max_carcasses": TYPE_INT,
+		"player_count_mult": TYPE_ARRAY, "extra_group_delay_s": TYPE_FLOAT, "kill_reward_mult": TYPE_FLOAT,
+		"victory_bonus_money": TYPE_INT, "waves": TYPE_ARRAY,
+	}
+	var ok: bool = true
+	for f: String in typed:
+		if not h.has(f):
+			_errors.append("Data: 'horde' lacks field '%s'" % f)
+			ok = false
+			continue
+		var t: int = typed[f]
+		var v: Variant = h[f]
+		var good: bool = typeof(v) == t
+		if t == TYPE_FLOAT or t == TYPE_INT:
+			good = (typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT)
+			if good and t == TYPE_INT and float(v) != floorf(float(v)):
+				good = false
+		if not good:
+			_errors.append("Data: horde.%s has the wrong type" % f)
+			ok = false
+	if not ok:
+		return
+	var map_id: String = str(h["map_id"])
+	var map_def: Dictionary = _index.get("maps", {}).get(map_id, {})
+	if map_def.is_empty():
+		_errors.append("Data: horde.map_id '%s' is not in maps.json" % map_id)
+	elif not bool(map_def.get("available", false)):
+		_errors.append("Data: horde.map_id '%s' is not available" % map_id)
+	if str(h["objective_prop_id"]) == "":
+		_errors.append("Data: horde.objective_prop_id is empty")
+	if float(h["first_wave_delay_s"]) < 0.0:
+		_errors.append("Data: horde.first_wave_delay_s must be >= 0")
+	if float(h["intermission_s"]) < 0.0:
+		_errors.append("Data: horde.intermission_s must be >= 0")
+	if float(h["barn_drain_mult"]) <= 0.0:
+		_errors.append("Data: horde.barn_drain_mult must be > 0")
+	if float(h["eat_ring_m"]) <= 0.0:
+		_errors.append("Data: horde.eat_ring_m must be > 0")
+	var speed_frac: float = float(h["to_barn_speed_frac"])
+	if speed_frac <= 0.0 or speed_frac > 1.5:
+		_errors.append("Data: horde.to_barn_speed_frac must be in (0, 1.5]")
+	if int(h["max_carcasses"]) < 0:
+		_errors.append("Data: horde.max_carcasses must be >= 0")
+	if float(h["extra_group_delay_s"]) < 0.0:
+		_errors.append("Data: horde.extra_group_delay_s must be >= 0")
+	var reward_mult: float = float(h["kill_reward_mult"])
+	if reward_mult <= 0.0 or reward_mult >= 1.0:
+		_errors.append("Data: horde.kill_reward_mult must be in (0, 1)")
+	if int(h["victory_bonus_money"]) < 0:
+		_errors.append("Data: horde.victory_bonus_money must be >= 0")
+	var max_players: int = int(_raw["net"].get("max_players", 0))
+	var mults: Array = h["player_count_mult"]
+	var max_mult: float = 1.0
+	if mults.size() != max_players:
+		_errors.append("Data: horde.player_count_mult needs %d entries (net.max_players)" % max_players)
+	var prev: float = 1.0
+	for m: Variant in mults:
+		if not (typeof(m) == TYPE_FLOAT or typeof(m) == TYPE_INT):
+			_errors.append("Data: horde.player_count_mult has a non-number entry")
+			continue
+		var mf: float = float(m)
+		if mf < 1.0:
+			_errors.append("Data: horde.player_count_mult entries must be >= 1.0")
+		if mf < prev:
+			_errors.append("Data: horde.player_count_mult must not decrease")
+		prev = maxf(prev, mf)
+		max_mult = maxf(max_mult, mf)
+	var boar_types: Dictionary = _index.get("boars", {})
+	var waves: Array = h["waves"]
+	if waves.is_empty():
+		_errors.append("Data: horde.waves must have at least one wave")
+	var id_budget: int = 0
+	for wi: int in waves.size():
+		var wave: Variant = waves[wi]
+		var groups: Array = (wave as Dictionary).get("groups", []) if wave is Dictionary else []
+		if groups.is_empty():
+			_errors.append("Data: horde wave %d has no groups" % (wi + 1))
+		var wave_total: int = 0
+		var has_alpha: bool = false
+		for g: Variant in groups:
+			if not (g is Dictionary):
+				_errors.append("Data: horde wave %d has a malformed group" % (wi + 1))
+				continue
+			var gd: Dictionary = g
+			var members: Array = gd.get("members", []) if gd.get("members", []) is Array else []
+			if members.size() != 1 and (members.size() < 3 or members.size() > 6):
+				_errors.append("Data: horde wave %d has a group of %d members (must be 1 or 3-6)" % [wi + 1, members.size()])
+			for m: Variant in members:
+				if not boar_types.has(str(m)):
+					_errors.append("Data: horde wave %d references unknown boar type '%s'" % [wi + 1, m])
+				if str(m) == "alpha":
+					has_alpha = true
+			if not gd.has("spawn_zone") or not (typeof(gd["spawn_zone"]) == TYPE_INT or typeof(gd["spawn_zone"]) == TYPE_FLOAT) or int(gd["spawn_zone"]) < 0:
+				_errors.append("Data: horde wave %d has a group with invalid spawn_zone" % (wi + 1))
+			if not gd.has("delay_s") or not (typeof(gd["delay_s"]) == TYPE_INT or typeof(gd["delay_s"]) == TYPE_FLOAT) or float(gd["delay_s"]) < 0.0:
+				_errors.append("Data: horde wave %d has a group with invalid delay_s" % (wi + 1))
+			wave_total += members.size()
+		id_budget += ceili(float(wave_total) * max_mult)
+		if wi == waves.size() - 1 and not has_alpha:
+			_errors.append("Data: the last horde wave must contain an alpha")
+	if id_budget > NetCodec.MAX_BOARS_PER_HUNT:
+		_errors.append("Data: horde needs up to %d boar ids, above %d" % [id_budget, NetCodec.MAX_BOARS_PER_HUNT])
 
 
 func _require_fields(entry: Dictionary, fields: Array, label: String) -> void:

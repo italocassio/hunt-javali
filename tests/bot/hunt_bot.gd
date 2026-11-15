@@ -75,13 +75,14 @@ func _clear_spot(target: Vector3, base_dir: Vector3) -> Vector3:
 	return Vector3.INF
 
 
-## Hunts until the hunt ends or `timeout_s` of hunt time passes. Returns true if the hunt ended.
-func kill_all(timeout_s: float) -> bool:
+## Hunts until the hunt ends, `stop` returns true (optional: horde tests stop after a wave) or `timeout_s` of hunt
+## time passes. Returns true if the hunt ended.
+func kill_all(timeout_s: float, stop: Callable = Callable()) -> bool:
 	var deadline: float = world.get_elapsed_s() + timeout_s
 	player.bot_set_aim(true)
 	var current: int = -1
 	var repositions: int = 0
-	while not world.is_hunt_over() and world.get_elapsed_s() < deadline:
+	while not world.is_hunt_over() and world.get_elapsed_s() < deadline and not (stop.is_valid() and bool(stop.call())):
 		var ids: PackedInt32Array = world.get_alive_boar_ids()
 		if ids.is_empty():
 			park_far()

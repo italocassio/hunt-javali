@@ -17,6 +17,9 @@ extends Node
 ##   --rejoin: instead of the two players, runs net_rejoin.gd (F8, docs/multiplayer.md section 4.7): a client
 ##   cut off in the hunt comes back to the same slot (plain drop and half-open socket), tampered token, cut
 ##   longer than the grace period, cut longer than the client's patience, explicit leave, backoff.
+##   --horde: the host picks the "Horda Javali" mode in the room (Net.host_select_mode); the client must see it
+##   in its lobby before L_START and both HuntRequests must come out horde / mato_grosso / contract_index 0
+##   (docs/horda.md 9.1). Without it the same checks expect the contract mode.
 ## Exit code 0 and "NET_E2E checks=N failures=0" when green.
 
 const PEER_ARG: String = "--e2e-peer="
@@ -28,6 +31,7 @@ const DROP_ARG: String = "--host-drops"     # scenario: the host process exits m
 const DEADLINES_ARG: String = "--deadlines"  # scenario: stalls, absences, timeouts, lock, flush (net_deadlines.gd)
 const REAL_TIMEOUTS_ARG: String = "--real-timeouts"   # with --deadlines: data/net.json values, not shortened ones
 const REJOIN_ARG: String = "--rejoin"        # scenario: reconnection of a client in the hunt (net_rejoin.gd)
+const HORDE_ARG: String = "--horde"          # scenario: the room mode is Horda Javali (passed on to both players)
 const SERVER_ARG: String = "--server="       # read by the autoload Net in the children
 
 const HOST_ADDR: String = "127.0.0.1"
@@ -53,6 +57,7 @@ const OLD_VERSION: String = "0.0.0-e2e"
 var _dir: String = ""
 var _keep: bool = false
 var _host_drops: bool = false
+var _horde: bool = false
 var _pids: Dictionary = {}        # label -> pid
 var _sessions: Array[NetSession] = []
 var _checks: int = 0
@@ -94,6 +99,7 @@ func _become_peer(peer_role: String) -> void:
 	driver.set("dir", _arg(DIR_ARG))
 	driver.set("code", _arg(CODE_ARG))
 	driver.set("host_drops", OS.get_cmdline_user_args().has(DROP_ARG))
+	driver.set("horde", OS.get_cmdline_user_args().has(HORDE_ARG))
 	get_tree().root.add_child.call_deferred(driver)
 
 
@@ -103,6 +109,7 @@ func _run() -> void:
 	Profile.set_save_path("user://net_e2e_orchestrator.json")   # never the player's save
 	_keep = OS.get_cmdline_user_args().has(KEEP_ARG)
 	_host_drops = OS.get_cmdline_user_args().has(DROP_ARG)
+	_horde = OS.get_cmdline_user_args().has(HORDE_ARG)
 	_dir = _arg(DIR_ARG)
 	if _dir == "":
 		_dir = OS.get_temp_dir().path_join("javali_net_e2e_%d" % OS.get_process_id())
@@ -180,6 +187,10 @@ func _run() -> void:
 	_ok(in_lobby, "mais dois peers entram (sala com 4)")
 	if in_lobby:
 		_ok(fillers[1].get_player_count() == 4, "quarto peer vê 4 na sala (%d)" % fillers[1].get_player_count())
+		# The room mode reaches every peer through L_LOBBY, also those that only sit in the lobby.
+		var want_mode: StringName = Ids.MODE_HORDE if _horde else Ids.MODE_CONTRACT
+		var saw_mode: bool = await _wait(func() -> bool: return fillers[1].get_selected_mode() == want_mode, SESSION_MS)
+		_ok(saw_mode, "quarto peer vê o modo da sala: %s (%s)" % [str(want_mode), str(fillers[1].get_selected_mode())])
 	var fifth: NetSession = _session(url, _version(), "Quinto")
 	fifth.join(code)
 	var fifth_fail: Array = await _wait_failure(fifth)
@@ -216,6 +227,15 @@ func _check_results() -> void:
 		_ok(i_loading >= 0 and i_hunt > i_loading, "%s: room_state_changed LOADING e depois IN_HUNT %s" % [who, str(states)])
 		var loading: Dictionary = r.get("loading", {})
 		_ok(str(loading.get("map", "")) != "", "%s: mapa selecionado já em LOADING (%s)" % [who, str(loading.get("map", ""))])
+		var want_mode: String = str(Ids.MODE_HORDE if _horde else Ids.MODE_CONTRACT)
+		_ok(str(loading.get("mode", "?")) == want_mode, "%s: Net.get_selected_mode() em LOADING = %s (%s)"
+			% [who, want_mode, str(loading.get("mode", "?"))])
+		if who == "client":
+			var lobby_seen: Dictionary = r.get("lobby_seen", {})
+			_ok(str(lobby_seen.get("mode", "?")) == want_mode and int(lobby_seen.get("state", -1)) == Net.RoomState.LOBBY,
+				"client: viu o modo %s no lobby, antes do L_START (%s)" % [want_mode, str(lobby_seen)])
+		else:
+			_ok(bool(r.get("select_ok", not _horde)), "host: host_select_mode aceito")
 		_ok(int(loading.get("player_count", 0)) == 2, "%s: 2 jogadores em LOADING" % who)
 		_ok(int(loading.get("seed", 0)) != 0, "%s: get_hunt_seed() já preenchido em LOADING" % who)
 		var roster: Array = loading.get("roster", [])
@@ -231,6 +251,10 @@ func _check_results() -> void:
 		_ok(int(go.get("request_seed", -1)) == int(go.get("seed", -2)),
 			"%s: HuntRequest.rng_seed = semente da sala (%s)" % [who, str(go.get("request_seed"))])
 		_ok(int(go.get("request_players", 0)) == 2, "%s: HuntRequest.player_count = 2" % who)
+		_ok(str(go.get("request_mode", "?")) == want_mode, "%s: HuntRequest.mode = %s (%s)" % [who, want_mode, str(go.get("request_mode", "?"))])
+		if _horde:
+			_ok(str(go.get("request_map", "")) == "mato_grosso", "%s: HuntRequest.map_id = mato_grosso (%s)" % [who, str(go.get("request_map", ""))])
+			_ok(int(go.get("request_contract", -1)) == 0, "%s: HuntRequest.contract_index = 0 (%s)" % [who, str(go.get("request_contract", ""))])
 		_ok(int(go.get("link_path", 0)) == NetLink.PATH_RELAY, "%s: enlace pelo relay (path %s)" % [who, str(go.get("link_path"))])
 		_ok(bool(go.get("remote_exists", false)), "%s: caçador remoto existe no mundo" % who)
 		var walked: float = _dist(r.get("local_start", []), r.get("local_end", []))
@@ -242,6 +266,8 @@ func _check_results() -> void:
 	_ok(int(host_go.get("seed", 0)) == int(client_go.get("seed", 1)), "semente igual nos dois peers (%s / %s)"
 		% [str(host_go.get("seed")), str(client_go.get("seed"))])
 	_ok(str(host_go.get("request_map", "")) == str(client_go.get("request_map", "-")), "mesmo mapa nos dois")
+	_ok(str(host_go.get("request_mode", "")) == str(client_go.get("request_mode", "-")), "mesmo modo nos dois")
+	_ok(int(host_go.get("request_contract", -1)) == int(client_go.get("request_contract", -2)), "mesmo contrato nos dois")
 	_check_view(host, client, "anfitrião vê o cliente")
 	_check_view(client, host, "cliente vê o anfitrião")
 	if _host_drops:
@@ -312,6 +338,8 @@ func _peer_args(peer_role: String, url: String, code: String) -> PackedStringArr
 		args.append(CODE_ARG + code)
 	if _host_drops:
 		args.append(DROP_ARG)
+	if _horde:
+		args.append(HORDE_ARG)
 	return args
 
 

@@ -5,6 +5,8 @@ extends Node
 ## Scene changes free the current scene, so the real runner is a second node of the same script that is
 ## parented to the root window (it survives Router.goto).
 ##
+## The last three cases are the horde route (docs/horda.md section 14).
+##
 ## Run: tools/godot.sh --headless --fixed-fps 60 --path . res://tests/flow_test.tscn [-- --strict]
 
 const TestCase := preload("res://tests/lib/test_case.gd")
@@ -140,6 +142,9 @@ func _run() -> void:
 	await _case("preparation_second_contract", _step_second_request)
 	await _case("back_buttons_navigate", _step_back_buttons)
 	await _case("friends_lobby_offline_and_back", _step_friends_lobby)
+	await _case("horde_menu_to_hunt", _step_horde_hunt)
+	await _case("horde_result_and_shop", _step_horde_result)
+	await _case("horde_shop_back_to_menu", _step_horde_back_to_menu)
 	_t.call("cleanup_test_files")
 	if not _finished:
 		_finished = true
@@ -379,3 +384,113 @@ func _step_friends_lobby() -> void:
 	if _press("BackButton"):
 		await _wait_scene(ScenePaths.MAIN_MENU)
 	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "Net sem sala depois de Voltar")
+
+
+# --------------------------------------------------------------------------------------------
+# Horde route (docs/horda.md section 14): menu -> hunt in horde mode -> result -> shop. The contract route above
+# is untouched. The horde hunt is started through Router.start_hunt with the debug request (the room is the
+# only way to pick the mode in the UI, and it needs a server).
+# --------------------------------------------------------------------------------------------
+
+func _find_label(text: String) -> Label:
+	var scene: Node = _scene()
+	if scene == null:
+		return null
+	var stack: Array[Node] = [scene]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is Label and (n as Label).text == text:
+			return n as Label
+		stack.append_array(n.get_children())
+	return null
+
+
+var _horde_money_before: int = 0
+var _horde_unlocked_before: int = 0
+var _horde_completed_before: Array[bool] = []
+
+
+func _step_horde_hunt() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	_horde_money_before = Profile.get_money()
+	_horde_unlocked_before = Profile.get_unlocked_contract_count(&"mato_grosso")
+	_horde_completed_before.clear()
+	for i: int in Data.get_contract_count(&"mato_grosso"):
+		_horde_completed_before.append(Profile.is_contract_completed(&"mato_grosso", i))
+	_started_signals = 0
+	_ended.clear()
+	var req: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE)
+	_t.call("ok", req.is_horde(), "pedido de horda")
+	Router.start_hunt(req)
+	if not await _wait_scene(ScenePaths.HUNT, 30.0):
+		return
+	var hunt: HuntController = _scene() as HuntController
+	if hunt == null:
+		_t.call("fail", "cena HUNT nao e HuntController")
+		return
+	var t0: int = Time.get_ticks_msec()
+	while not hunt.is_world_ready() and Time.get_ticks_msec() - t0 < 60000:
+		await get_tree().process_frame
+	_t.call("ok", hunt.is_world_ready(), "mundo da horda pronto")
+	for i: int in 5:
+		await get_tree().process_frame
+	_t.call("eq", _started_signals, 1, "hunt_started 1x na horda")
+	_t.call("eq", hunt.get_mode(), Ids.MODE_HORDE, "get_mode() == horda")
+	_t.call("ok", hunt.is_horde(), "is_horde()")
+	_t.call("eq", hunt.get_horde_wave(), 1, "onda 1 anunciada")
+	_t.call("eq", hunt.get_horde_wave_count(), 8, "8 ondas")
+	_t.call("eq", hunt.get_horde_phase(), Ids.HP_INTERMISSION, "comeca no intervalo")
+	_t.call("ok", hunt.get_horde_countdown_s() > 0.0 and hunt.get_horde_countdown_s() <= float(Data.get_horde()["first_wave_delay_s"]), "contador do primeiro intervalo (%.1f)" % hunt.get_horde_countdown_s())
+	_t.call("ok", hunt.get_objective_position().is_finite(), "celeiro tem posicao")
+	_t.call("eq", hunt.get_player().get_weapon_count(), Data.get_weapon_ids().size(), "todas as armas")
+	_t.call("ok", hunt.get_player().has_infinite_reserve(), "reserva infinita")
+	# the HUD in horde layout (A): wave label and banner exist, the contract counter is gone, the bar says "Celeiro"
+	_t.call("ok", hunt.find_child("WaveLabel", true, false) != null, "HUD: WaveLabel existe")
+	_t.call("ok", hunt.find_child("WaveBanner", true, false) != null, "HUD: WaveBanner existe")
+	_t.call("ok", _find_label("Celeiro 100%") != null, "HUD: barra do topo diz 'Celeiro 100%'")
+	_t.call("ok", _find_label("Lavoura 100%") == null, "HUD: sem 'Lavoura' na horda")
+	_ended.clear()
+	hunt.debug_force_end(HuntResult.Outcome.VICTORY)
+	await _wait_scene(ScenePaths.RESULT, 30.0)
+	_t.call("eq", _ended.size(), 1, "hunt_ended 1x na horda")
+
+
+func _step_horde_result() -> void:
+	if _scene_path() != ScenePaths.RESULT:
+		_t.call("fail", "pre-condicao: nao esta no resultado (%s)" % _scene_path())
+		return
+	var r: HuntResult = Router.last_result
+	_t.call("ok", r != null, "Router.last_result definido")
+	if r != null:
+		_t.call("eq", r.mode, Ids.MODE_HORDE, "last_result.mode")
+		_t.call("eq", r.outcome, HuntResult.Outcome.VICTORY, "outcome")
+		_t.call("ok", not r.counts_for_progression, "horda nunca conta para progressao")
+		_t.call("eq", r.contract_bonus, Profile.horde_bonus(100.0), "bonus de defesa com o estoque cheio")
+		_t.call("eq", r.horde_wave_count, 8, "horde_wave_count")
+		_t.call("eq", r.horde_waves_cleared, 8, "vitoria forcada: ondas vencidas = ondas do plano")
+		_t.call("eq", Profile.get_money(), _horde_money_before + Profile.horde_bonus(100.0), "saldo += Profile.horde_bonus(100) (1x)")
+	_t.call("eq", Profile.get_unlocked_contract_count(&"mato_grosso"), _horde_unlocked_before, "contratos liberados iguais")
+	for i: int in _horde_completed_before.size():
+		_t.call("eq", Profile.is_contract_completed(&"mato_grosso", i), _horde_completed_before[i], "contrato %d: concluido como antes" % i)
+	_t.call("ok", _find_label("Celeiro defendido!") != null, "titulo 'Celeiro defendido!'")
+	_t.call("ok", _find_label("Ondas vencidas") != null, "linha 'Ondas vencidas'")
+	_t.call("ok", _find_label("8 de 8") != null, "valor '8 de 8'")
+	_t.call("ok", _find_label("Celeiro preservado") != null, "linha 'Celeiro preservado'")
+	var retry: Button = _button("RetryButton")
+	if retry != null:
+		_t.call("eq", retry.is_visible_in_tree(), false, "%RetryButton invisivel na horda")
+	var cont: Button = _button("ContinueButton")
+	if cont != null:
+		_t.call("ok", cont.is_visible_in_tree(), "%ContinueButton visivel")
+	if _press("ContinueButton"):
+		await _wait_scene(ScenePaths.SHOP)
+
+
+func _step_horde_back_to_menu() -> void:
+	if _scene_path() != ScenePaths.SHOP:
+		_t.call("fail", "pre-condicao: nao esta na loja (%s)" % _scene_path())
+		return
+	if _press("BackButton"):
+		await _wait_scene(ScenePaths.MAIN_MENU)

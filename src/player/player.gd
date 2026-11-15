@@ -130,13 +130,15 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 	_items.binoculars_changed.connect(_on_binoculars_changed)
 
 	var ids: Array[StringName] = request.weapon_ids.duplicate()
+	if request.is_horde():
+		ids = Data.get_weapon_ids()   # horde: every weapon, in file order (docs/horda.md section 7)
 	if ids.is_empty():
 		ids.append(Ids.W_CARBINE_22)
 	for weapon_id: StringName in ids:
 		var weapon: Weapon = Weapon.new()
 		weapon.name = "Weapon_%s" % weapon_id
 		add_child(weapon)
-		if not weapon.setup(weapon_id, _items.reserve_mult):
+		if not weapon.setup(weapon_id, _items.reserve_mult, request.is_horde()):
 			push_error("Player.setup: unknown weapon '%s'" % weapon_id)
 			weapon.queue_free()
 			continue
@@ -360,6 +362,10 @@ func get_weapon() -> Weapon:
 
 func get_weapon_count() -> int:
 	return _weapons.size()
+
+
+func has_infinite_reserve() -> bool:
+	return _request != null and _request.is_horde()
 
 
 func get_weapon_slot() -> int:
@@ -590,6 +596,12 @@ func _pump_discrete_input(delta: float) -> void:
 		_select_weapon(0)
 	if Input.is_action_just_pressed(&"weapon_2"):
 		_select_weapon(1)
+	if Input.is_action_just_pressed(&"weapon_3"):
+		_select_weapon(2)
+	if Input.is_action_just_pressed(&"weapon_4"):
+		_select_weapon(3)
+	if Input.is_action_just_pressed(&"weapon_5"):
+		_select_weapon(4)
 	if Input.is_action_just_pressed(&"weapon_swap"):
 		_select_weapon((_slot + 1) % maxi(_weapons.size(), 1))
 	if Input.is_action_just_pressed(&"use_item"):

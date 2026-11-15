@@ -3,8 +3,8 @@ extends Node
 ## (emulated touch-mouse is ignored) and tracks touch mode. See docs/arquitetura.md §4.
 
 const ACTIONS: PackedStringArray = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
-	"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_swap",
-	"dog_command", "use_item", "item_next", "pause"]
+	"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
+	"weapon_swap", "dog_command", "use_item", "item_next", "pause"]
 
 const ACTION_DEADZONE: float = 0.2
 ## Real mouse motion longer than this (px) switches "auto" mode back to mouse/keyboard.
@@ -27,6 +27,9 @@ const _KEYS: Dictionary = {
 	"crouch": [KEY_CTRL, KEY_C],
 	"weapon_1": [KEY_1],
 	"weapon_2": [KEY_2],
+	"weapon_3": [KEY_3],
+	"weapon_4": [KEY_4],
+	"weapon_5": [KEY_5],
 	"dog_command": [KEY_E],
 	"use_item": [KEY_Q],
 	"item_next": [KEY_F],

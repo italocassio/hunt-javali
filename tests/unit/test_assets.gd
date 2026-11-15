@@ -45,7 +45,7 @@ const THEME_VARIATIONS: Dictionary = {
 }
 
 const EXTRA_ICONS: Array[String] = ["money", "gold", "boar", "crop", "health", "ammo", "lock", "dog_paw", "app_icon",
-	"map_mato_grosso", "map_pantanal", "map_campanha_gaucha", "map_triangulo_mineiro",
+	"barn", "map_mato_grosso", "map_pantanal", "map_campanha_gaucha", "map_triangulo_mineiro",
 	"btn_fire", "btn_aim", "btn_reload", "btn_swap", "btn_dog", "btn_item", "btn_crouch", "btn_pause",
 	"joystick_base", "joystick_knob"]
 
@@ -324,6 +324,174 @@ func test_props_contract() -> void:
 			ok(absf(box.size[axis] - want[axis]) <= allowed, "%s: dimensao %s = %.2f, esperado %.2f +- %.2f" % [id, "XYZ"[axis], box.size[axis], want[axis], allowed])
 		ok(absf(box.position.y) <= 0.1, "%s: base no chao (y min %.2f)" % [id, box.position.y])
 		ok(absf(box.get_center().x) <= want.x * 0.1 + 0.1 and absf(box.get_center().z) <= want.z * 0.1 + 0.1, "%s: centrado na pegada (centro %s)" % [id, box.get_center()])
+
+
+## Corn stock of the barn (docs/horda.md section 11.1): budget, geometry and API. The stage checks run off-tree,
+## where the asset applies a stage instantly (the tween only exists inside the tree).
+func _visible_volume(root: Node3D) -> float:
+	var total: float = 0.0
+	for mi: MeshInstance3D in _meshes(root):
+		if mi.visible and mi.mesh != null:
+			var b: AABB = mi.transform * mi.get_aabb()
+			total += b.size.x * b.size.y * b.size.z
+	return total
+
+
+func _visible_meshes(root: Node3D) -> int:
+	var n: int = 0
+	for mi: MeshInstance3D in _meshes(root):
+		if mi.visible and mi.scale.y > 0.05:
+			n += 1
+	return n
+
+
+func test_barn_corn_contract() -> void:
+	var path: String = ScenePaths.BARN_CORN
+	var scene: PackedScene = need_scene(path)
+	if scene == null:
+		return
+	var root: Node3D = scene.instantiate() as Node3D
+	if root == null:
+		fail("%s: raiz nao e Node3D" % path)
+		return
+	ok(root is CornStockVisualBase, "raiz estende CornStockVisualBase")
+	if not root is CornStockVisualBase:
+		root.free()
+		return
+	var stock: CornStockVisualBase = root as CornStockVisualBase
+	eq(stock.name, &"BarnCorn", "nome do no raiz")
+	_forbidden(stock, "barn_corn")
+	var meshes: Array[MeshInstance3D] = _meshes(stock)
+	var tris: int = _tree_tris(stock)
+	print("INFO barn_corn: %d MeshInstance3D, %d triangulos" % [meshes.size(), tris])
+	ok(meshes.size() <= 8, "%d MeshInstance3D (<= 8)" % meshes.size())
+	ok(tris <= 900, "%d triangulos (<= 900)" % tris)
+	var materials: Dictionary = {}
+	for mi: MeshInstance3D in meshes:
+		var m: Material = mi.material_override
+		if m == null and mi.mesh != null and mi.mesh.get_surface_count() > 0:
+			m = mi.mesh.surface_get_material(0)
+		if m != null:
+			materials[m.get_instance_id()] = true
+	ok(materials.size() >= 1 and materials.size() <= 2, "%d materiais (1 a 2)" % materials.size())
+	var shadow_casters: int = 0
+	for mi: MeshInstance3D in meshes:
+		if mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			shadow_casters += 1
+	ok(shadow_casters <= 1, "so o monte de dentro projeta sombra (%d)" % shadow_casters)
+	# API, off-tree: setup exactly once before add_child, then every stage.
+	var ring: float = float(Data.get_horde().get("eat_ring_m", 10.0))
+	stock.setup(ring)
+	var volumes: Array[float] = []
+	for pct: float in [100.0, 90.0, 60.0, 30.0, 10.0]:
+		stock.set_stock_pct(pct)
+		volumes.append(_visible_volume(stock))
+	ok(not stock.is_inside_tree(), "off-tree")
+	ok(volumes[0] > 0.0, "cheio mostra milho")
+	for i: int in range(1, volumes.size()):
+		ok(volumes[i] <= volumes[i - 1] + 0.001, "volume visivel nao cresce quando o estoque cai (%.1f -> %.1f)" % [volumes[i - 1], volumes[i]])
+	ok(volumes[volumes.size() - 1] < volumes[0] * 0.5, "10%% mostra bem menos que cheio (%.1f vs %.1f)" % [volumes[volumes.size() - 1], volumes[0]])
+	stock.set_stock_pct(100.0)
+	eq(_visible_meshes(stock), 7, "cheio: monte de dentro + 6 de fora visiveis")
+	var gnawed_visible: bool = false
+	stock.set_stock_pct(0.0)
+	var heaps_shown: int = 0
+	for mi: MeshInstance3D in _meshes(stock):
+		if mi.name.begins_with("Outer") or mi.name == "InnerPile":
+			if mi.visible and mi.scale.y > 0.05:
+				heaps_shown += 1
+		elif mi.visible:
+			gnawed_visible = true
+	ok(gnawed_visible, "vazio (0%) mostra a palha/espigas roidas no chao")
+	eq(heaps_shown, 0, "vazio (0%) nao mostra monte nenhum")
+	stock.set_stock_pct(100.0)
+	# Geometry at full stock: inner pile fits the barn (14 x 8 m, <= 3 m); the outer heaps sit on the ring.
+	var on_ring: int = 0
+	var first_is_north: bool = false
+	for mi: MeshInstance3D in _meshes(stock):
+		if not mi.visible or mi.mesh == null:
+			continue
+		var b: AABB = mi.transform * mi.get_aabb()
+		var c: Vector3 = b.get_center()
+		var dist: float = Vector2(mi.position.x, mi.position.z).length()
+		if mi.name == "InnerPile":
+			ok(b.size.x <= 14.0 + 0.01 and b.size.z <= 8.0 + 0.01, "monte de dentro cabe em 14 x 8 m (%.1f x %.1f)" % [b.size.x, b.size.z])
+			ok(b.end.y <= 3.0 + 0.01, "monte de dentro <= 3 m de altura (%.2f)" % b.end.y)
+			ok(absf(c.x) <= 7.0 and c.z >= -5.0 and c.z <= 5.0, "monte de dentro dentro do galpao (centro %s)" % c)
+		elif mi.name.begins_with("Outer"):
+			if absf(dist - ring) <= 0.01:
+				on_ring += 1
+			if mi.name == "Outer_0" and mi.position.z < -ring + 0.01 and absf(mi.position.x) < 0.01:
+				first_is_north = true
+	ok(on_ring >= 6, "ao menos 6 montes no anel de %.1f m (%d)" % [ring, on_ring])
+	ok(first_is_north, "o primeiro monte fica em -Z")
+	# In the tree: stage changes animate (<= 0.5 s), under_attack shakes only children, root untouched.
+	track(stock)
+	var snap: Array = _root_transform_snapshot(stock)
+	stock.set_stock_pct(60.0)
+	stock.set_stock_pct(30.0)
+	stock.set_under_attack(true)
+	await frames(10)
+	stock.set_stock_pct(10.0)
+	stock.set_stock_pct(0.0)
+	stock.set_under_attack(false)
+	await wait_s(0.6)
+	var after_volume: float = _visible_volume(stock)
+	ok(after_volume < volumes[0] * 0.5, "depois da transicao (0,6 s) o estoque vazio esta pequeno (%.1f)" % after_volume)
+	stock.set_stock_pct(100.0)
+	await wait_s(0.6)
+	near(_visible_volume(stock), volumes[0], volumes[0] * 0.05, "voltar a 100% restaura o visual cheio")
+	eq(_root_transform_snapshot(stock), snap, "o asset nao altera position/rotation/scale da raiz")
+	stock.set_stock_pct(100.0)   # idempotent
+	stock.set_under_attack(true)
+	stock.set_under_attack(true)
+	stock.set_under_attack(false)
+	await frames(2)
+
+
+func test_barn_corn_odd_percentages_and_attack_without_errors() -> void:
+	var scene: PackedScene = need_scene(ScenePaths.BARN_CORN)
+	if scene == null:
+		return
+	var stock: CornStockVisualBase = scene.instantiate() as CornStockVisualBase
+	if stock == null:
+		fail("barn_corn nao instancia como CornStockVisualBase")
+		return
+	stock.setup(10.0)
+	track(stock)
+	stock.set_stock_pct(100.0)
+	var mark: int = error_mark()
+	for pct: float in [0.0, 10.0, 30.0, 60.0, 90.0, 100.0, -5.0, 0.0001, 25.0, 25.001, 250.0]:
+		stock.set_stock_pct(pct)
+		stock.set_under_attack(int(pct) % 2 == 0)
+		await frames(2)
+	stock.set_under_attack(false)
+	await frames(2)
+	eq(errors_since(mark).size(), 0, "barn_corn sem erros com percentuais fora do normal: %s" % str(errors_since(mark)))
+
+
+func test_horde_sounds_exist_and_play() -> void:
+	for id: StringName in [&"horde_wave_start", &"horde_wave_clear"]:
+		ok(Sfx.has_sound(id), "Sfx.has_sound(%s)" % id)
+	var mark: int = error_mark()
+	Sfx.play(&"horde_wave_start")
+	Sfx.play(&"horde_wave_clear")
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar os sons de horda nao gera erros: %s" % str(errors_since(mark)))
+	# no recorded files: the synthesis fallback still has both
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	for id: StringName in [&"horde_wave_start", &"horde_wave_clear"]:
+		ok(fb.call(&"has_sound", id), "fallback: has_sound(%s)" % id)
+		var stream: AudioStreamWAV = fb.call(&"_get_stream", id) as AudioStreamWAV
+		ok(stream != null, "fallback: %s sintetizado" % id)
+		if stream != null:
+			var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+			var channels: float = 2.0 if stream.stereo else 1.0
+			var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+			ok(seconds > 0.3 and seconds < 3.0, "%s dura %.2f s (esperado ~1 a 1,5 s)" % [id, seconds])
+	await frames(2)
 
 
 # --------------------------------------------------------------------------------------------

@@ -31,6 +31,9 @@ const DOG_CMD_RECALL: int = 1
 const FULL_SYNC_BYTES: int = 10          # EV_FULL_SYNC body: t_ms u32, crop u16, killed u8, total u8, n_records u16
 const FULL_SYNC_COUNT_AT: int = 8        # offset of n_records inside that body
 const SYNC_MARK_OWNER: int = 255         # EV_DOG_MARK owner of a replayed mark (the owner does not matter)
+const HORDE_WAVE_BYTES: int = 7          # EV_HORDE_WAVE body (docs/horda.md section 9.2)
+const COUNTDOWN_WIRE_SCALE: float = 10.0 # EV_HORDE_WAVE countdown u16 in 0.1 s, rounded up
+const COUNTDOWN_EPSILON: float = 0.0001  # keeps 12.0 s from rounding up to 12.1 s
 const DEFAULT_CLAIM_TOLERANCE_M: float = 12.0
 ## Rounding slack of the u16 fields when comparing a claim with the weapon limits.
 const DAMAGE_SLACK: float = 1.0 / DAMAGE_WIRE_SCALE
@@ -186,6 +189,14 @@ func write_mark_replay(out: StreamPeerBuffer, boar_id: int, remaining_s: float) 
 	out.put_u8(clampi(ceili(remaining_s * MARK_WIRE_SCALE), 1, MAX_U8))
 
 
+## Horde: replayed EV_HORDE_WAVE with the current wave state (countdown = time left). One record.
+func write_horde_wave_replay(out: StreamPeerBuffer, wave: int, wave_count: int, phase: StringName, countdown_s: float,
+		wave_total: int, killed_before: int) -> void:
+	out.put_u8(NetCodec.EV_HORDE_WAVE)
+	out.put_u16(HORDE_WAVE_BYTES)
+	_put_horde_wave(out, wave, wave_count, phase, countdown_s, wave_total, killed_before)
+
+
 ## The EV_HUNT_END sent when the hunt ended, byte for byte. Returns 1 if written, 0 if the hunt is still on.
 func write_hunt_end_replay(out: StreamPeerBuffer) -> int:
 	if _hunt_end_record.is_empty():
@@ -261,6 +272,28 @@ func queue_hunt_end(outcome: int, crop_pct: float, duration_s: float, killed: in
 		_events.put_u8(mini(int(e.get("kills", 0)), MAX_U8))
 		_events.put_u32(maxi(int(e.get("money", 0)), 0))
 	_end(at)
+
+
+## Horde, EV_HORDE_WAVE: wave u8, wave_count u8, phase u8 (NetCodec.HORDE_PHASES), countdown u16 (x0.1 s, rounded
+## up; 0 in a wave), wave_total u8, killed_before u8. Once per HordeDirector.wave_changed.
+func queue_horde_wave(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void:
+	var at: int = _begin(NetCodec.EV_HORDE_WAVE)
+	_put_horde_wave(_events, wave, wave_count, phase, countdown_s, wave_total, killed_before)
+	_end(at)
+
+
+func _put_horde_wave(out: StreamPeerBuffer, wave: int, wave_count: int, phase: StringName, countdown_s: float,
+		wave_total: int, killed_before: int) -> void:
+	var phase_index: int = maxi(NetCodec.HORDE_PHASES.find(phase), 0)
+	var countdown: int = 0
+	if phase == Ids.HP_INTERMISSION:
+		countdown = clampi(ceili(countdown_s * COUNTDOWN_WIRE_SCALE - COUNTDOWN_EPSILON), 0, MAX_U16)
+	out.put_u8(clampi(wave, 0, MAX_U8))
+	out.put_u8(clampi(wave_count, 0, MAX_U8))
+	out.put_u8(phase_index)
+	out.put_u16(countdown)
+	out.put_u8(clampi(wave_total, 0, MAX_U8))
+	out.put_u8(clampi(killed_before, 0, MAX_U8))
 
 
 func _on_boar_added(boar: Boar) -> void:

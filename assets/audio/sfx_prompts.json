@@ -44,6 +44,8 @@
     {"id": "amb_cerrado_loop", "duration_s": 20.0, "loop": true, "prompt": "Calm Brazilian cerrado savanna daytime ambience: a few soft, distant tropical birds calling now and then, a light breeze moving through dry grass and low shrubs, gentle natural rustle. Open, quiet, sparse landscape. No insects, no cicadas, no crickets, no buzzing or high-pitched drone, no people, no music, no nearby animals. Seamless loop."},
     {"id": "amb_wind_loop", "duration_s": 15.0, "loop": true, "prompt": "Steady gentle wind over open grassland, soft gusts, seamless loop, no birds, no people"},
     {"id": "victory_sting", "duration_s": 3.0, "prompt": "Short triumphant rustic sting, acoustic guitar and accordion flourish, Brazilian country style, ends cleanly"},
+    {"id": "horde_wave_start", "duration_s": 1.5, "prompt": "Deep low rustic cattle horn (berrante) blast, one short note then one long sustained note, Brazilian countryside, announces an incoming attack wave, ends cleanly"},
+    {"id": "horde_wave_clear", "duration_s": 1.0, "prompt": "Short gentle relief jingle, soft rising acoustic guitar arpeggio, Brazilian country style, calm and light, ends cleanly"},
     {"id": "defeat_sting", "duration_s": 3.0, "prompt": "Short sad rustic sting, slow descending acoustic guitar notes, Brazilian country style, ends cleanly"},
     {"id": "ui_click", "duration_s": 0.5, "prompt": "Soft clean wooden button click, short UI sound"},
     {"id": "ui_buy", "duration_s": 0.7, "prompt": "Cash register purchase sound, short bell ding and coins, UI"},

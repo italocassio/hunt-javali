@@ -17,6 +17,8 @@ extends Node
 ##   spectator      F6: allies on minimap/compass, SpectatorCamera, "Assistindo" banner, solo untouched  RESULT:
 ##   net_dogs       F7: one Dog per slot on the host, DogPuppet on the client, dog records, commands  RESULT:
 ##   net_sync       F8: rejoin sync (EV_FULL_SYNC) in one process: same boars/patches/score, idempotent   RESULT:
+##   net_horde      horde mode over the byte path: wave state host -> client, EV_HORDE_WAVE, F8 replay   RESULT:
+##   net_mode       room mode (L_LOBBY / L_START byte of the mode), host_select_mode                NET_MODE_SELFTEST
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
 ## A child that exits without its summary line (crash, parse error, hang killed by the limit) is a FAIL.
 ##
@@ -41,6 +43,8 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "spectator", "scene": "res://src/player/debug/spectator_sandbox.tscn", "limit_s": 90.0},
 	{"name": "net_dogs", "scene": "res://src/hunt/debug/net_dogs_test.tscn", "limit_s": 120.0},
 	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0},
+	{"name": "net_horde", "scene": "res://src/hunt/debug/net_horde_test.tscn", "limit_s": 120.0},
+	{"name": "net_mode", "scene": "res://src/net/debug/net_mode_selftest.tscn", "limit_s": 60.0},
 	{"name": "remote_hunter", "scene": "res://src/player/debug/remote_sandbox.tscn", "limit_s": 60.0, "wall_clock": true},
 ]
 
@@ -124,7 +128,7 @@ func _run_sandbox(sandbox: Dictionary) -> void:
 		float(sandbox["limit_s"]), _abort_requested)
 	if bool(r["aborted"]):
 		return
-	var detail: Array = ChildRunner.problems(r, "RESULT: N passed ... / LINK_SELFTEST checks= / remote_sandbox: PASS")
+	var detail: Array = ChildRunner.problems(r, "RESULT: N passed ... / LINK_SELFTEST|NET_MODE_SELFTEST checks= / remote_sandbox: PASS")
 	if detail.is_empty():
 		TestCase.report("PASS", "%s (%d verificacoes, %.1f s)" % [label, int(r["checks"]), float(r["secs"])], [], _totals)
 	else:

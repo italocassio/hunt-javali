@@ -12,6 +12,9 @@ const COLOR_PLAYER: Color = Color("#F4EFE6")
 const COLOR_DOG: Color = Color("#F2C12E")
 const COLOR_BOAR: Color = Color("#D9452B")
 const COLOR_BAIT: Color = Color("#E8B923")
+const COLOR_OBJECTIVE: Color = Color("#F2C12E")
+const OBJECTIVE_ICON_PX: float = 24.0
+const OBJECTIVE_SQUARE_PX: float = 12.0
 const ALLY_ARROW_TIP_PX: float = 8.0
 const ALLY_ARROW_BACK_PX: float = 5.0
 const ALLY_FALLEN_HALF_PX: float = 5.0
@@ -27,6 +30,9 @@ var dog_position: Vector3 = Vector3.INF
 var marked: PackedVector3Array = PackedVector3Array()
 var revealed: PackedVector3Array = PackedVector3Array()
 var baits: PackedVector3Array = PackedVector3Array()
+## Horde objective (the barn): Vector3.INF = none. Drawn with the icon, or a filled square without it.
+var objective: Vector3 = Vector3.INF
+var objective_icon: Texture2D = null
 ## Allies (docs/multiplayer.md 6.7): four parallel arrays, one entry per hunter other than the one in the centre.
 var allies: PackedVector3Array = PackedVector3Array()
 var ally_colors: PackedColorArray = PackedColorArray()
@@ -70,6 +76,8 @@ func _draw() -> void:
 		var clipped: Rect2 = Rect2(a, b - a).intersection(bounds)
 		if clipped.has_area():
 			draw_rect(clipped, COLOR_CROP)
+	if objective.is_finite():
+		_draw_objective()
 	for p: Vector3 in baits:
 		_dot(p, COLOR_BAIT, 4.0)
 	for p: Vector3 in marked:
@@ -82,6 +90,18 @@ func _draw() -> void:
 		_draw_ally(i)
 	_draw_player()
 	draw_rect(bounds, COLOR_FRAME, false, 2.0)
+
+
+## The barn sticks to the frame when out of view, like the other markers.
+func _draw_objective() -> void:
+	var p: Vector2 = _to_map(objective.x, objective.z)
+	var half: float = (OBJECTIVE_ICON_PX if objective_icon != null else OBJECTIVE_SQUARE_PX) * 0.5
+	p = Vector2(clampf(p.x, half + 2.0, size.x - half - 2.0), clampf(p.y, half + 2.0, size.y - half - 2.0))
+	if objective_icon != null:
+		draw_texture_rect(objective_icon, Rect2(p - Vector2.ONE * half, Vector2.ONE * half * 2.0), false)
+	else:
+		draw_rect(Rect2(p - Vector2.ONE * (half + 1.5), Vector2.ONE * (half + 1.5) * 2.0), Color.BLACK)
+		draw_rect(Rect2(p - Vector2.ONE * half, Vector2.ONE * half * 2.0), COLOR_OBJECTIVE)
 
 
 func _dot(world: Vector3, color: Color, radius: float) -> void:

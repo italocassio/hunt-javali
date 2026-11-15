@@ -252,8 +252,8 @@ func _check_autoload_signatures() -> void:
 		_t.call("ok", iconsts.has("ACTIONS"), "InputSetup.ACTIONS ausente")
 		if iconsts.has("ACTIONS"):
 			var expected: Array[String] = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
-				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_swap",
-				"dog_command", "use_item", "item_next", "pause"]
+				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
+				"weapon_swap", "dog_command", "use_item", "item_next", "pause"]
 			var got: Array[String] = []
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))
@@ -345,6 +345,7 @@ func _check_core_classes() -> void:
 		"MapEnvironmentBase": "res://src/core/map_environment_base.gd",
 		"HunterVisualBase": "res://src/core/hunter_visual_base.gd",
 		"NetCodec": "res://src/core/net_codec.gd", "NetPeerInfo": "res://src/core/net_peer_info.gd",
+		"CornStockVisualBase": "res://src/core/corn_stock_visual_base.gd",
 	}
 	var classes: Dictionary = _global_classes()
 	for cname: String in core:
@@ -401,6 +402,9 @@ func _check_core_additions() -> void:
 	_t.call("eq", NetCodec.BOAR_STATES.size(), 12, "NetCodec.BOAR_STATES")
 	_t.call("eq", NetCodec.DOG_STATES.size(), 7, "NetCodec.DOG_STATES")
 	_t.call("eq", NetCodec.ZONES.size(), 5, "NetCodec.ZONES")
+	# Horde (docs/horda.md section 4): wire index = position, so order is part of the format.
+	_t.call("eq", NetCodec.MODES, [&"contract", &"horde"] as Array[StringName], "NetCodec.MODES")
+	_t.call("eq", NetCodec.HORDE_PHASES, [&"intermission", &"wave"] as Array[StringName], "NetCodec.HORDE_PHASES")
 
 
 func _base_chain(script: Script) -> Array[String]:

@@ -106,6 +106,22 @@ var _pending_baits: PackedVector2Array = PackedVector2Array()   # CLIENT: own ba
 var _conn_lost: bool = false
 var _away_slots: Dictionary = {}        # slot -> true while that remote's snapshot record carries HF_AWAY
 
+# Horde mode (docs/horda.md section 5). Nothing here runs with request.mode == contract.
+var _horde: Dictionary = {}             # data/horde.json (empty outside the horde)
+var _director: HordeDirector = null     # offline and host
+var _objective: Vector3 = Vector3.INF   # barn origin on the ground
+var _eat_ring_m: float = 0.0
+var _stock_visual: CornStockVisualBase = null
+var _carcasses: Array[Node3D] = []      # dead boars (host) / dead puppets (client), oldest first
+var _max_carcasses: int = 0
+# CLIENT: the last EV_HORDE_WAVE (section 9.2); the countdown keeps running here.
+var _hw_wave: int = 0
+var _hw_count: int = 0
+var _hw_phase: StringName = &""
+var _hw_countdown: float = 0.0
+var _hw_total: int = 0
+var _hw_killed_before: int = 0
+
 @onready var _boars_root: Node3D = $Boars
 @onready var _baits_root: Node3D = $Baits
 @onready var _loading: CanvasLayer = $LoadingOverlay
@@ -160,7 +176,30 @@ func _assemble() -> void:
 	else:
 		rng.randomize()
 	var contract: Dictionary = Data.get_contract(_request.map_id, _request.contract_index)
-	if _net_role == Net.Role.HOST:
+	var plan: Array = []
+	if _request.is_horde():
+		# Horde (docs/horda.md section 5.1, steps 1-2): the waves replace the contract groups.
+		_horde = Data.get_horde()
+		_result.mode = Ids.MODE_HORDE
+		_result.counts_for_progression = false
+		if _horde.is_empty():
+			push_error("HuntController: horde requested but data/horde.json is empty or invalid")
+			_ready_flag = true
+			_loading.visible = false
+			_finish(HuntResult.Outcome.ABANDONED)
+			return
+		_result.contract_index = _request.contract_index
+		_eat_ring_m = float(_horde.get("eat_ring_m", 0.0))
+		_max_carcasses = maxi(int(_horde.get("max_carcasses", 0)), 0)
+		contract = {"crop_drain_mult": float(_horde.get("barn_drain_mult", 1.0)), "groups": []}
+		if _net_role != Net.Role.CLIENT:
+			plan = HordeDirector.plan_waves(_horde, _result.player_count if _net_role == Net.Role.HOST else 1)
+			_result.horde_wave_count = plan.size()
+			var flat: Array = []
+			for wave_groups: Variant in plan:
+				flat.append_array(wave_groups as Array)
+			contract["groups"] = flat
+	elif _net_role == Net.Role.HOST:
 		# More hunters, more boars (section 6.10). The client never simulates the groups.
 		contract = contract.duplicate(true)
 		contract["groups"] = BoarSpawner.scale_groups(contract.get("groups", []), _result.player_count,
@@ -199,6 +238,8 @@ func _assemble() -> void:
 		return
 	t = Time.get_ticks_msec()
 	_map.build_props_and_water()
+	if is_horde() and not _build_objective():
+		return
 	t = _lap("props_water", t)
 	if not await _next_frame():
 		return
@@ -213,6 +254,8 @@ func _assemble() -> void:
 	crop.name = "CropManager"
 	add_child(crop)
 	crop.setup(heightmap, _map.get_crop_fields(), rng, _map.flora.get_mesh)
+	if is_horde():
+		crop.set_store_mode(true)   # the crop health is the barn's corn stock (section 5.4)
 	retreat_zones = _map.get_retreat_zones()
 	t = _lap("crop", t)
 	if not await _next_frame():
@@ -274,6 +317,14 @@ func _assemble() -> void:
 	spawner.setup(self, _boars_root, contract, _map.get_spawn_zones())
 	spawner.boar_died.connect(_on_boar_died)
 	spawner.group_entered.connect(_on_group_entered)
+	if is_horde():
+		# After the controller's boar_died connection (section 5.1, step 5).
+		_director = HordeDirector.new()
+		_director.name = "HordeDirector"
+		add_child(_director)
+		_director.setup(self, spawner, _horde, plan)
+		_director.wave_changed.connect(_on_director_wave_changed)
+		_director.wave_progress.connect(_on_director_wave_progress)
 	if _net_role == Net.Role.HOST:
 		_host_sync = HuntHostSync.new()
 		_host_sync.name = "HuntHostSync"
@@ -292,6 +343,8 @@ func _assemble() -> void:
 	_ready_flag = true
 	if _net_role == Net.Role.OFFLINE:
 		spawner.begin()
+		if _director != null:
+			_director.begin()
 		world_ready.emit()
 		_announce_start()
 	else:
@@ -312,6 +365,8 @@ func _finish_assembly_client() -> void:
 	_replica.hunt_end_received.connect(_on_host_hunt_end)
 	_replica.full_sync_started.connect(_on_full_sync_started)
 	_replica.full_sync_finished.connect(_on_full_sync_finished)
+	if is_horde():
+		_replica.horde_wave_received.connect(_on_horde_wave_received)
 	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
 	GameEvents.hunt_abandon_requested.connect(_on_abandon_requested)
 	GameEvents.item_used.connect(_on_item_used)
@@ -420,6 +475,8 @@ func _begin_net_hunt() -> void:
 	_go_elapsed = _elapsed
 	if _net_role == Net.Role.HOST and spawner != null:
 		spawner.begin()
+		if _director != null:
+			_director.begin()
 	if _player != null and is_instance_valid(_player):
 		_player.set_input_enabled(true)
 	_announce_start()
@@ -467,6 +524,8 @@ func _process(delta: float) -> void:
 		return
 	_track_deaths()
 	if _net_role == Net.Role.CLIENT:
+		if _hw_phase == Ids.HP_INTERMISSION and _hw_countdown > 0.0:
+			_hw_countdown = maxf(_hw_countdown - delta, 0.0)
 		# Only the host decides the end (EV_HUNT_END); a client ends alone only by leaving or losing the host.
 		if _abandon:
 			_finish(HuntResult.Outcome.ABANDONED)
@@ -521,7 +580,17 @@ func _finish(outcome: HuntResult.Outcome) -> void:
 		_result.counts_for_progression = false
 	_result.duration_s = _elapsed
 	_result.contract_bonus = 0
-	if outcome == HuntResult.Outcome.VICTORY:
+	if is_horde():
+		# Horde (docs/horda.md section 5.5): defense bonus on victory, never progression.
+		_result.counts_for_progression = false
+		if _net_role == Net.Role.CLIENT and _hw_count > 0:
+			_result.horde_wave_count = _hw_count
+		if outcome == HuntResult.Outcome.VICTORY:
+			_result.contract_bonus = Profile.horde_bonus(_result.crop_health_pct)
+			_result.horde_waves_cleared = _result.horde_wave_count
+		else:
+			_result.horde_waves_cleared = get_horde_waves_cleared()
+	elif outcome == HuntResult.Outcome.VICTORY:
 		# Full bonus for every hunter in the room at the end, alive or not (section 6.10).
 		_result.contract_bonus = Profile.contract_bonus(_result.map_id, _result.contract_index, _result.crop_health_pct)
 	_result.total_money = _result.money_from_kills + _result.contract_bonus
@@ -592,6 +661,8 @@ func _on_item_used(item_id: StringName, item_position: Vector3) -> void:
 ## Section 8.2 step 5. Order: boar_hit -> boar_state_changed(dead) -> boar_killed -> boar_counts_changed.
 func _on_boar_died(boar: Boar) -> void:
 	_marks.erase(boar.boar_id)
+	if is_horde():
+		_add_carcass(boar)
 	if _over:
 		return
 	_killed += 1
@@ -602,8 +673,11 @@ func _on_boar_died(boar: Boar) -> void:
 	kill.killing_zone = boar.killing_zone
 	kill.one_shot = boar.is_one_shot()
 	kill.clean_kill = _clean_zones.has(String(boar.killing_zone))
-	kill.reward_money = Profile.kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot,
-		_result.map_id, _result.contract_index)
+	if is_horde():
+		kill.reward_money = Profile.horde_kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot)
+	else:
+		kill.reward_money = Profile.kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot,
+			_result.map_id, _result.contract_index)
 	kill.position = boar.global_position
 	kill.time_s = _elapsed
 	kill.killer_slot = boar.killer_slot
@@ -626,6 +700,8 @@ func _credit_kill(kill: KillInfo) -> void:
 ## Client: a boar died on the host (EV_BOAR_DEATH). Same order of signals as the host.
 func _on_replica_kill(kill: KillInfo, killed: int, total: int) -> void:
 	_marks.erase(kill.boar_id)
+	if is_horde() and _replica != null:
+		_add_carcass(_replica.get_puppet(kill.boar_id))
 	if _over:
 		return
 	kill.time_s = _elapsed
@@ -635,6 +711,8 @@ func _on_replica_kill(kill: KillInfo, killed: int, total: int) -> void:
 	_net_total = total
 	GameEvents.boar_killed.emit(kill)
 	GameEvents.boar_counts_changed.emit(killed, total)
+	if is_horde() and _hw_phase == Ids.HP_WAVE:
+		GameEvents.horde_wave_progress.emit(_client_wave_remaining(), _hw_total)
 
 
 ## Team tally per slot (scoreboard). Network only: solo leaves the scoreboard empty.
@@ -697,6 +775,8 @@ func _on_host_hunt_end(outcome: int, crop_pct: float, killed: int, total: int, e
 func _on_group_entered(leader_type: StringName, count: int) -> void:
 	if _over or _elapsed < 1.0:
 		return
+	if is_horde() and leader_type != Ids.ALPHA:
+		return   # D11: the wave banner replaces the herd announcements; only the alpha's stays
 	var text: String = MSG_GROUP
 	if leader_type == Ids.ALPHA:
 		text = MSG_ALPHA
@@ -888,6 +968,163 @@ func _on_dog_mark(boar_id: int, duration_s: float) -> void:
 
 func mark_boar(boar_id: int, duration_s: float) -> void:
 	_marks[boar_id] = _elapsed + duration_s
+
+
+# --- Horde (docs/horda.md section 5) --------------------------------------------------------------
+
+## Every role, end of the props step: the barn is the objective and gets the corn stock visual. False (and the
+## hunt ends ABANDONED) if the map has no such prop.
+func _build_objective() -> bool:
+	var prop_id: StringName = StringName(str(_horde.get("objective_prop_id", "")))
+	var spawn: PropSpawn = _map.find_prop_spawn(prop_id)
+	if spawn == null:
+		push_error("HuntController: horde objective prop '%s' not found in the map" % prop_id)
+		_ready_flag = true
+		_loading.visible = false
+		_finish(HuntResult.Outcome.ABANDONED)
+		return false
+	var at: Vector3 = spawn.global_position
+	at.y = get_height(at.x, at.z)
+	_objective = at
+	var node: Node = AssetLoader.instantiate(ScenePaths.BARN_CORN)
+	_stock_visual = node as CornStockVisualBase
+	if _stock_visual == null:
+		if node != null:
+			push_warning("HuntController: %s is not a CornStockVisualBase; using the fallback" % ScenePaths.BARN_CORN)
+			node.free()
+		_stock_visual = CornStockVisualBase.create_fallback()
+	_stock_visual.setup(_eat_ring_m)
+	_stock_visual.name = "BarnCorn"
+	add_child(_stock_visual)
+	_stock_visual.global_position = _objective
+	_stock_visual.rotation.y = spawn.global_rotation.y
+	_stock_visual.set_stock_pct(100.0)
+	GameEvents.crop_health_changed.connect(_on_stock_changed)
+	GameEvents.crop_under_attack.connect(_on_stock_attack)
+	return true
+
+
+func _on_stock_changed(pct: float) -> void:
+	if is_instance_valid(_stock_visual):
+		_stock_visual.set_stock_pct(pct)
+
+
+func _on_stock_attack(on: bool) -> void:
+	if is_instance_valid(_stock_visual):
+		_stock_visual.set_under_attack(on)
+
+
+## Where boar `boar_id` eats: its own spot (golden angle) on the ring around the barn, inside the map margin.
+func get_horde_eat_point(boar_id: int) -> Vector2:
+	var a: float = float(boar_id) * 2.3999632
+	var p: Vector2 = Vector2(_objective.x, _objective.z) + Vector2(sin(a), -cos(a)) * _eat_ring_m
+	return Steering.clamp_to_rect(p, _map_rect, Boar.MAP_MARGIN_M)
+
+
+## Offline and host: the director's phase changes go to the bus (only emitter) and, on the host, to the clients.
+func _on_director_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float) -> void:
+	if _host_sync != null:
+		_host_sync.queue_horde_wave(wave, wave_count, phase, countdown_s, _director.get_wave_total(), _director.get_killed_before())
+	GameEvents.horde_wave_changed.emit(wave, wave_count, phase, countdown_s)
+
+
+func _on_director_wave_progress(remaining: int, wave_total: int) -> void:
+	GameEvents.horde_wave_progress.emit(remaining, wave_total)
+
+
+## Client: EV_HORDE_WAVE (live or replayed by a full sync). The countdown restarts from the host's value.
+func _on_horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int,
+		killed_before: int) -> void:
+	if _over:
+		return
+	_hw_wave = wave
+	_hw_count = wave_count
+	_hw_phase = phase
+	_hw_countdown = countdown_s if phase == Ids.HP_INTERMISSION else 0.0
+	_hw_total = wave_total
+	_hw_killed_before = killed_before
+	_result.horde_wave_count = wave_count
+	GameEvents.horde_wave_changed.emit(wave, wave_count, phase, _hw_countdown)
+	if phase == Ids.HP_WAVE:
+		GameEvents.horde_wave_progress.emit(_client_wave_remaining(), wave_total)
+
+
+func _client_wave_remaining() -> int:
+	return clampi(_hw_total - (_net_killed - _hw_killed_before), 0, _hw_total)
+
+
+## D7: dead boars (host) or dead puppets (client) past horde.max_carcasses are hidden, oldest first. Nothing is
+## freed, so every id stays valid.
+func _add_carcass(body: Node3D) -> void:
+	if body == null or not is_instance_valid(body) or _carcasses.has(body):
+		return
+	_carcasses.append(body)
+	var hide_at: int = _carcasses.size() - 1 - _max_carcasses
+	if hide_at >= 0 and is_instance_valid(_carcasses[hide_at]):
+		_carcasses[hide_at].visible = false
+
+
+func get_mode() -> StringName:
+	return _request.mode if _request != null else Ids.MODE_CONTRACT
+
+
+func get_objective_position() -> Vector3:
+	return _objective if is_horde() else Vector3.INF
+
+
+func get_horde_wave() -> int:
+	if not is_horde():
+		return 0
+	return _director.get_wave() if _director != null else _hw_wave
+
+
+func get_horde_wave_count() -> int:
+	if not is_horde():
+		return 0
+	return _director.get_wave_count() if _director != null else _hw_count
+
+
+func get_horde_phase() -> StringName:
+	if not is_horde():
+		return &""
+	return _director.get_phase() if _director != null else _hw_phase
+
+
+func get_horde_countdown_s() -> float:
+	if not is_horde():
+		return 0.0
+	if _director != null:
+		return _director.get_countdown_s()
+	return _hw_countdown if _hw_phase == Ids.HP_INTERMISSION else 0.0
+
+
+func get_horde_wave_total() -> int:
+	if not is_horde():
+		return 0
+	return _director.get_wave_total() if _director != null else _hw_total
+
+
+func get_horde_wave_remaining() -> int:
+	if not is_horde():
+		return 0
+	if _director != null:
+		return _director.get_wave_remaining()
+	return _client_wave_remaining() if _hw_phase == Ids.HP_WAVE else 0
+
+
+func get_horde_waves_cleared() -> int:
+	if not is_horde():
+		return 0
+	if _director != null:
+		return _director.get_waves_cleared()
+	if _over and _result != null and _result.outcome == HuntResult.Outcome.VICTORY:
+		return _hw_count
+	return maxi(_hw_wave - 1, 0)
+
+
+func debug_horde_start_next_wave() -> void:
+	if _director != null and _net_role != Net.Role.CLIENT:
+		_director.skip_intermission()
 
 
 # --- HuntWorld -----------------------------------------------------------------------------------
@@ -1236,6 +1473,11 @@ func net_write_full_sync(out: StreamPeerBuffer) -> void:
 		if left_s > 0.0 and b != null and b.is_alive():
 			_host_sync.write_mark_replay(out, id, left_s)
 			records += 1
+	if _director != null and _director.get_wave() >= 1:
+		# Horde (docs/horda.md section 9.3): the wave state as it is now, countdown = time left.
+		_host_sync.write_horde_wave_replay(out, _director.get_wave(), _director.get_wave_count(), _director.get_phase(),
+			_director.get_countdown_s(), _director.get_wave_total(), _director.get_killed_before())
+		records += 1
 	if _over:
 		records += _host_sync.write_hunt_end_replay(out)
 	_host_sync.set_full_sync_count(out, sync_at, records)

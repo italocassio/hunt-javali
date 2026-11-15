@@ -43,6 +43,10 @@ signal net_stall_changed(stalled: bool)
 signal net_reconnect_changed(active: bool)          # Net -> A Hud, A Player, B HuntController
 signal hunter_away_changed(slot: int, away: bool)   # B HuntController -> A Hud
 
+# Horde mode (docs/horda.md section 4). Only emitted when HuntWorld.is_horde().
+signal horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)   # B HuntController -> A Hud
+signal horde_wave_progress(remaining: int, wave_total: int)                                   # B HuntController -> A Hud
+
 # HUD
 signal hud_message_requested(text: String, duration_s: float)
 

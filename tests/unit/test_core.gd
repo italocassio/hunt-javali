@@ -48,6 +48,105 @@ func test_hunt_request_coop_defaults() -> void:
 	eq(HuntRequest.make_debug(&"mato_grosso", 0).player_count, 1, "make_debug e solo")
 
 
+func test_horde_mode_defaults_in_request_and_result() -> void:
+	## docs/horda.md section 4: the contract mode is the default everywhere; nothing horde-related leaks into it.
+	eq(Ids.MODE_CONTRACT, &"contract", "Ids.MODE_CONTRACT")
+	eq(Ids.MODE_HORDE, &"horde", "Ids.MODE_HORDE")
+	eq(Ids.HP_INTERMISSION, &"intermission", "Ids.HP_INTERMISSION")
+	eq(Ids.HP_WAVE, &"wave", "Ids.HP_WAVE")
+	var req: HuntRequest = HuntRequest.new()
+	eq(req.mode, &"contract", "HuntRequest.mode padrao")
+	ok(not req.is_horde(), "HuntRequest padrao nao e horda")
+	var dbg: HuntRequest = HuntRequest.make_debug()
+	eq(dbg.mode, &"contract", "make_debug() sem 3o parametro e contrato")
+	eq(dbg.map_id, &"mato_grosso", "make_debug() mapa padrao")
+	eq(dbg.contract_index, 0, "make_debug() contrato padrao")
+	var dbg2: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 2)
+	eq(dbg2.mode, &"contract", "make_debug(mapa, contrato) continua contrato")
+	eq(dbg2.contract_index, 2, "make_debug(mapa, contrato): indice")
+	var horde: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE)
+	eq(horde.mode, &"horde", "make_debug com MODE_HORDE")
+	ok(horde.is_horde(), "is_horde() verdadeiro")
+	eq(horde.player_count, 1, "horda debug e solo")
+	var res: HuntResult = HuntResult.new()
+	eq(res.mode, &"contract", "HuntResult.mode padrao")
+	ok(not res.is_horde(), "HuntResult padrao nao e horda")
+	eq(res.horde_wave_count, 0, "horde_wave_count padrao 0")
+	eq(res.horde_waves_cleared, 0, "horde_waves_cleared padrao 0")
+	var d: Dictionary = res.to_dict()
+	eq(d["mode"], "contract", "to_dict: mode")
+	eq(d["horde_wave_count"], 0, "to_dict: horde_wave_count")
+	eq(d["horde_waves_cleared"], 0, "to_dict: horde_waves_cleared")
+	res.mode = Ids.MODE_HORDE
+	res.horde_wave_count = 8
+	res.horde_waves_cleared = 5
+	ok(res.is_horde(), "HuntResult horda")
+	var d2: Dictionary = res.to_dict()
+	eq(d2["mode"], "horde", "to_dict horda: mode")
+	eq(d2["horde_wave_count"], 8, "to_dict horda: horde_wave_count")
+	eq(d2["horde_waves_cleared"], 5, "to_dict horda: horde_waves_cleared")
+	ok(JSON.parse_string(JSON.stringify(d2)) is Dictionary, "to_dict de horda serializa em JSON")
+
+
+func test_hunt_world_base_horde_getters_are_contract_defaults() -> void:
+	var w: HuntWorld = HuntWorld.new()
+	track(w)
+	eq(w.get_mode(), &"contract", "get_mode")
+	ok(not w.is_horde(), "is_horde")
+	ok(w.get_objective_position().x == INF and w.get_objective_position().y == INF and w.get_objective_position().z == INF, "get_objective_position = INF")
+	eq(w.get_horde_wave(), 0, "get_horde_wave")
+	eq(w.get_horde_wave_count(), 0, "get_horde_wave_count")
+	eq(w.get_horde_phase(), &"", "get_horde_phase")
+	eq(w.get_horde_countdown_s(), 0.0, "get_horde_countdown_s")
+	eq(w.get_horde_wave_total(), 0, "get_horde_wave_total")
+	eq(w.get_horde_wave_remaining(), 0, "get_horde_wave_remaining")
+	eq(w.get_horde_waves_cleared(), 0, "get_horde_waves_cleared")
+	w.debug_horde_start_next_wave()   # no-op
+	var p: PlayerBase = PlayerBase.new()
+	track(p)
+	eq(p.get_weapon_count(), 0, "PlayerBase.get_weapon_count padrao")
+	ok(not p.has_infinite_reserve(), "PlayerBase.has_infinite_reserve padrao")
+
+
+func test_corn_stock_stage_for() -> void:
+	## docs/horda.md section 11.1: 4 full, 3/2/1 shrinking, 0 empty. Boundaries belong to the lower stage.
+	eq(CornStockVisualBase.stage_for(0.0), 0, "0% = vazio")
+	eq(CornStockVisualBase.stage_for(-5.0), 0, "negativo = vazio")
+	eq(CornStockVisualBase.stage_for(0.1), 1, "0,1% = estagio 1")
+	eq(CornStockVisualBase.stage_for(25.0), 1, "25% = estagio 1")
+	eq(CornStockVisualBase.stage_for(25.1), 2, "25,1% = estagio 2")
+	eq(CornStockVisualBase.stage_for(50.0), 2, "50% = estagio 2")
+	eq(CornStockVisualBase.stage_for(50.1), 3, "50,1% = estagio 3")
+	eq(CornStockVisualBase.stage_for(75.0), 3, "75% = estagio 3")
+	eq(CornStockVisualBase.stage_for(75.1), 4, "75,1% = estagio 4")
+	eq(CornStockVisualBase.stage_for(100.0), 4, "100% = cheio")
+	eq(CornStockVisualBase.stage_for(250.0), 4, "acima de 100% satura")
+	var last: int = 0
+	for pct: int in range(0, 101):
+		var st: int = CornStockVisualBase.stage_for(float(pct))
+		ok(st >= last, "estagio nao decresce com o estoque (%d%%)" % pct)
+		last = st
+
+
+func test_corn_stock_fallback_visual() -> void:
+	var v: CornStockVisualBase = CornStockVisualBase.create_fallback()
+	v.setup(10.0)
+	track(v)
+	eq(v.get_child_count(), CornStockVisualBase.FALLBACK_HEAPS, "6 montes de reserva")
+	for pct: float in [100.0, 60.0, 30.0, 10.0, 0.0, 100.0]:
+		v.set_stock_pct(pct)
+		v.set_under_attack(pct > 50.0)
+		var visible_count: int = 0
+		for c: Node in v.get_children():
+			if (c as MeshInstance3D).visible:
+				visible_count += 1
+		eq(visible_count, 0 if pct <= 0.0 else CornStockVisualBase.FALLBACK_HEAPS, "montes visiveis a %s%%" % pct)
+	# every heap sits on the ring of radius 10 m
+	for c: Node in v.get_children():
+		var p: Vector3 = (c as Node3D).position
+		near(Vector2(p.x, p.z).length(), 10.0, 0.001, "monte no anel de 10 m")
+
+
 func test_hit_info_defaults() -> void:
 	var h: HitInfo = HitInfo.new()
 	eq(h.target_id, -1, "target_id padrao -1")

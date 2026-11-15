@@ -3,7 +3,8 @@ extends RefCounted
 ## Procedural fallback for world ambience, stings and UI sounds (used only when the recorded file is missing,
 ## see Sfx). Loops are built lazily (LAZY_IDS).
 
-const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop"]
+## Synthesized on first use (loops and the horde stings), never at startup.
+const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop", &"horde_wave_start", &"horde_wave_clear"]
 ## Ids written by build().
 const IDS: Array[StringName] = [&"bait_drop", &"victory_sting", &"defeat_sting", &"ui_click", &"ui_buy",
 	&"ui_error", &"ui_coin"]
@@ -23,6 +24,8 @@ static func build_lazy(id: StringName) -> AudioStreamWAV:
 	match id:
 		&"amb_cerrado_loop": return _cerrado()
 		&"amb_wind_loop": return _wind()
+		&"horde_wave_start": return _horde_wave_start()
+		&"horde_wave_clear": return _horde_wave_clear()
 	return null
 
 
@@ -59,6 +62,31 @@ static func _defeat() -> AudioStreamWAV:
 		SynthDsp.tone(b, i * 0.25, 0.7, f, f * 0.97, 0.5, 0.35, SynthDsp.SHAPE_SAW, 0.01)
 	SynthDsp.drive(b, 1.3)
 	return SynthDsp.to_stream(b, 0.55)
+
+
+## Low horn (berrante), ~1.5 s: a short pickup note, then a long one that bends up a little.
+static func _horde_wave_start() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(1.6)
+	var low: float = SynthDsp.note(-26.0)   # ~98 Hz
+	var high: float = SynthDsp.note(-21.0)
+	SynthDsp.tone(b, 0.0, 0.32, low, low * 1.02, 0.6, 0.6, SynthDsp.SHAPE_SAW, 0.05, 0.0, 0.0, 5.5, 0.006)
+	SynthDsp.tone(b, 0.0, 0.32, low * 2.0, low * 2.04, 0.25, 0.4, SynthDsp.SHAPE_TRI, 0.05)
+	SynthDsp.tone(b, 0.38, 1.2, high * 0.96, high, 0.6, 0.9, SynthDsp.SHAPE_SAW, 0.07, 0.0, 0.0, 5.5, 0.008)
+	SynthDsp.tone(b, 0.38, 1.2, high * 1.92, high * 2.0, 0.25, 0.7, SynthDsp.SHAPE_TRI, 0.07)
+	SynthDsp.noise(b, 0.38, 1.0, 0.05, 0.6, 0.15, 0.0, 0.1)
+	SynthDsp.drive(b, 1.4)
+	return SynthDsp.to_stream(b, 0.65)
+
+
+## Relief vinette, ~1 s: soft rising three-note arpeggio, lighter than the victory sting.
+static func _horde_wave_clear() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(1.1)
+	var seq: Array = [-5.0, -1.0, 2.0]
+	for i in 3:
+		var f: float = SynthDsp.note(seq[i])
+		SynthDsp.tone(b, i * 0.16, 0.5, f, f, 0.45, 0.18, SynthDsp.SHAPE_SINE, 0.008)
+	_chord(b, 0.5, [2.0, 7.0, 11.0], 0.55, 0.25, SynthDsp.SHAPE_SINE)
+	return SynthDsp.to_stream(b, 0.5)
 
 
 static func _click() -> AudioStreamWAV:

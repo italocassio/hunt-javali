@@ -69,3 +69,9 @@ const D_DOGO: StringName = &"dogo"
 const Q_LOW: StringName = &"low"
 const Q_MEDIUM: StringName = &"medium"
 const Q_HIGH: StringName = &"high"
+
+# Game modes and horde phases (docs/horda.md section 4)
+const MODE_CONTRACT: StringName = &"contract"
+const MODE_HORDE: StringName = &"horde"
+const HP_INTERMISSION: StringName = &"intermission"
+const HP_WAVE: StringName = &"wave"

@@ -22,6 +22,7 @@ const REMOTE_HUNTER: String = "res://src/player/remote_hunter.tscn"
 const BOAR_VISUAL: String = "res://assets/models/boar/boar_visual.tscn"
 const DOG_VISUAL: String = "res://assets/models/dog/dog_visual.tscn"
 const HUNTER_VISUAL: String = "res://assets/models/hunter/hunter_visual.tscn"
+const BARN_CORN: String = "res://assets/models/props/barn_corn.tscn"   # horde corn stock (CornStockVisualBase)
 const FLORA_LIBRARY: String = "res://assets/models/flora/flora_library.gd"
 const TERRAIN_MATERIAL: String = "res://assets/materials/terrain.tres"
 const WATER_MATERIAL: String = "res://assets/materials/water.tres"

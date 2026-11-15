@@ -601,8 +601,8 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | Registro | Dir. | Pista | Frequência | Corpo | Bytes |
 |---|---|---|---|---|---|
 | `L_READY` | C→H | E | ao mudar | `ready u8, weapon0 u8, weapon1 u8, dog u8, token u32` | 8 |
-| `L_LOBBY` | H→C | E | ao mudar | `state u8, map u8, contract u8, n u8, n×{slot u8, flags u8 (b0 pronto, b1 anfitrião, b2 carregou, b3 rtc), weapon0 u8, dog u8}` | 4+4n |
-| `L_START` | H→C | E | 1× | `map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[4] u8` | 12 |
+| `L_LOBBY` | H→C | E | ao mudar | `state u8, map u8, contract u8, n u8, n×{slot u8, flags u8 (b0 pronto, b1 anfitrião, b2 carregou, b3 rtc), weapon0 u8, dog u8}, mode u8` (0.5.0: `mode` no fim, índice em `NetCodec.MODES`; ausente = contrato) | 5+4n |
+| `L_START` | H→C | E | 1× | `map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[4] u8, mode u8` (0.5.0: `mode` na posição `8 + net.max_players`; ausente = contrato) | 13 |
 | `L_LOADED` | C→H | E | 1× | — | 0 |
 | `L_GO` | H→C | E | 1× | — | 0 |
 | `L_NEED_RELAY` | ambos | E | raro | — | 0 |
@@ -619,10 +619,15 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | `EV_MESSAGE` | H→C | E | raro | `target_slot u8 (255 = todos), msg u8` | 2 |
 | `EV_HUNT_END` | H→C | E | 1× | `outcome u8, crop u16 (×0,01 %), duration_s u16, killed u8, total u8, n u8, n×{slot u8, kills u8, money u32}` | 8+6n |
 | `EV_FULL_SYNC` (F8) | H→C | E | 1× por reentrada | `t_ms u32, crop u16 (×0,01 %), killed u8, total u8, n_records u16`, seguido de `n_records` registros repetidos (§4.7.6) | 10 |
+| `EV_HORDE_WAVE` (0.5.0, `0x2C`) | H→C | E | 2 por onda, só em horda | `wave u8 (1..N), wave_count u8, phase u8 (0 intervalo, 1 onda), countdown u16 (×0,1 s, para cima; 0 na onda), wave_total u8, killed_before u8` (`docs/horda.md` §9.2) | 7 |
 | `C_SHOT` | C→H | E | por disparo | `shot_id u32, weapon u8, origin xz 2×u16, origin_y i16 (cm), n u8, n×{boar u8, zone u8, damage u16 (×0,1), dist u16 (×0,1 m)}` | 12+6n |
 | `C_CHARGE_HIT` | C→H | E | por investida sofrida | `boar u8` | 1 |
 | `C_BAIT` | C→H | E | por ceva | `xz 2×u16` | 4 |
 | `C_DOG_CMD` | C→H | E | por comando | — | 0 |
+
+Horda (0.5.0, `docs/horda.md` §9): `H_SNAPSHOT` não muda (`crop` = estoque do celeiro, `flags b0` = javalis no
+celeiro); `killed`/`total` contam a partida inteira (≤ 255, `NetCodec.MAX_BOARS_PER_HUNT`); não há `EV_CROP_EATEN`.
+`PROTOCOL_VERSION` continua 1 (o servidor não lê registros de jogo; `config/version` 0.5.0 separa as salas).
 
 `msg` de `EV_MESSAGE`: 0 vara entrou, 1 solitário, 2 cachaço (`hunt_controller.gd:13–15`); 3 cão não
 farejou, 4 cão recuou, 5 cão pronto (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`, `NET_MSG_RECOVERED`; texto em
@@ -843,12 +848,14 @@ Repetição (formatos de §4.5, sem mudança), nesta ordem; `n_records` conta to
 | 2 | `EV_CROP_EATEN` | todos os canteiros comidos (`CropManager.get_eaten_indices()`), 255 por registro |
 | 3 | `EV_BAIT` | uma por ceva ativa, com `duration_s = ceil(remaining_s)` (1..255) |
 | 4 | `EV_DOG_MARK` | uma por marcação não vencida: `owner = 255`, `boar`, tempo restante ×0,1 s (1..255) |
+| 4a | `EV_HORDE_WAVE` | só em horda (0.5.0): um, com o estado de onda atual e `countdown` = restante (`docs/horda.md` §9.3) |
 | 5 | `EV_HUNT_END` | só se a caçada já terminou no anfitrião (mesmo conteúdo enviado no fim) |
 
 Javalis vivos (pose e estado), cães, caçadores e saúde da lavoura não entram: vêm no `H_SNAPSHOT` seguinte
 (≤ 100 ms). Placar parcial e dinheiro do próprio cliente se recompõem pela repetição dos `EV_BOAR_DEATH` (cada
 um leva `killer_slot` e `reward`).
 
+Horda (0.5.0): até 255 javalis por partida, diário ≤ ~7,7 kB (≈ 8 quadros), sem canteiros.
 Tamanho: típico (23 javalis, 10 abatidos, 300 canteiros) ≈ 1,1 kB = 1–2 quadros. Pior caso (63 javalis todos
 abatidos = 1,9 kB; 2555 canteiros = 5,2 kB) ≈ 7,2 kB = 7 quadros de ≤ 1100 B = 4 mensagens de relay de
 ≤ 2205 B (< `max_binary_bytes`), dentro de `reliable_window` (64) e do balde do servidor (120).

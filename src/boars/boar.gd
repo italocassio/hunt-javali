@@ -89,8 +89,13 @@ var killing_zone: StringName = &""
 var body_scale: float = 1.0
 ## Slot of the hunter who dealt the last damage (the killer once dead). Solo: 0.
 var killer_slot: int = 0
+## Horde: 0-based wave of the boar's group (set by the spawner). -1 in the contract mode.
+var wave: int = -1
 
 var _world: HuntController = null
+## Horde mode (docs/horda.md section 6): read once in setup. Every horde deviation (H1-H6) is behind it.
+var _horde: bool = false
+var _to_barn_frac: float = 1.0
 var _visual: BoarVisualBase = null
 var _zone_mults: Dictionary = {}
 
@@ -182,6 +187,9 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, p_herd: BoarHer
 	_sprint_threshold_mps = (float(player_def.get("walk_speed_mps", 4.0)) + float(player_def.get("sprint_speed_mps", 6.5))) * 0.5
 	_knockback_mps = float(player_def.get("knockback_mps", 6.0))
 	_perception_timer = fmod(float(boar_id) * 0.37, 1.0) * _perception_interval
+	_horde = _world.is_horde()
+	if _horde:
+		_to_barn_frac = float(Data.get_horde().get("to_barn_speed_frac", 1.0))
 	_build_visual()
 	_build_hit_zones()
 	herd.add(self)
@@ -194,7 +202,10 @@ func start(pos: Vector2, yaw: float) -> void:
 	_up = _world.heightmap.get_normal(pos.x, pos.y)
 	_apply_basis()
 	_voice_time = _world.rng.randf_range(GRUNT_MIN_S, GRUNT_MAX_S)
-	_enter_wander()
+	if _horde:
+		_enter_to_crop()   # H1: straight to the barn, never wanders
+	else:
+		_enter_wander()
 
 
 func is_alive() -> bool:
@@ -564,10 +575,14 @@ func _has_line_of_sight(player: PlayerBase) -> bool:
 func _after_perception() -> void:
 	if _detects:
 		_threat = _target_xz()
-		herd.last_detect_time = _now()
-		if _is_calm():
-			herd.raise_alert(self, _threat)
-			return
+		# H6: in the horde a calm boar only alerts its herd if it would charge that hunter; otherwise it keeps
+		# running to the barn (the detection is ignored).
+		var ignored: bool = _horde and _is_calm() and not _wants_charge(get_xz().distance_to(_threat), false)
+		if not ignored:
+			herd.last_detect_time = _now()
+			if _is_calm():
+				herd.raise_alert(self, _threat)
+				return
 	if state == Ids.BS_WANDER or state == Ids.BS_TO_CROP or (state == Ids.BS_EAT and not _using_bait):
 		if _try_take_bait():
 			_enter_to_bait()
@@ -687,6 +702,10 @@ func _tick_wander(delta: float) -> void:
 
 func _enter_to_crop() -> void:
 	_leave_activity()
+	if _horde:
+		_target = _world.get_horde_eat_point(boar_id)   # H2: its own spot on the eat ring of the barn
+		_set_state(Ids.BS_TO_CROP)
+		return
 	herd.ensure_crop_target(_world.crop.get_rects(), _now(), _world.rng)
 	_target = _spread_point(herd.crop_target, HERD_SPREAD_M, herd.crop_rect)
 	_set_state(Ids.BS_TO_CROP)
@@ -697,7 +716,9 @@ func _tick_to_crop(delta: float) -> void:
 	if dist < ARRIVE_M:
 		_enter_eat()
 		return
-	_steer(Steering.seek(get_xz(), _target), _speed_for(_walk_speed) * Steering.arrive_scale(dist, SLOW_RADIUS_M), delta)
+	# H3: the horde runs to the barn (limping if wounded).
+	var base: float = _run_speed * _to_barn_frac if _horde else _walk_speed
+	_steer(Steering.seek(get_xz(), _target), _speed_for(base) * Steering.arrive_scale(dist, SLOW_RADIUS_M), delta)
 
 
 func _enter_to_bait() -> void:
@@ -741,6 +762,8 @@ func _tick_eat(delta: float) -> void:
 		return
 	if not _eating_here:
 		_set_eating_here(true)
+	if _horde:
+		return   # H4: eats in place at the barn, never shifts
 	if now >= _eat_shift_time:
 		_eat_shift_time = now + _world.rng.randf_range(EAT_SHIFT_MIN_S, EAT_SHIFT_MAX_S)
 		_target = _spread_point(get_xz(), EAT_SHIFT_RADIUS_M, herd.crop_rect)
@@ -819,6 +842,9 @@ func _tick_approach(delta: float) -> void:
 # --- States: flee --------------------------------------------------------------------------------
 
 func _enter_flee() -> void:
+	if _horde:
+		_horde_regroup()
+		return
 	_leave_activity()
 	_release_bait()
 	_approaching = false
@@ -829,6 +855,17 @@ func _enter_flee() -> void:
 		if type_id == Ids.PIGLET or wounded:
 			Sfx.play_3d(&"boar_squeal", global_position, QUIET_DB, _voice_pitch())
 	_state_time = 0.0
+
+
+## H5: nobody flees in the horde. A boar on its way to (or eating at) the barn carries on; any other goes back
+## to the barn, letting go of a bait.
+func _horde_regroup() -> void:
+	_approaching = false
+	_end_encounter()
+	if (state == Ids.BS_TO_CROP or state == Ids.BS_EAT) and not _using_bait:
+		return
+	_release_bait()
+	_enter_to_crop()
 
 
 func _plan_flee() -> void:

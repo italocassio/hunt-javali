@@ -30,6 +30,7 @@ const EV_DOG_CMD: int = 0x28
 const EV_MESSAGE: int = 0x29
 const EV_HUNT_END: int = 0x2A
 const EV_FULL_SYNC: int = 0x2B         # header of a rejoin sync, followed by replayed records (section 4.7.6)
+const EV_HORDE_WAVE: int = 0x2C        # horde wave state (docs/horda.md section 9)
 # Client -> host
 const C_STATE: int = 0x40              # state lane
 const C_SHOT: int = 0x41
@@ -50,6 +51,10 @@ const BOAR_STATES: Array[StringName] = [&"wander", &"to_crop", &"eat", &"to_bait
 	&"scrape", &"charge", &"recover", &"bayed", &"held", &"dead"]
 const DOG_STATES: Array[StringName] = [&"follow", &"seek", &"point", &"bay", &"hold", &"retreat", &"return"]
 const ZONES: Array[StringName] = [&"head", &"vital", &"body", &"rear", &"dog"]
+# Horde (docs/horda.md section 9). Wire index = position in the array; unknown index = contract / intermission.
+const MODES: Array[StringName] = [&"contract", &"horde"]              # mode u8 of L_LOBBY and L_START
+const HORDE_PHASES: Array[StringName] = [&"intermission", &"wave"]    # phase u8 of EV_HORDE_WAVE
+const MAX_BOARS_PER_HUNT: int = 255    # boar ids are u8 on the wire (1..255): total of a whole hunt
 
 
 static func make_shot_id(slot: int, counter: int) -> int:

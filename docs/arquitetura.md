@@ -1,6 +1,7 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.1** · Godot **4.7.2** · GDScript tipado · Renderer **Compatibility** · Web sem threads.
+Versão do contrato: **1.2** (jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`) · Godot **4.7.2** ·
+GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
 estiver errado ou faltando, **faça o mínimo, não invente API, e relate** ao coordenador. Mudanças de
@@ -63,6 +64,15 @@ WebRTC não fechar (NAT de 4G), o par usa o servidor de salas (Cloudflare Worker
 gratuito) como ponte. O solo não muda: sem sala ativa nenhum código de rede executa. Detalhe em
 `docs/multiplayer.md`.
 
+**Horda Javali (0.5.0):** segundo modo, escolhido pelo anfitrião na sala (1 a 4 jogadores; não existe no menu
+solo). Mato Grosso; os caçadores defendem o **celeiro** e o seu estoque de milho (100% → 0%, que ocupa o
+lugar da saúde da lavoura em todo o caminho de dados) contra ondas de javalis definidas em `data/horde.json`,
+a última com cachaço alfa. Os javalis correm direto ao celeiro e não fogem; fêmeas, machos e alfa investem
+pelas regras de hoje. Vitória: todas as ondas abatidas. Derrota: estoque em 0 ou todos os caçadores caídos.
+Todas as armas, reserva de munição infinita, prêmio de abate reduzido, bônus de defesa na vitória, nunca conta
+para a progressão. `HuntRequest.mode` (`&"contract"` | `&"horde"`) liga o modo; com `&"contract"` nenhum código
+de horda executa. Contrato completo: `docs/horda.md`.
+
 ---
 
 ## 2. Árvore de pastas e donos
@@ -91,7 +101,8 @@ hunt-javali/
 ├── CLAUDE.md                     coordenador
 ├── docs/                         game-architect
 │   ├── arquitetura.md
-│   └── multiplayer.md            detalhe do protocolo do modo cooperativo
+│   ├── multiplayer.md            detalhe do protocolo do modo cooperativo
+│   └── horda.md                  contrato do modo Horda Javali (0.5.0)
 ├── server/                       coordenador (servidor de salas; JavaScript, fora do Godot)
 ├── tools/                        coordenador (godot.sh / godot.ps1)
 ├── data/                         game-systems  (seed inicial copiado da §9 pelo coordenador na Fase 0)
@@ -103,7 +114,8 @@ hunt-javali/
 │   ├── maps.json
 │   ├── gold_packages.json
 │   ├── pix_config.json
-│   └── net.json
+│   ├── net.json
+│   └── horde.json                (0.5.0, docs/horda.md §3)
 ├── src/
 │   ├── core/                     coordenador (copiado VERBATIM do Apêndice A; ninguém mais edita)
 │   │   ├── game_events.gd        autoload GameEvents
@@ -124,7 +136,8 @@ hunt-javali/
 │   │   ├── net_codec.gd          class NetCodec
 │   │   ├── net_peer_info.gd      class NetPeerInfo
 │   │   ├── weapon_view_base.gd   class WeaponViewBase
-│   │   └── map_environment_base.gd class MapEnvironmentBase
+│   │   ├── map_environment_base.gd class MapEnvironmentBase
+│   │   └── corn_stock_visual_base.gd class CornStockVisualBase (0.5.0, horda)
 │   ├── input/                    game-developer Pacote A
 │   ├── player/                   game-developer Pacote A
 │   │   └── debug/                (sandbox do pacote A)
@@ -295,7 +308,8 @@ Registradas por **`InputSetup`** (`res://src/input/input_setup.gd`, Pacote A) em
 | `crouch` | Ctrl (esq.), C | — | botão Agachar (alterna) |
 | `weapon_1` | 1 | — | — |
 | `weapon_2` | 2 | — | — |
-| `weapon_swap` | — | — | botão Trocar arma |
+| `weapon_3`, `weapon_4`, `weapon_5` (0.5.0) | 3, 4, 5 | — | — (slot inexistente = nada; na horda há 5 armas, `docs/horda.md` §7) |
+| `weapon_swap` | — | — | botão Trocar arma (cicla todas as armas carregadas) |
 | `dog_command` | E | — | botão Cão |
 | `use_item` | Q | — | botão Item |
 | `item_next` | F | — | seta pequena ao lado do botão Item |
@@ -321,7 +335,7 @@ API de `InputSetup` (sem `class_name`):
 ```gdscript
 const ACTIONS: PackedStringArray = ["move_forward","move_back","move_left","move_right","fire","aim",
 	"zoom_in","zoom_out","reload","sprint","crouch","weapon_1","weapon_2","weapon_swap",
-	"dog_command","use_item","item_next","pause"]
+	"dog_command","use_item","item_next","pause","weapon_3","weapon_4","weapon_5"]
 func register_actions() -> void          # chamado no _ready; idempotente
 func is_touch_mode() -> bool
 func set_touch_override(mode: String) -> void   # "auto" | "on" | "off"; reaplica e emite se mudou
@@ -372,6 +386,13 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 | `hunter_died(slot: int)` | B `HuntController` | A `Hud`, `SpectatorCamera` | qualquer caçador (local ou remoto) morreu |
 | `spectate_changed(slot: int)` | A `Player` | A `Hud` | começou/trocou de alvo como espectador (−1 = deixou) |
 | `net_stall_changed(stalled: bool)` | `Net` | A `Hud` (faixa "Anfitrião sem resposta…") | cliente ficou `net.host_stall_warn_s` sem snapshot / voltou |
+| `net_reconnect_changed(active: bool)` | `Net` | A `Hud`, A `Player`, B `HuntController` | F8: cliente tentando voltar à caçada (`docs/multiplayer.md` §4.7) |
+| `hunter_away_changed(slot: int, away: bool)` | B `HuntController` | A `Hud` | F8: bit `HF_AWAY` de um aliado mudou |
+| `horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)` | B `HuntController` | A `Hud`, tests | só em horda: mudança de fase da onda (`docs/horda.md` §4.1) |
+| `horde_wave_progress(remaining: int, wave_total: int)` | B `HuntController` | A `Hud`, tests | só em horda: início de onda e cada abate dela, depois de `boar_counts_changed` |
+
+Em horda, `crop_health_changed`/`crop_under_attack` carregam o **estoque do celeiro** e `boar_counts_changed` continua
+contando a partida inteira (todas as ondas).
 
 `player_died()` continua significando "o caçador **desta máquina** morreu". Sinais de cão
 (`dog_state_changed`, `dog_health_changed`, `dog_command_executed`) passam a valer só para o cão do jogador
@@ -416,6 +437,7 @@ func get_gold_packages() -> Array[Dictionary]
 func get_gold_package(id: StringName) -> Dictionary
 func get_pix_config() -> Dictionary
 func get_net() -> Dictionary                          # data/net.json inteiro (§9.9)
+func get_horde() -> Dictionary                        # data/horde.json inteiro (§9.10); {} se ausente
 func get_item_def(id: StringName) -> Dictionary       # procura em weapons, equipment e dogs
 func get_item_category(id: StringName) -> StringName  # &"weapon" | &"equipment" | &"dog" | &""
 ```
@@ -462,6 +484,8 @@ func get_stats() -> Dictionary                            # cópia do bloco "sta
 func build_hunt_request(map_id: StringName, contract_index: int) -> HuntRequest   # stub: HuntRequest.make_debug(map_id, contract_index)
 func kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool, map_id: StringName, contract_index: int) -> int   # stub 0
 func contract_bonus(map_id: StringName, contract_index: int, crop_health_pct: float) -> int                                                       # stub 0
+func horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool) -> int   # stub 0; docs/horda.md §10.1
+func horde_bonus(stock_pct: float) -> int                                                                         # stub 0; docs/horda.md §10.1
 func apply_hunt_result(result: HuntResult) -> void        # ÚNICO ponto que credita a caçada; salva
 # doações
 func is_code_redeemed(code: String) -> bool
@@ -473,7 +497,8 @@ func set_setting(key: String, value: Variant) -> void     # valida, emite settin
 `apply_hunt_result`: `money += result.total_money`; subtrai `result.consumables_used` do inventário;
 se `VICTORY` **e `result.counts_for_progression`**: marca o contrato vencido e desbloqueia o próximo
 (`index + 1`, se existir); atualiza stats; `save()`. Chamado só por `Router.finish_hunt`. Settings novo:
-`player_name` (String, §10).
+`player_name` (String, §10). Horda: o `HuntResult` chega com `counts_for_progression = false` e
+`contract_bonus` = bônus de defesa; `apply_hunt_result` não muda.
 
 ### 6.4 Autoload `InputSetup` — `res://src/input/input_setup.gd` — dono: Pacote A
 API em §4. Stub: `register_actions()` vazio, `is_touch_mode()` → `false`.
@@ -520,6 +545,7 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `NetPeerInfo` | `src/core/net_peer_info.gd` | RefCounted | um jogador da sala |
 | `WeaponViewBase` | `src/core/weapon_view_base.gd` | Node3D | API da arma em 1ª pessoa + fallback |
 | `MapEnvironmentBase` | `src/core/map_environment_base.gd` | Node3D | API do ambiente (céu/sol) + fallback |
+| `CornStockVisualBase` | `src/core/corn_stock_visual_base.gd` | Node3D | API do estoque de milho do celeiro (horda, `docs/horda.md` §11.1) + fallback |
 
 ### 6.8 Pacote A — classes públicas (dono: game-developer A)
 
@@ -650,6 +676,8 @@ func join_room(code: String) -> void
 func leave_room() -> void               # idempotente; fecha tudo e volta a OFFLINE
 func set_ready(ready: bool) -> void     # cliente; reenvia o resumo do loadout
 func host_select_contract(map_id: StringName, contract_index: int) -> bool   # só anfitrião, só contrato dele desbloqueado
+func host_select_mode(mode: StringName) -> bool   # 0.5.0: só anfitrião, só em LOBBY; &"contract" | &"horde" (docs/horda.md §9.1)
+func get_selected_mode() -> StringName  # (&"contract") modo da sala; volta a &"contract" ao criar/entrar/sair
 func host_start_hunt() -> bool          # só anfitrião, todos prontos: tranca a sala, envia L_START
 func take_url_room_code() -> String     # lê "?sala=" uma única vez ("" depois ou fora do Web)
 
@@ -666,7 +694,9 @@ parede) o anfitrião monta para cada enlace um quadro de estado (`world.net_writ
 `net_apply_claim` e `get_hunter(slot).net_apply_state`. Registros de caçada recebidos antes de `bind_world`
 ficam em fila e são aplicados em ordem. Formatos de registro: `docs/multiplayer.md` §4. Ao entrar em
 `LOADING`, `Net` completa o `Router.get_pending_request()` com `rng_seed` (= `get_hunt_seed()`),
-`player_count`, `map_id` e `contract_index`.
+`player_count`, `map_id`, `contract_index` e `mode` (= `get_selected_mode()`); em horda, também
+`map_id = Data.get_horde()["map_id"]` e `contract_index = 0`. O modo trafega num byte no fim de `L_LOBBY` e de
+`L_START` (`NetCodec.MODES`); `roster_changed` também avisa mudança de modo.
 
 Classes internas de N (ninguém fora de `src/net` as referencia): `NetSession` (sala, lobby, relógio de ticks,
 despacho), `NetSignaling` (`WebSocketPeer`, JSON de sala/sinalização, quadros de relay), `NetLink` (um par:
@@ -889,6 +919,7 @@ Ids (quem toca entre parênteses):
 | Javali (B) | `boar_grunt`, `boar_squeal`, `boar_snort_alert`, `boar_scrape`, `boar_charge_roar`, `boar_eat`, `boar_death` |
 | Cão (B) | `dog_bark`, `dog_growl`, `dog_yelp`, `dog_whine` |
 | Mundo (B) | `bait_drop`, `amb_cerrado_loop`, `amb_wind_loop`, `victory_sting`, `defeat_sting` |
+| Horda (A, HUD; 0.5.0) | `horde_wave_start`, `horde_wave_clear` (`docs/horda.md` §11.2) |
 | UI (systems) | `ui_click`, `ui_buy`, `ui_error`, `ui_coin` |
 
 Cooperativo: o Pacote A (`RemoteHunter`) passa a usar `play_3d` para os tiros e passos de aliados, com os
@@ -920,7 +951,7 @@ ids de arma e de passo já listados. Nenhum id novo.
   Fallback: tema padrão do Godot (variações inexistentes são ignoradas pelo engine).
 - **Ícones** `res://assets/ui/icons/<id>.svg` (`ScenePaths.icon(id)`), 128×128, SVG escrito à mão. Ids:
   todos os ids de arma, equipamento e cão; `money`, `gold`, `boar`, `crop`, `health`, `ammo`, `lock`,
-  `dog_paw`, `app_icon`; mapas `map_mato_grosso`, `map_pantanal`, `map_campanha_gaucha`,
+  `dog_paw`, `app_icon`, `barn` (0.5.0, horda); mapas `map_mato_grosso`, `map_pantanal`, `map_campanha_gaucha`,
   `map_triangulo_mineiro`; toque `btn_fire`, `btn_aim`, `btn_reload`, `btn_swap`, `btn_dog`, `btn_item`,
   `btn_crouch`, `btn_pause`, `joystick_base`, `joystick_knob`. Fallback: sem ícone (texto) / círculos
   desenhados com `draw_circle`.
@@ -957,6 +988,12 @@ libera após `lifetime * 2`. Máximo 6 simultâneos (o A descarta excedentes). F
 | `get_muzzle()`, `get_name_anchor()` | já na base |
 
 Fallback: `HunterVisualBase.create_fallback()` (cápsula na cor do slot).
+
+### 7.12 Estoque de milho do celeiro (horda) — `res://assets/models/props/barn_corn.tscn` (`ScenePaths.BARN_CORN`)
+Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_corn.gd`), no referencial do prop
+`barn`. API `setup(ring_radius_m)`, `set_stock_pct(pct)`, `set_under_attack(on)`, estágios por
+`CornStockVisualBase.stage_for(pct)`; ≤ 900 tris, ≤ 8 `MeshInstance3D`. Fallback:
+`CornStockVisualBase.create_fallback()`. Contrato completo: `docs/horda.md` §11.1.
 
 ---
 
@@ -1269,6 +1306,10 @@ qualidades gráficas: com `sync_layout = true` o laço sorteia sempre a quantida
 `round(count × density)` de capim/arbusto; o solo chama com `false` (layout de hoje). Lavoura no cliente: o
 `CropManager` é o mesmo, sem comedores; `EV_CROP_EATEN` → `apply_eaten(indices)`; `set_replicated_health(pct)`
 a cada snapshot atualiza a saúde e passa pelo mesmo `crop_health_changed` do solo.
+
+**Horda (0.5.0).** Tudo acima vale; os acréscimos (modo na sala, `EV_HORDE_WAVE`, repetição de onda no
+`EV_FULL_SYNC`, `CropManager` em modo estoque, ondas no `BoarSpawner`, desvios H1–H7 da FSM, carcaças
+escondidas) estão em `docs/horda.md` §5, §6 e §9.
 
 ---
 
@@ -1719,6 +1760,14 @@ WebRTC), `?drop_ice=1` (não envia candidatos: força o estouro de `ice_timeout_
 Dono: game-systems; leitor: `Net` (e `HuntHostSync`/`HuntReplica` para `hit_claim_tolerance_m` e as demoras
 de interpolação). Protocolo e limites do servidor: `docs/multiplayer.md` §4 e §5.
 
+### 9.10 `data/horde.json` (0.5.0)
+Modo Horda Javali: mapa e prop do objetivo, intervalos, dreno do estoque (`barn_drain_mult`, no lugar de
+`contract.crop_drain_mult`), anel de comer, velocidade da corrida ao celeiro, teto de carcaças, multiplicador de
+javalis por jogador, prêmio de abate (`kill_reward_mult`), bônus de vitória e as `waves` (cada uma com `groups`
+no formato de grupo da §9.6). Esquema, regras de validação (inclusive o teto de 255 javalis por partida) e
+seed: `docs/horda.md` §3. Dono: game-systems; leitores: B (`HuntController`, `HordeDirector`, `Boar`), systems
+(`Profile.horde_*`, lobby, resultado), `Net` (`map_id`).
+
 ---
 
 ## 10. Save
@@ -1813,6 +1862,10 @@ vive no `Router.goto` (§6.6) e na configuração `game.music` (§9.1); as telas
 | Entrada | `%NameEdit` (grava `player_name`), `%CreateRoomButton`, `%CodeEdit` (5 caracteres, maiúsculas), `%JoinButton`, `%BackButton` → `MAIN_MENU`; `%StatusLabel` mostra o erro |
 | Conectando | `%StatusLabel`, `%CancelButton` (sempre habilitado) |
 | Sala | `%MessageLabel`, `%RoomCodeLabel`, `%RoomLinkLabel`, `%CopyLinkButton` (Web: copia `Net.get_room_link()` e mostra "Link copiado!" por `Lobby.COPIED_FEEDBACK_S`; fora do Web copia o código), `Slot_N/{Swatch, Info/Name, Info/Detail, Role}` (Detail = arma e "direto"/"via servidor"), `%MapOption` e `Contract_<index>` (só anfitrião; só contratos desbloqueados dele), `%ContractLabel`, `%HintLabel`, `LoadoutPanel` (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`), `%ReadyButton` (cliente), `%StartButton` (anfitrião; habilita só com todos os clientes prontos), `%ShopButton`, `%LeaveButton` |
+
+Horda (0.5.0): `%ModeLabel`, `%ModeContractButton`, `%ModeHordeButton`, `%HordeInfoLabel` e, no `LoadoutPanel`,
+`%WeaponsLockedLabel` + `set_weapons_locked(text)`; resultado de horda com títulos e linhas próprios. Nós,
+regras e textos: `docs/horda.md` §10.2 e §10.3.
 
 `%BackButton` só na tela de entrada. `Lobby` tem `class_name`. O `Net` escolhe o contrato padrão; o lobby só
 chama `Net.host_select_contract` quando o anfitrião escolhe, e `_begin_hunt` usa `Net.get_hunt_seed()`. O
@@ -1965,6 +2018,8 @@ resultado de renderização.
 
 ## 14. Pacotes de trabalho
 
+Modo Horda Javali (0.5.0): pacotes, ordem e critérios de aceite em `docs/horda.md` §14.
+
 ### Fase 0 — coordenador (antes de disparar os agentes)
 1. `project.godot` (§3) e `export_presets.cfg` (§3.2).
 2. `src/core/*.gd` copiados **verbatim** do Apêndice A.
@@ -2086,6 +2141,84 @@ de resultado e é publicável (a entrada do menu é visível para todos desde a 
 ---
 
 ## Apêndice A — `src/core/` (verbatim; coordenador copia, ninguém edita)
+
+### Acréscimos 0.5.0 (Horda Javali) — já aplicados em `src/core/`
+
+Os blocos de arquivo abaixo são a base 1.1; os acréscimos da F8 (`docs/multiplayer.md` §4.7.9) e estes da
+horda já estão nos arquivos reais, que são a referência. Todos aditivos, com padrão seguro para o modo contrato.
+
+```gdscript
+# game_events.gd (depois de hunter_away_changed)
+# Horde mode (docs/horda.md section 4). Only emitted when HuntWorld.is_horde().
+signal horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)   # B HuntController -> A Hud
+signal horde_wave_progress(remaining: int, wave_total: int)                                   # B HuntController -> A Hud
+
+# ids.gd (fim)
+const MODE_CONTRACT: StringName = &"contract"
+const MODE_HORDE: StringName = &"horde"
+const HP_INTERMISSION: StringName = &"intermission"
+const HP_WAVE: StringName = &"wave"
+
+# scene_paths.gd (depois de HUNTER_VISUAL)
+const BARN_CORN: String = "res://assets/models/props/barn_corn.tscn"   # horde corn stock (CornStockVisualBase)
+
+# hunt_request.gd
+var mode: StringName = &"contract"                    # Ids.MODE_CONTRACT | Ids.MODE_HORDE (docs/horda.md)
+static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0, p_mode: StringName = &"contract") -> HuntRequest   # + r.mode = p_mode
+func is_horde() -> bool:
+	return mode == Ids.MODE_HORDE
+
+# hunt_result.gd (crop_health_pct = estoque e contract_bonus = bônus de defesa na horda)
+var mode: StringName = &"contract"
+var horde_wave_count: int = 0
+var horde_waves_cleared: int = 0
+func is_horde() -> bool:
+	return mode == Ids.MODE_HORDE
+# to_dict() ganha "mode": String(mode), "horde_wave_count", "horde_waves_cleared"
+
+# player_base.gd (depois de is_reloading)
+func get_weapon_count() -> int:           # weapons carried (horde: every weapon of data/weapons.json)
+	return 0
+func has_infinite_reserve() -> bool:      # horde: reloading never spends the reserve (docs/horda.md section 7)
+	return false
+
+# hunt_world.gd (depois de get_result; padrões = modo contrato)
+func get_mode() -> StringName:                 # Ids.MODE_CONTRACT | Ids.MODE_HORDE
+	return &"contract"
+func is_horde() -> bool:
+	return get_mode() == Ids.MODE_HORDE
+func get_objective_position() -> Vector3:      # horde: barn origin on the ground; Vector3.INF = no objective
+	return Vector3.INF
+func get_horde_wave() -> int:                  # 1-based wave being fought or announced; 0 = not horde
+	return 0
+func get_horde_wave_count() -> int:
+	return 0
+func get_horde_phase() -> StringName:          # Ids.HP_INTERMISSION | Ids.HP_WAVE; &"" = not horde
+	return &""
+func get_horde_countdown_s() -> float:
+	return 0.0
+func get_horde_wave_total() -> int:
+	return 0
+func get_horde_wave_remaining() -> int:
+	return 0
+func get_horde_waves_cleared() -> int:
+	return 0
+# (debug, depois de debug_force_end)
+func debug_horde_start_next_wave() -> void:    # horde: ends the current intermission now; no-op otherwise / on a client
+	pass
+
+# net_codec.gd
+const EV_HORDE_WAVE: int = 0x2C        # horde wave state (docs/horda.md section 9)
+const MODES: Array[StringName] = [&"contract", &"horde"]              # mode u8 of L_LOBBY and L_START
+const HORDE_PHASES: Array[StringName] = [&"intermission", &"wave"]    # phase u8 of EV_HORDE_WAVE
+const MAX_BOARS_PER_HUNT: int = 255    # boar ids are u8 on the wire (1..255): total of a whole hunt
+```
+
+`src/core/corn_stock_visual_base.gd` (novo, `class_name CornStockVisualBase extends Node3D`): constantes
+`STAGE_COUNT = 5`, `static func stage_for(pct: float) -> int` (0 se `pct <= 0`, senão `clampi(ceili(pct / 25), 1, 4)`),
+`setup(ring_radius_m: float)`, `set_stock_pct(pct: float)`, `set_under_attack(on: bool)` e
+`static func create_fallback() -> CornStockVisualBase` (6 cones amarelos no anel que encolhem por estágio). O
+arquivo é a referência verbatim.
 
 ### `src/core/game_events.gd`
 ```gdscript

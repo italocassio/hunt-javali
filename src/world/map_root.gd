@@ -91,6 +91,18 @@ func get_retreat_zones() -> PackedVector2Array:
 	return _marker_xz(^"RetreatZones")
 
 
+## First PropSpawn with that prop id (null if none). Horde: the barn is the objective (docs/horda.md section 5.1).
+func find_prop_spawn(prop_id: StringName) -> PropSpawn:
+	var holder: Node = get_node_or_null(^"PropSpawns")
+	if holder == null:
+		return null
+	for c: Node in holder.get_children():
+		var p: PropSpawn = c as PropSpawn
+		if p != null and p.prop_id == prop_id:
+			return p
+	return null
+
+
 func get_static_shapes_used() -> int:
 	return _shapes_used
 

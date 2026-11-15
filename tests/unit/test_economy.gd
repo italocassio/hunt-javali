@@ -349,6 +349,78 @@ func test_profile_kill_reward_unknown_type() -> void:
 	eq(Profile.contract_bonus(&"mato_grosso", 0, 100.0), int(Data.get_contract(&"mato_grosso", 0)["bonus_money"]), "bonus pelo Profile")
 
 
+# --- economy of the mode (docs/horda.md 3.2 and 10.1) ---
+
+func test_horde_economy_vectors() -> void:
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true), 217, "macho 132 kg, vital, um tiro = R$ 217")
+	eq(Profile.horde_bonus(87.0), 2610, "bonus com 87% de estoque = R$ 2610")
+	eq(Profile.horde_bonus(100.0), int(Data.get_horde()["victory_bonus_money"]), "100% = bonus cheio")
+	eq(Profile.horde_bonus(0.0), 0, "0% = nada")
+	eq(Profile.horde_bonus(-5.0), 0, "negativo = nada")
+	eq(Profile.horde_bonus(300.0), int(Data.get_horde()["victory_bonus_money"]), "satura em 100%")
+	eq(Profile.horde_kill_reward(&"nao_existe", 100.0, &"vital", true), 0, "tipo desconhecido = 0")
+	eq(Profile.horde_kill_reward(&"boar", 0.0, &"vital", true), 0, "peso 0 = 0")
+	ok(Profile.horde_kill_reward(&"boar", -40.0, &"vital", true) >= 0, "peso negativo nunca paga negativo")
+
+
+func test_horde_kill_reward_is_a_fraction_of_the_contract_reward() -> void:
+	## Contract-0 reward uses reward_mult; the horde multiplies by kill_reward_mult < 1: never pays more than a
+	## contract kill at reward_mult 1 and scales like the same formula.
+	var mult: float = float(Data.get_horde()["kill_reward_mult"])
+	var boar: Dictionary = Data.get_boar_type(Ids.BOAR)
+	var rules: Dictionary = Data.get_boar_rules()
+	var full: int = RewardCalculator.kill_reward(boar, rules, 132.0, Ids.ZONE_VITAL, true, {"reward_mult": 1.0})
+	var horde: int = Profile.horde_kill_reward(Ids.BOAR, 132.0, Ids.ZONE_VITAL, true)
+	eq(horde, int(roundf(float(full) * mult)), "horda = formula x kill_reward_mult")
+	ok(horde < full, "abate de horda paga menos que o de contrato")
+	var body: int = Profile.horde_kill_reward(Ids.BOAR, 132.0, Ids.ZONE_BODY, false)
+	ok(body < horde, "tiro no corpo paga menos que tiro limpo de um tiro")
+	for type_id: StringName in Data.get_boar_type_ids():
+		var w: float = float(Data.get_boar_type(type_id)["weight_max_kg"])
+		ok(Profile.horde_kill_reward(type_id, w, Ids.ZONE_VITAL, true) > 0, "%s paga algo na horda" % type_id)
+
+
+func test_horde_victory_credits_once_and_never_progresses() -> void:
+	fresh_profile()
+	var before_unlocked: int = Profile.get_unlocked_contract_count(&"mato_grosso")
+	var r: HuntResult = HuntResult.new()
+	r.outcome = HuntResult.Outcome.VICTORY
+	r.mode = Ids.MODE_HORDE
+	r.map_id = &"mato_grosso"
+	r.contract_index = 0
+	r.counts_for_progression = false
+	r.horde_wave_count = 8
+	r.horde_waves_cleared = 8
+	r.money_from_kills = 1500
+	r.contract_bonus = Profile.horde_bonus(87.0)
+	r.total_money = r.money_from_kills + r.contract_bonus
+	r.crop_health_pct = 87.0
+	var k: KillInfo = KillInfo.new()
+	k.weight_kg = 120.0
+	r.kills.append(k)
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 1500 + 2610, "credita abates + bonus de defesa")
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 1500 + 2610, "o mesmo resultado nao paga duas vezes")
+	eq(Profile.get_unlocked_contract_count(&"mato_grosso"), before_unlocked, "horda nao libera contratos")
+	ok(not Profile.is_contract_completed(&"mato_grosso", 0), "horda nao conclui o contrato 0")
+	eq(Profile.get_best_crop_pct(&"mato_grosso", 0), -1.0, "horda nao grava recorde de lavoura")
+	eq(int(Profile.get_stats()["hunts_won"]), 1, "D10: vitoria em horda conta em hunts_won")
+	eq(int(Profile.get_stats()["hunts_played"]), 1, "hunts_played")
+	# a defeat pays only the kills and counts as played, not won
+	var d: HuntResult = HuntResult.new()
+	d.outcome = HuntResult.Outcome.DEFEAT_CROP
+	d.mode = Ids.MODE_HORDE
+	d.counts_for_progression = false
+	d.total_money = 90
+	var money1: int = Profile.get_money()
+	Profile.apply_hunt_result(d)
+	eq(Profile.get_money(), money1 + 90, "derrota paga so os abates")
+	eq(int(Profile.get_stats()["hunts_won"]), 1, "derrota nao conta vitoria")
+	eq(int(Profile.get_stats()["hunts_played"]), 2, "derrota conta como jogada")
+
+
 # --- Network hunts: counts_for_progression and DISCONNECTED (docs/multiplayer.md sections 3.7 and 6.7) ---
 # All of these use the temporary save of fresh_profile(), never user://save.json.
 

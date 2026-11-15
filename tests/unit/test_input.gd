@@ -40,6 +40,47 @@ func test_all_actions_registered() -> void:
 	ok(InputMap.action_get_events("pause").size() >= 2, "pause: Esc e P")
 
 
+func test_weapon_slot_keys_1_to_5() -> void:
+	## docs/horda.md D9: the keys 3, 4 and 5 pick weapons 3-5 (horde); in the contract the slot does not exist.
+	var want: Dictionary = {"weapon_1": KEY_1, "weapon_2": KEY_2, "weapon_3": KEY_3, "weapon_4": KEY_4, "weapon_5": KEY_5}
+	for action_name: String in want:
+		ok(InputMap.has_action(action_name), "acao %s registrada" % action_name)
+		ok(InputSetup.ACTIONS.has(action_name), "%s em InputSetup.ACTIONS" % action_name)
+		var keys: Array[int] = []
+		for ev: InputEvent in InputMap.action_get_events(action_name):
+			if ev is InputEventKey:
+				keys.append(int((ev as InputEventKey).physical_keycode))
+		eq(keys, [int(want[action_name])] as Array[int], "%s: so a tecla %s" % [action_name, OS.get_keycode_string(int(want[action_name]))])
+	var seen: Dictionary = {}
+	for action_name: String in InputSetup.ACTIONS:
+		ok(not seen.has(action_name), "%s nao repetida em ACTIONS" % action_name)
+		seen[action_name] = true
+	# order: weapon_3..5 come right after weapon_2 and before weapon_swap (docs/horda.md section 7)
+	var acts: PackedStringArray = InputSetup.ACTIONS
+	var i2: int = acts.find("weapon_2")
+	eq(acts[i2 + 1], "weapon_3", "weapon_3 depois de weapon_2")
+	eq(acts[i2 + 2], "weapon_4", "weapon_4 depois de weapon_3")
+	eq(acts[i2 + 3], "weapon_5", "weapon_5 depois de weapon_4")
+	eq(acts[i2 + 4], "weapon_swap", "weapon_swap logo depois")
+	# a key press drives the action
+	_begin_input_test("off")
+	for action_name: String in ["weapon_3", "weapon_4", "weapon_5"]:
+		var ev: InputEventKey = InputEventKey.new()
+		ev.physical_keycode = want[action_name] as Key
+		ev.pressed = true
+		Input.parse_input_event(ev)
+		await frames(2)
+		ok(Input.is_action_pressed(action_name), "tecla aperta aperta %s" % action_name)
+		ev = ev.duplicate() as InputEventKey
+		ev.pressed = false
+		Input.parse_input_event(ev)
+		await frames(2)
+		ok(not Input.is_action_pressed(action_name), "soltar a tecla solta %s" % action_name)
+	_end_input_test()
+	for action_name: String in ["weapon_3", "weapon_4", "weapon_5"]:
+		ok(not Input.is_action_pressed(action_name), "%s solta apos release_all_actions" % action_name)
+
+
 func test_real_mouse_fires_in_mouse_mode() -> void:
 	_begin_input_test("off")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))

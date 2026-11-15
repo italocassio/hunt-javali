@@ -20,6 +20,8 @@ signal hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int,
 signal full_sync_started(crop_pct: float)
 ## Rejoin, step 4: the last replayed record went through. killed/total are the ones of the sync header.
 signal full_sync_finished(killed: int, total: int)
+## Horde (docs/horda.md section 9.2): the host's wave state changed (or was replayed by a full sync).
+signal horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int)
 
 const SPAWN_BYTES: int = 9
 const HIT_BYTES: int = 8
@@ -47,6 +49,8 @@ const HUNT_END_ENTRY_BYTES: int = 6
 const FULL_SYNC_BYTES: int = 10          # t_ms u32, crop u16, killed u8, total u8, n_records u16
 const CROP_WIRE_SCALE: float = 100.0     # crop u16 in 0.01 %
 const PATCH_BYTES: int = 2
+const HORDE_WAVE_BYTES: int = 7          # EV_HORDE_WAVE body
+const COUNTDOWN_WIRE_SCALE: float = 10.0 # EV_HORDE_WAVE countdown u16 in 0.1 s
 const SNAP_FLAG_CROP_ATTACK: int = 1     # H_SNAPSHOT flags b0
 const DEFAULT_INTERP_DELAY_MS: float = 200.0
 const DEFAULT_THERMAL_RANGE_M: float = 150.0
@@ -361,6 +365,23 @@ func _apply_record(type: int, inp: StreamPeerBuffer, length: int) -> void:
 		NetCodec.EV_HUNT_END:
 			if length >= HUNT_END_HEADER_BYTES:
 				_on_hunt_end(inp, length)
+		NetCodec.EV_HORDE_WAVE:
+			if length >= HORDE_WAVE_BYTES:
+				_on_horde_wave(inp)
+
+
+## EV_HORDE_WAVE: wave u8, wave_count u8, phase u8, countdown u16 (x0.1 s), wave_total u8, killed_before u8.
+## A phase index outside NetCodec.HORDE_PHASES is ignored.
+func _on_horde_wave(inp: StreamPeerBuffer) -> void:
+	var wave: int = inp.get_u8()
+	var wave_count: int = inp.get_u8()
+	var phase_index: int = inp.get_u8()
+	var countdown_s: float = float(inp.get_u16()) / COUNTDOWN_WIRE_SCALE
+	var wave_total: int = inp.get_u8()
+	var killed_before: int = inp.get_u8()
+	if phase_index >= NetCodec.HORDE_PHASES.size():
+		return
+	horde_wave_received.emit(wave, wave_count, NetCodec.HORDE_PHASES[phase_index], countdown_s, wave_total, killed_before)
 
 
 ## H_SNAPSHOT header, crop part: health (x0.01 %) and flags b0 (boars at the crop) into the crop mirror.

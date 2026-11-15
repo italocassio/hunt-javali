@@ -25,6 +25,10 @@ extends Node
 ##                + 2 s; at a conference point both have the same live boars, eaten patches and partial
 ##                scoreboard; the host heard hunter_away_changed(1, true) and (1, false) and never hunter_left(1).
 ##                Then the bots finish as in "victory", with the same checks.
+##   horde        docs/horda.md section 14: the host picks Net.host_select_mode(&"horde") in the lobby; the client bot
+##                shoots HORDE_CLIENT_KILLS boar replicas of the first wave, then the host starts every wave at once and
+##                kills the rest (debug) -> VICTORY on both, result.mode == &"horde" on both, kills add up to the
+##                planned total, same waves cleared, same defense bonus, no progression.
 ##
 ## Run (from the project root; Bun on PATH, in BUN or ~/.bun/bin, or -- --bun=<path>):
 ##   tools/godot.sh --headless --path . res://src/hunt/debug/net_hunt_e2e.tscn [-- --scenario=all]
@@ -36,7 +40,7 @@ const CODE_ARG: String = "--hunt-code="
 const SCENARIO_ARG: String = "--scenario="
 const BUN_ARG: String = "--bun="
 const SERVER_ARG: String = "--server="   # read by the autoload Net in the children
-const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop", "dogs", "rejoin"]
+const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop", "dogs", "rejoin", "horde"]
 
 const HOST_ADDR: String = "127.0.0.1"
 const PORT_MIN: int = 20000
@@ -86,6 +90,8 @@ const REJOIN_START_MS: int = 3000
 const REJOIN_PEER_WAIT_MS: int = 40000
 const CONF_STEP_MS: int = 200
 const CONF_MS: int = 20000
+const HORDE_CLIENT_KILLS: int = 2
+const HORDE_HOST_S: float = 240.0
 
 # Bot (same idea as tests/bot/hunt_bot.gd, kept here so package B owns its scenario).
 const STAND_M: float = 14.0
@@ -247,6 +253,8 @@ func _run_scenario(url: String) -> void:
 					_check_crop()
 				"death":
 					_check_death()
+				"horde":
+					_check_horde()
 
 
 func _end_scenario() -> void:
@@ -389,6 +397,41 @@ func _check_rejoin() -> void:
 		"[rejoin] anfitrião nunca ouviu hunter_left(1) %s, 2 caçadores no fim (%s)" % [str(host.get("left")), str(host.get("hunters_at_end"))])
 	_ok(not _has_int(host.get("died", []), CLIENT_SLOT) and not _has_int(client.get("died", []), CLIENT_SLOT),
 		"[rejoin] cliente não morreu durante a queda")
+
+
+func _check_horde() -> void:
+	var pair: Array[Dictionary] = _both()
+	var host: Dictionary = pair[0]
+	var client: Dictionary = pair[1]
+	if host.is_empty() or client.is_empty():
+		return
+	var horde: Dictionary = Data.get_horde()
+	var planned: int = 0
+	for wave_groups: Variant in HordeDirector.plan_waves(horde, 2):
+		for g: Variant in wave_groups:
+			planned += ((g as Dictionary)["members"] as Array).size()
+	var n: int = (horde.get("waves", []) as Array).size()
+	var total: int = int(host.get("total", -1))
+	var host_ids: Array = host.get("credited", [])
+	var client_ids: Array = client.get("credited", [])
+	_ok(_outcome(host) == HuntResult.Outcome.VICTORY and _outcome(client) == HuntResult.Outcome.VICTORY,
+		"[horde] VICTORY nos dois (anfitrião %s, cliente %s)" % [str(host.get("outcome")), str(client.get("outcome"))])
+	_ok(str(host.get("mode", "")) == "horde" and str(client.get("mode", "")) == "horde",
+		"[horde] result.mode horde nos dois (%s / %s)" % [str(host.get("mode")), str(client.get("mode"))])
+	_ok(total == planned and int(client.get("boars_total", -1)) == planned, "[horde] total planejado para 2 jogadores (%d, cliente %s, plano %d)"
+		% [total, str(client.get("boars_total")), planned])
+	_ok(host_ids.size() + client_ids.size() == total and client_ids.size() >= HORDE_CLIENT_KILLS,
+		"[horde] soma dos abates = total (%d + %d = %d)" % [host_ids.size(), client_ids.size(), total])
+	for r: Dictionary in [host, client]:
+		var who: String = str(r.get("role"))
+		_ok(int(r.get("horde_waves_cleared", -1)) == n and int(r.get("horde_wave_count", -2)) == n,
+			"[horde] %s: ondas vencidas %s de %s" % [who, str(r.get("horde_waves_cleared")), str(r.get("horde_wave_count"))])
+		_ok(not bool(r.get("counts_for_progression", true)), "[horde] %s: não conta progresso" % who)
+		_ok(int(r.get("contract_bonus", -1)) == Profile.horde_bonus(float(r.get("crop", -1.0))) and int(r.get("contract_bonus", 0)) > 0,
+			"[horde] %s: bônus de defesa %s" % [who, str(r.get("contract_bonus"))])
+		_ok(int(r.get("money_delta", -1)) == int(r.get("total_money", -2)), "[horde] %s: Router.finish_hunt creditou %s (resultado %s)"
+			% [who, str(r.get("money_delta")), str(r.get("total_money"))])
+	_ok(_boards_equal(host.get("scoreboard", []), client.get("scoreboard", [])), "[horde] placar igual nos dois")
 
 
 func _check_crop() -> void:
@@ -645,6 +688,9 @@ func _run_peer() -> void:
 		if not await _until(func() -> bool: return Net.get_room_state() == Net.RoomState.LOBBY, 15000, "room created"):
 			return
 		Net.host_select_contract(MAP_ID, CONTRACT)
+		if _scenario == "horde" and not Net.host_select_mode(Ids.MODE_HORDE):
+			_peer_finish("host_select_mode(horde) refused")
+			return
 		_write("code", Net.get_room_code())
 		var started: bool = await _until(func() -> bool:
 			return Net.get_player_count() == 2 and Net.host_start_hunt(), 60000, "host_start_hunt")
@@ -697,6 +743,13 @@ func _run_peer() -> void:
 				await _client_dogs(world)
 			else:
 				await _host_dogs(world)
+		"horde":
+			if not world.is_horde():
+				_peer_finish("the hunt is not a horde (mode %s)" % world.get_mode())
+			elif client:
+				await _client_horde(world)
+			else:
+				await _host_horde(world)
 		_:
 			_peer_finish("unknown scenario " + _scenario)
 
@@ -763,6 +816,49 @@ func _host_victory(world: HuntController) -> void:
 	await _stay_for_client()
 	_result["ok"] = _outcome(_result) == HuntResult.Outcome.VICTORY
 	_peer_finish("" if bool(_result["ok"]) else "host did not win")
+
+
+# --- Horde scenario (peer side) ---
+
+## Client: shoots replicas of the first wave until HORDE_CLIENT_KILLS are its own, then waits for the end.
+func _client_horde(world: HuntController) -> void:
+	var player: PlayerBase = world.get_player()
+	await _kill_until(world, player, func() -> bool: return _credited(world).size() >= HORDE_CLIENT_KILLS, CLIENT_KILL_S)
+	if not is_instance_valid(world) or _done:
+		return
+	_park(world, player)
+	_write("client_done", str(_credited(world).size()))
+	_log("client kills %d, waiting for the end of the horde" % _credited(world).size())
+	if not await _until(func() -> bool: return world.is_hunt_over(), int(HORDE_HOST_S * 1000.0) + 30000, "end of horde (EV_HUNT_END)"):
+		return
+	_capture(world)
+	await _after_route()
+	_result["ok"] = (_result["credited"] as Array).size() >= HORDE_CLIENT_KILLS and _outcome(_result) == HuntResult.Outcome.VICTORY
+	_peer_finish("" if bool(_result["ok"]) else "horde not won here (%d kills)" % (_result["credited"] as Array).size())
+
+
+## Host: never waits for an intermission; once the client has its kills, every boar dies as it is born.
+func _host_horde(world: HuntController) -> void:
+	var player: PlayerBase = world.get_player()
+	_park(world, player)
+	var limit: int = Time.get_ticks_msec() + int((CLIENT_KILL_S + HORDE_HOST_S) * 1000.0)
+	while is_instance_valid(world) and not world.is_hunt_over() and not _done and Time.get_ticks_msec() < limit:
+		if world.get_horde_phase() == Ids.HP_INTERMISSION:
+			world.debug_horde_start_next_wave()
+		if _has_file("client_done"):
+			for id: int in world.get_alive_boar_ids().duplicate():
+				world.debug_kill_boar(id)
+		await get_tree().process_frame
+	if not is_instance_valid(world) or _done:
+		return
+	if not world.is_hunt_over():
+		_peer_finish("host did not finish the horde (wave %d/%d)" % [world.get_horde_wave(), world.get_horde_wave_count()])
+		return
+	_capture(world)
+	await _after_route()
+	await _stay_for_client()
+	_result["ok"] = _outcome(_result) == HuntResult.Outcome.VICTORY
+	_peer_finish("" if bool(_result["ok"]) else "host did not win the horde")
 
 
 # --- Rejoin scenario (peer side) ---
@@ -1132,6 +1228,9 @@ func _capture(world: HuntController) -> void:
 	_result["reconnects"] = _reconnects
 	_result["eaten_n"] = eaten.size()
 	_result["eaten_hash"] = hash(var_to_bytes(eaten))
+	_result["mode"] = String(res.mode)
+	_result["horde_wave_count"] = res.horde_wave_count
+	_result["horde_waves_cleared"] = res.horde_waves_cleared
 	_log("over: outcome %d kills %d money %d bonus %d eaten %d" % [res.outcome, ids.size(), res.money_from_kills,
 		res.contract_bonus, eaten.size()])
 

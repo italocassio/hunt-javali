@@ -26,6 +26,8 @@ var _step_pct: float = DEFAULT_SIGNAL_STEP_PCT
 var _frozen: bool = false
 var _zero_sent: bool = false
 var _under_attack: bool = false
+## Horde (docs/horda.md section 5.4): the health is the barn's corn stock; it drains, no patch is ever eaten.
+var _store_mode: bool = false
 
 var _rects: Array[Rect2] = []
 var _fields: Array[Dictionary] = []   # {rect, cols, rows, first}
@@ -86,6 +88,15 @@ func is_frozen() -> bool:
 	return _frozen
 
 
+## Horde: call before any eater registers. The fields stay as scenery; patch_eaten is never emitted.
+func set_store_mode(on: bool) -> void:
+	_store_mode = on
+
+
+func is_store_mode() -> bool:
+	return _store_mode
+
+
 ## Stops the drain (hunt over). Eaters are kept so the picture stays as it was.
 func freeze() -> void:
 	_frozen = true
@@ -109,7 +120,7 @@ func unregister_eater(boar_id: int) -> void:
 func set_health(pct: float) -> void:
 	_health_pct = clampf(pct, 0.0, 100.0)
 	var target_eaten: int = int(round((100.0 - _health_pct) / 100.0 * float(_patch_total)))
-	var guard: int = _patch_total * 2
+	var guard: int = 0 if _store_mode else _patch_total * 2
 	while _eaten_count < target_eaten and guard > 0:
 		guard -= 1
 		var p: int = _rng.randi_range(0, maxi(_patch_total - 1, 0))
@@ -158,6 +169,8 @@ func _process(delta: float) -> void:
 	for id: int in _eater_drain.keys():
 		var amount: float = float(_eater_drain[id]) * delta
 		_health_pct = maxf(_health_pct - amount, 0.0)
+		if _store_mode:
+			continue
 		var acc: float = float(_eater_accum.get(id, 0.0)) + amount
 		while acc >= quantum:
 			acc -= quantum

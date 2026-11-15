@@ -15,6 +15,7 @@ const PEER_LEFT_WAIT_MS: int = 10000
 const START_RETRY_MS: int = 250
 const HARD_LIMIT_MS: int = 110000       # this process never outlives the orchestrator's own deadline
 const MOVE_ACTION: StringName = &"move_forward"
+const LEAVE_FLUSH_S: float = 0.3         # time for the "leave" and the close handshake to reach the room server
 
 var role: String = ""
 var dir: String = ""
@@ -201,9 +202,13 @@ func _finish(error: String) -> void:
 		_log("FAIL " + error)
 	_write("result_%s.json" % role, JSON.stringify(_result, "  "))
 	_log("done ok=%s" % str(_result["ok"]))
-	if role == "host" and not host_drops:
+	if not host_drops:
+		# Both sides leave on purpose. Since F8 a client whose socket just drops is kept for
+		# net.peer_timeout_s (it may come back, docs/multiplayer.md section 4.7); only an explicit leave
+		# removes it at once, and that is what the host of this scenario waits for.
 		Net.leave_room()
-	# The leaving side just quits, socket open: the other one must see it drop in the middle of the hunt.
+		await get_tree().create_timer(LEAVE_FLUSH_S).timeout   # Net keeps polling the socket until the leave is out
+	# --host-drops: the host just quits, socket open: the client must see it drop in the middle of the hunt.
 	get_tree().quit(0 if bool(_result["ok"]) else 1)
 
 

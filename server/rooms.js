@@ -2,8 +2,10 @@
 // Every call receives the list of live connections of the room (docs/multiplayer.md section 5.1).
 //
 // peer = { meta, vol, send(data), close(code, reason), setMeta(meta) }
-//   meta (survives hibernation): { id, host, name, v, proto, code, locked, born, left }
-//        locked and born only matter on the host; left = "peer_left/host_left already handled".
+//   meta (survives hibernation): { id, host, name, v, proto, code, locked, born, left, tokens, ep }
+//        locked, born and tokens only matter on the host; left = "peer_left/host_left already handled".
+//        tokens: { "<id>": u32 } who may re-enter the locked room (set by the host's lock message).
+//        ep: link epoch of a client connection (0 = normal entry, 1..15 = re-entry).
 //   vol  (volatile): { tokens, last }  rate bucket
 // Conventions: `peers` may or may not contain the peer being handled; peers are matched by meta.id.
 // `now` is in milliseconds. welcome() expects `peers` to already contain the new peer.
@@ -37,6 +39,30 @@ function toInt(text) {
   return parseInt(text, 10);
 }
 
+const U32_MAX = 4294967295;
+
+// Decimal u32 (up to 10 digits; toInt stops at 9). null when it is not one.
+function toU32(text) {
+  if (text === null || text === undefined || !/^\d{1,10}$/.test(text)) return null;
+  const n = parseInt(text, 10);
+  return n <= U32_MAX ? n : null;
+}
+
+// lock.tokens: object with keys "2".."max" and integer values 1..u32. -> clean copy | null
+function cleanTokens(raw, maxPeers) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {};
+  for (const key of Object.keys(raw)) {
+    if (!/^\d$/.test(key)) return null;
+    const id = parseInt(key, 10);
+    if (id < 2 || id > maxPeers) return null;
+    const tok = raw[key];
+    if (!Number.isInteger(tok) || tok < 1 || tok > U32_MAX) return null;
+    out[key] = tok;
+  }
+  return out;
+}
+
 function cleanName(name, maxChars) {
   const clean = String(name || "").replace(CONTROL_CHARS, "").trim();
   return Array.from(clean).slice(0, maxChars).join("").trim();
@@ -58,7 +84,8 @@ function expired(host, config, now) {
   return host !== undefined && now - host.meta.born > config.room_max_age_s * 1000;
 }
 
-// query string -> { t, code, v, proto, name, want } | null
+// query string -> { t, code, v, proto, name, want, tok, ep } | null
+// tok and ep are only read in t=join: tok != 0 makes the join a re-entry into a locked room.
 export function parseHello(url) {
   let u;
   try {
@@ -77,6 +104,8 @@ export function parseHello(url) {
   const code = (q.get("code") || "").toUpperCase();
   if (!/^[A-Z0-9]{0,16}$/.test(code)) return null;
   let want = 0;
+  let tok = 0;
+  let ep = 0;
   if (t === "join") {
     if (code === "") return null;
     const w = q.get("want");
@@ -84,8 +113,18 @@ export function parseHello(url) {
       want = toInt(w);
       if (want === null || want > 255) return null;
     }
+    const k = q.get("tok");
+    if (k !== null && k !== "") {
+      tok = toU32(k);
+      if (tok === null) return null;
+    }
+    const e = q.get("ep");
+    if (e !== null) {
+      ep = /^\d{1,2}$/.test(e) ? parseInt(e, 10) : null;
+      if (ep === null || ep > 15) return null;
+    }
   }
-  return { t, code, v, proto, name: rawName, want };
+  return { t, code, v, proto, name: rawName, want, tok, ep };
 }
 
 export function makeCode(config, random) {
@@ -98,6 +137,7 @@ export function makeCode(config, random) {
 }
 
 // -> { meta } | { error, close, extra, reason }   (reason = WebSocket close reason; default: error)
+// Only side effect: a re-entry (hello.tok != 0) closes the live connection that still holds the slot.
 export function admit(peers, hello, config, now) {
   const live = alive(peers);
   const name = cleanName(hello.name, config.max_name_chars);
@@ -117,6 +157,23 @@ export function admit(peers, hello, config, now) {
     const reasonV = String(host.meta.v).replace(/[^\x21-\x7e]/g, "");
     return { error: "version_mismatch", close: 4426, extra: { host_v: host.meta.v }, reason: `version_mismatch ${reasonV}` };
   }
+  if (hello.tok) {
+    // Re-entry: same slot, locked room, token the host registered for that slot. Skips in_progress/room_full.
+    const want = hello.want;
+    const tokens = host.meta.tokens;
+    const valid = host.meta.locked === true && want >= 2 && want <= config.max_peers_per_room
+      && tokens !== null && typeof tokens === "object" && tokens[String(want)] === hello.tok;
+    if (!valid) return { error: "bad_token", close: 4401 };
+    for (const old of live) {
+      if (old.meta.id !== want) continue;
+      // half-open leftover of the same player: no peer_left, its later onClose is a no-op
+      markLeft(old);
+      fail(old, "replaced", 4411);
+    }
+    return {
+      meta: { id: want, host: false, name, v: hello.v, proto: hello.proto, code: host.meta.code, ep: hello.ep || 0 },
+    };
+  }
   if (host.meta.locked) return { error: "in_progress", close: 4423 };
   if (live.length >= config.max_peers_per_room) return { error: "room_full", close: 4403 };
   const used = new Set(live.map((p) => p.meta.id));
@@ -129,7 +186,7 @@ export function admit(peers, hello, config, now) {
     }
   }
   if (id === 0) return { error: "room_full", close: 4403 };
-  return { meta: { id, host: false, name, v: hello.v, proto: hello.proto, code: host.meta.code } };
+  return { meta: { id, host: false, name, v: hello.v, proto: hello.proto, code: host.meta.code, ep: 0 } };
 }
 
 // created/joined for the new peer, peer_joined for the others
@@ -141,7 +198,8 @@ export function welcome(peers, peer) {
   }
   const list = others.map((p) => ({ id: p.meta.id, name: p.meta.name })).sort((a, b) => a.id - b.id);
   sendJson(peer, { t: "joined", code: peer.meta.code, id: peer.meta.id, peers: list });
-  for (const p of others) sendJson(p, { t: "peer_joined", id: peer.meta.id, name: peer.meta.name });
+  const joined = { t: "peer_joined", id: peer.meta.id, name: peer.meta.name, ep: peer.meta.ep || 0 };
+  for (const p of others) sendJson(p, joined);
 }
 
 export function onMessage(peers, peer, data, config, now) {
@@ -194,11 +252,21 @@ function onText(live, peer, text, config) {
       if (target === undefined) return; // peer left in a race: drop, do not punish the sender
       return sendJson(target, { t: "signal", from: peer.meta.id, data: msg.data });
     }
-    case "lock":
+    case "lock": {
       if (!peer.meta.host || typeof msg.locked !== "boolean") return fail(peer, "bad_request", 4400);
-      return peer.setMeta({ ...peer.meta, locked: msg.locked });
+      // Every lock replaces the token map; unlocking or omitting tokens erases it.
+      let tokens;
+      if (msg.tokens !== undefined) {
+        tokens = cleanTokens(msg.tokens, config.max_peers_per_room);
+        if (tokens === null) return fail(peer, "bad_request", 4400);
+      }
+      const meta = { ...peer.meta, locked: msg.locked };
+      delete meta.tokens;
+      if (msg.locked && tokens !== undefined) meta.tokens = tokens;
+      return peer.setMeta(meta);
+    }
     case "leave":
-      onClose(live, peer);
+      onClose(live, peer, true);
       return peer.close(1000, "leave");
     default:
       return fail(peer, "bad_request", 4400);
@@ -218,8 +286,9 @@ function onBinary(live, peer, bytes, config) {
   target.send(out);
 }
 
-// The runtime calls this when a socket closed; idempotent (meta.left)
-export function onClose(peers, peer) {
+// The runtime calls this when a socket closed; idempotent (meta.left).
+// clean = the peer asked to leave ({"t":"leave"}): the others get peer_left with "clean": true.
+export function onClose(peers, peer, clean = false) {
   if (!peer.meta || peer.meta.left) return;
   const others = alive(peers).filter((p) => p.meta.id !== peer.meta.id);
   const wasHost = peer.meta.host;
@@ -233,5 +302,6 @@ export function onClose(peers, peer) {
     }
     return;
   }
-  for (const p of others) sendJson(p, { t: "peer_left", id });
+  const left = clean === true ? { t: "peer_left", id, clean: true } : { t: "peer_left", id };
+  for (const p of others) sendJson(p, left);
 }

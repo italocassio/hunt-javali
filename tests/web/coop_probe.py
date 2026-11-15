@@ -1,6 +1,7 @@
 """Co-op WebRTC probe (docs/multiplayer.md section 9, F2/F3/F6): two real Chrome instances play the real Web build.
 
-    python tests/web/coop_probe.py [--scenarios=rtc,drop_ice,invite,server_unreachable,invite_unknown,shop_in_room] [--build-dir=DIR]
+    python tests/web/coop_probe.py [--scenarios=rtc,drop_ice,invite,server_unreachable,invite_unknown,shop_in_room,rejoin]
+                                   [--build-dir=DIR]
                                    [--load-timeout=S] [--keep] [--help]
 
 What it does, end to end
@@ -38,6 +39,17 @@ Scenarios
   shop_in_room
             F6 edge: a client that is READY opens "Loja" from the room, then the host presses "Iniciar cacada". Both
             pages must reach the hunt (or the host must be blocked); a stranded client is a bug.
+  rejoin    F8 (docs/multiplayer.md 4.7), two phases in the RTC hunt. Phase 1 (socket only): the room socket of B
+            is closed from the page; per 4.7.3 a client whose RTC keeps delivering snapshots must NOT reconnect (no new
+            join request, path stays "rtc", the hunt goes on). Phase 2 (full cut): DevTools puts B offline for
+            REJOIN_OFFLINE_S (5 s) while the page closes its sockets and its RTCPeerConnections (what a dead network
+            ends up doing; a localhost RTC would otherwise survive DevTools offline). Back online, B must open a new
+            socket with tok/ep, get `joined` again in the same slot, and the link must return to path == "rtc" with
+            a NEW RTCPeerConnection (renegotiated, 4.7.1) within rejoin_timeout_s + ice_timeout_s + REJOIN_EXTRA_S;
+            boars_alive equal on both, A keeps one ally the whole time (no hunter_left), and B walking afterwards is
+            seen by A. Limits: window.huntProbe has no "reconnecting" field, so the banner and the is_reconnecting()
+            flag are not read here (they are proven by hud_net and net_e2e --rejoin); the cut is page-level, not a
+            kernel-level network loss.
   Not covered here (no way to do it from the browser, reported instead): the spectator. Nothing in the Web build
   kills the local hunter on demand (no JavaScriptBridge hook) and window.huntProbe has no spectating field; the
   spectator is covered by src/player/debug/spectator_sandbox.tscn (tests/net_unit.tscn).
@@ -98,7 +110,10 @@ MESSAGE_RGB = (217, 69, 43)
 MESSAGE_TOL = 30
 MESSAGE_MIN_PX = 100                      # the shortest message (room_not_found) has a few hundred; the idle screen has 0
 MESSAGE_DEADLINE_S = 9.0                  # docs/multiplayer.md F6 acceptance
-SCENARIOS = ("rtc", "drop_ice", "invite", "server_unreachable", "invite_unknown", "shop_in_room")
+SCENARIOS = ("rtc", "drop_ice", "invite", "server_unreachable", "invite_unknown", "shop_in_room", "rejoin")
+REJOIN_OFFLINE_S = 5.0                    # the cut of the rejoin scenario (docs/multiplayer.md 4.7.10)
+REJOIN_BACK_S = 30.0                      # rejoin_timeout_s: the client must be back in the room by then (after the net returns)
+REJOIN_EXTRA_S = 20.0                     # on top of ice_timeout_s for the RTC renegotiation
 
 RESULTS = []
 CLEANUP = []                              # callables run on every way out, most recent first
@@ -154,6 +169,7 @@ HOOK_JS = r"""
     constructor(...a) {
       super(...a);
       window.__ws.urls.push(String(a[0]));
+      window.__socks.push(this);
       this.addEventListener('message', (e) => {
         if (typeof e.data === 'string') { if (window.__ws.rx.length < 500) window.__ws.rx.push(e.data); }
         else { window.__ws.bin_rx++; window.__ws.bin_rx_bytes += (e.data.byteLength || e.data.size || 0); }
@@ -166,6 +182,9 @@ HOOK_JS = r"""
       return super.send(d);
     }
   }
+  window.__close_pcs = () => { let n = 0; for (const pc of window.__pcs || []) { if (pc.connectionState !== 'closed') { pc.close(); n++; } } return n; };
+  window.__socks = [];
+  window.__cut_ws = () => { let n = 0; for (const s of window.__socks) { if (s.readyState === 1) { s.close(); n++; } } return n; };
   window.WebSocket = Spy;
   window.__pcs = [];
   const OP = window.RTCPeerConnection;
@@ -294,6 +313,20 @@ class Browser:
                 if abs(line[o] - rgb[0]) <= tol and abs(line[o + 1] - rgb[1]) <= tol and abs(line[o + 2] - rgb[2]) <= tol:
                     n += 1
         return n
+
+    def set_offline(self, offline):
+        """DevTools network emulation: while offline, new connections (a rejoin socket) fail."""
+        self.cdp.call("Network.enable")
+        self.cdp.call("Network.emulateNetworkConditions", {"offline": bool(offline), "latency": 0,
+                                                           "downloadThroughput": -1, "uploadThroughput": -1})
+
+    def cut_rtc(self):
+        """Closes every RTCPeerConnection of the page (the direct link dies)."""
+        return self.js("window.__close_pcs ? window.__close_pcs() : -1")
+
+    def cut_sockets(self):
+        """Closes every open WebSocket of the page from JS (what a lost connection looks like to the game)."""
+        return self.js("window.__cut_ws ? window.__cut_ws() : -1")
 
     def console(self, n=12):
         return self.cdp.console[-n:]
@@ -707,6 +740,111 @@ def scenario(name, base_url, bun_port, workdir, shots_root, net_cfg):
         b.close()
 
 
+def join_urls(br):
+    return [u for u in br.wire().get("urls", []) if "t=join" in u]
+
+
+def scenario_rejoin(base_url, bun_port, workdir, shots_root, net_cfg):
+    """F8: B loses its room socket mid-hunt and comes back in the same slot; the RTC link is renegotiated."""
+    name = "rejoin"
+    log(f"=== scenario {name}")
+    query = f"probe=1&server=ws://127.0.0.1:{bun_port}/ws"
+    shots = os.path.join(shots_root, name)
+    os.makedirs(shots, exist_ok=True)
+    a = Browser(f"{name}_A", workdir, shots)
+    b = Browser(f"{name}_B", workdir, shots)
+    try:
+        a.connect()
+        b.connect()
+        if drive_to_hunt(a, b, base_url, query) is None:
+            return
+        ice_s = float(net_cfg["ice_timeout_s"])
+        got = wait_for(lambda: (a.fresh_probe() or {}).get("path") == "rtc" and (b.fresh_probe() or {}).get("path") == "rtc",
+                       ice_s + RTC_EXTRA_WAIT_S, step=0.4)
+        pa0, pb0 = a.fresh_probe(), b.fresh_probe()
+        record('before the cut: huntProbe.path == "rtc" on both', bool(got), f"A {pa0['path']}, B {pb0['path']}")
+        if not got:
+            return
+        slot0 = pb0["slot"]
+        join_urls0 = len(join_urls(b))
+        joined0 = len(b.server_frames("joined"))
+        pcs0 = len(b.rtc_summary()["pcs"])
+        log(f"  before the cut: B slot {slot0}, join URLs {join_urls0}, joined frames {joined0}, pcs {pcs0}, "
+            f"boars A {pa0['boars_alive']} B {pb0['boars_alive']}")
+
+        # Phase 1: only the room socket dies. The RTC link keeps delivering, so the contract says: no reconnection.
+        closed = b.cut_sockets()
+        record("phase 1: the cut closed the room socket of B", closed is not None and closed >= 1, f"{closed} open socket(s) closed")
+        time.sleep(6.0)
+        pb = b.fresh_probe()
+        record("phase 1: RTC alive, B does not reconnect (no new join request, path stays rtc, hunt runs)",
+               len(join_urls(b)) == join_urls0 and pb["path"] == "rtc" and len(b.server_frames("joined")) == joined0,
+               f"join URLs {len(join_urls(b))} (before {join_urls0}), path {pb['path']}, ally count {len(pb['allies'])}")
+        pa = a.fresh_probe()
+        record("phase 1: A still sees B", len(pa["allies"]) == 1, f"A allies {len(pa['allies'])}")
+
+        # Phase 2: the network dies for REJOIN_OFFLINE_S: offline first (no rejoin socket can open), then the
+        # transports go (socket if any, RTC).
+        t_cut = time.time()
+        b.set_offline(True)
+        closed = b.cut_sockets()
+        closed_pcs = b.cut_rtc()
+        record("phase 2: the cut closed the RTC link of B", closed_pcs is not None and closed_pcs >= 1,
+               f"{closed_pcs} RTCPeerConnection(s) and {closed} socket(s) closed")
+        page_alive = True
+        a_allies_min = 1
+        while time.time() - t_cut < REJOIN_OFFLINE_S:
+            pa = a.probe()
+            if pa is not None:
+                a_allies_min = min(a_allies_min, len(pa["allies"]))
+            page_alive = page_alive and b.probe() is not None
+            time.sleep(0.25)
+        joined_mid = len(b.server_frames("joined"))
+        b.set_offline(False)
+        t_back = time.time()
+        record("while offline B got no new `joined`", joined_mid == joined0, f"joined frames {joined_mid} (before {joined0})")
+        record("the page of B kept running during the cut", page_alive, "huntProbe stayed available")
+
+        back = wait_for(lambda: len(b.server_frames("joined")) > joined0, REJOIN_BACK_S, step=0.25)
+        record("B is back in the room (new `joined`) within rejoin_timeout_s", bool(back),
+               f"{time.time() - t_back:.1f} s after the network returned ({time.time() - t_cut:.1f} s after the cut)")
+        new_urls = join_urls(b)[join_urls0:]
+        record("the rejoin request carries tok and ep", bool(new_urls) and all("tok=" in u and "ep=" in u for u in new_urls),
+               f"{len(new_urls)} new join URL(s): {[u.split('?', 1)[-1][:100] for u in new_urls[:2]]}")
+        if back:
+            joined_msg = b.server_frames("joined")[-1]
+            record("same slot after the return", joined_msg.get("id") == slot0 + 1,
+                   f"joined id {joined_msg.get('id')} (slot {slot0} + 1 expected)")
+        got = wait_for(lambda: (b.fresh_probe() or {}).get("path") == "rtc", ice_s + REJOIN_EXTRA_S, step=0.4)
+        pb = b.fresh_probe()
+        pcs = b.rtc_summary()["pcs"]
+        record('path back to "rtc" on B', bool(got), f"B path {pb['path']} {time.time() - t_back:.1f} s after the network returned")
+        record("the RTC link was renegotiated (a new RTCPeerConnection)", len(pcs) > pcs0,
+               f"pcs before {pcs0}, after {len(pcs)}: {pcs}")
+        pa = a.fresh_probe()
+        record('path "rtc" on A as well', pa["path"] == "rtc", f"A path {pa['path']}")
+        record("same slot and role on the probe", pb["slot"] == slot0 and pb["role"] == "client", f"B slot {pb['slot']} role {pb['role']}")
+        record("A kept one ally the whole time (no hunter_left)", a_allies_min == 1 and len(pa["allies"]) == 1,
+               f"fewest allies A saw during the cut {a_allies_min}, now {len(pa['allies'])}")
+        time.sleep(2.0)
+        pa, pb = a.fresh_probe(), b.fresh_probe()
+        record("boars_alive equal on both after the return", pa["boars_alive"] == pb["boars_alive"],
+               f"A {pa['boars_alive']}, B {pb['boars_alive']} (before the cut A {pa0['boars_alive']}, B {pb0['boars_alive']})")
+        record("B is alive after the return", pb["health"] > 0.0, f"B health {pb['health']}")
+        a.shot("after_rejoin")
+        b.shot("after_rejoin")
+        if walk(b, a, "after the rejoin: B walks, A watches") is None:
+            a.shot("walk_failed")
+            b.shot("walk_failed")
+    finally:
+        try:
+            b.set_offline(False)
+        except Exception:
+            pass
+        a.close()
+        b.close()
+
+
 def _frame_diff(img_a, img_b):
     """Mean absolute RGB difference between two decoded PNGs of the same size (every 3rd pixel)."""
     wa, ha, ca, ra = img_a
@@ -923,6 +1061,8 @@ def main():
                     scenario_server_unreachable(base_url, free_port(), work, shots_root)
                 elif name == "shop_in_room":
                     scenario_shop_in_room(base_url, bun_port, work, shots_root)
+                elif name == "rejoin":
+                    scenario_rejoin(base_url, bun_port, work, shots_root, net_cfg)
                 elif name == "invite_unknown":
                     scenario_invite_unknown(base_url, bun_port, work, shots_root)
                 else:

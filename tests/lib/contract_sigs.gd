@@ -39,6 +39,9 @@ const GAME_EVENTS_SIGNALS: Array[String] = [
 	"hunter_died(slot: int)",
 	"spectate_changed(slot: int)",
 	"net_stall_changed(stalled: bool)",
+	# docs/multiplayer.md section 4.7.9 (F8)
+	"net_reconnect_changed(active: bool)",
+	"hunter_away_changed(slot: int, away: bool)",
 ]
 
 ## docs/multiplayer.md section 3.4: autoload Net.
@@ -71,6 +74,10 @@ const NET_METHODS: Array[String] = [
 	# approved by the coordination, outside the original section 3.4 (net.gd)
 	"is_peer_absent(slot: int) -> bool",
 	"get_hunt_seed() -> int",
+	# docs/multiplayer.md section 4.7.9 (F8)
+	"is_reconnecting() -> bool",
+	"get_traffic() -> Dictionary",
+	"debug_cut(duration_s: float, half_open: bool = false) -> void",
 ]
 
 const NET_SIGNALS: Array[String] = [
@@ -343,7 +350,7 @@ const CLASSES: Array[Dictionary] = [
 	# points that Net, the sandboxes and the tests call, so a rename shows up here) ---
 	{"name": "NetSession", "path": "res://src/net/net_session.gd", "base": "RefCounted", "pkg": "N",
 		"signals": ["state_changed(state: int)", "failed(code: StringName, message: String)", "roster_changed()",
-			"hunt_go()", "stall_changed(stalled: bool)"],
+			"hunt_go()", "stall_changed(stalled: bool)", "reconnect_changed(active: bool)"],
 		"methods": ["setup(cfg: Dictionary, env: Dictionary) -> void", "get_role() -> int", "get_state() -> int",
 			"get_code() -> String", "get_local_slot() -> int", "get_player_count() -> int",
 			"get_roster() -> Array[NetPeerInfo]", "get_peer(slot: int) -> NetPeerInfo",
@@ -351,13 +358,16 @@ const CLASSES: Array[Dictionary] = [
 			"is_peer_absent(slot: int) -> bool", "get_link_path(slot: int) -> int", "create() -> void",
 			"join(code: String) -> void", "leave() -> void", "process(delta: float) -> void", "set_ready(ready: bool) -> void",
 			"host_select_contract(map_id: StringName, contract_index: int) -> bool", "host_start_hunt() -> bool",
-			"bind_world(world: HuntWorld) -> void", "unbind_world(world: HuntWorld) -> void", "flush() -> void"]},
+			"bind_world(world: HuntWorld) -> void", "unbind_world(world: HuntWorld) -> void", "flush() -> void",
+			"is_reconnecting() -> bool", "get_traffic() -> Dictionary",
+			"debug_cut(duration_s: float, half_open: bool = false) -> void"]},
 	{"name": "NetSignaling", "path": "res://src/net/net_signaling.gd", "base": "RefCounted", "pkg": "N",
 		"methods": ["build_url(base: String, params: Dictionary) -> String",
 			"open(url: String, cfg: Dictionary, now_ms: int) -> bool", "is_open() -> bool", "is_closed() -> bool",
 			"poll(now_ms: int) -> void", "take_messages() -> Array", "take_relay() -> Array",
 			"send_json(msg: Dictionary) -> bool", "flush() -> void",
-			"send_relay(to_id: int, payload: PackedByteArray) -> bool", "close(now_ms: int, say_leave: bool = true) -> void"]},
+			"send_relay(to_id: int, payload: PackedByteArray) -> bool", "close(now_ms: int, say_leave: bool = true) -> void",
+			"probe(now_ms: int, timeout_ms: int) -> void"]},
 	{"name": "NetLink", "path": "res://src/net/net_link.gd", "base": "RefCounted", "pkg": "N",
 		"signals": ["path_changed()"],
 		"methods": ["get_path() -> int", "is_lost() -> bool", "send_state(records: PackedByteArray) -> void",
@@ -403,7 +413,7 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"EV_BOAR_DEATH": 0x24, "EV_CROP_EATEN": 0x25, "EV_BAIT": 0x26, "EV_DOG_MARK": 0x27, "EV_DOG_CMD": 0x28,
 			"EV_MESSAGE": 0x29, "EV_HUNT_END": 0x2A, "EV_FULL_SYNC": 0x2B,
 			"C_STATE": 0x40, "C_SHOT": 0x41, "C_CHARGE_HIT": 0x42, "C_BAIT": 0x43, "C_DOG_CMD": 0x44,
-			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32}},
+			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32, "HF_AWAY": 64}},
 	{"name": "NetPeerInfo", "path": "res://src/core/net_peer_info.gd", "base": "RefCounted",
 		"props": ["slot", "display_name", "is_host", "ready", "loaded", "weapon_id", "dog_id", "path"]},
 	{"name": "HunterVisualBase", "path": "res://src/core/hunter_visual_base.gd", "base": "Node3D",
@@ -428,7 +438,8 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"net_apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void",
 			"net_take_claims(out: StreamPeerBuffer) -> void",
 			"net_apply_claim(slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void",
-			"net_peer_left(slot: int) -> void", "net_connection_lost() -> void"]},
+			"net_peer_left(slot: int) -> void", "net_connection_lost() -> void",
+			"net_write_full_sync(out: StreamPeerBuffer) -> void"]},
 ]
 
 

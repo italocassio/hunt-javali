@@ -1,5 +1,5 @@
 extends Node
-## tests/net_unit.tscn: the single-process sandboxes of the multiplayer phases F2, F4 and F5, run as child Godot
+## tests/net_unit.tscn: the single-process sandboxes of the multiplayer phases F2, F4, F5 and F8, run as child Godot
 ## processes with their failures propagated to the exit code. No socket and no Bun are involved (the two-process
 ## scenarios over the relay are in tests/net_test.tscn).
 ##
@@ -16,6 +16,7 @@ extends Node
 ##   link_selftest  NetLink over NetLoopback: loss, reordering, RTC promotion/downgrade, relay rate   LINK_SELFTEST
 ##   spectator      F6: allies on minimap/compass, SpectatorCamera, "Assistindo" banner, solo untouched  RESULT:
 ##   net_dogs       F7: one Dog per slot on the host, DogPuppet on the client, dog records, commands  RESULT:
+##   net_sync       F8: rejoin sync (EV_FULL_SYNC) in one process: same boars/patches/score, idempotent   RESULT:
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
 ## A child that exits without its summary line (crash, parse error, hang killed by the limit) is a FAIL.
 ##
@@ -39,6 +40,7 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "link_selftest", "scene": "res://src/net/debug/link_selftest.tscn", "limit_s": 90.0},
 	{"name": "spectator", "scene": "res://src/player/debug/spectator_sandbox.tscn", "limit_s": 90.0},
 	{"name": "net_dogs", "scene": "res://src/hunt/debug/net_dogs_test.tscn", "limit_s": 120.0},
+	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0},
 	{"name": "remote_hunter", "scene": "res://src/player/debug/remote_sandbox.tscn", "limit_s": 60.0, "wall_clock": true},
 ]
 

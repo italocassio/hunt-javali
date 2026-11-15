@@ -177,6 +177,84 @@ async function main() {
   host.json({ t: "lock", locked: false });
   await sleep(150);
 
+  // F8 (docs/multiplayer.md 4.7.2). At this point: host 1, a = 2, c = 3, b = 4, room unlocked.
+  console.log("reentrada");
+  const TOK2 = 123456;
+  const TOK3 = 4294967295;
+  a.inbox.length = 0;
+  const unlockedTry = await joinFail(`t=join&code=${code}&name=Ana&want=2&tok=${TOK2}`);
+  ok(unlockedTry.err && unlockedTry.err.code === "bad_token" && unlockedTry.code === 4401, "sala destrancada: bad_token + 4401", unlockedTry);
+  host.json({ t: "lock", locked: true, tokens: { 2: TOK2, 3: TOK3 } });
+  await sleep(150);
+  const noTok = await joinFail(`t=join&code=${code}&name=Edu&want=2`);
+  ok(noTok.err && noTok.err.code === "in_progress" && noTok.code === 4423, "sem tok em sala trancada: in_progress + 4423", noTok);
+  const wrongTok = await joinFail(`t=join&code=${code}&name=Ana&want=2&tok=${TOK2 + 1}`);
+  ok(wrongTok.err && wrongTok.err.code === "bad_token" && wrongTok.code === 4401, "token errado: bad_token + 4401", wrongTok);
+  const noSlotTok = await joinFail(`t=join&code=${code}&name=Beto&want=4&tok=${TOK2}`);
+  ok(noSlotTok.err && noSlotTok.err.code === "bad_token" && noSlotTok.code === 4401, "slot sem token: bad_token + 4401", noSlotTok);
+  const badTok = await joinFail(`t=join&code=${code}&name=Ana&want=2&tok=4294967296`);
+  ok(badTok.err && badTok.err.code === "bad_request" && badTok.code === 4400, "tok acima de u32: bad_request + 4400", badTok);
+  const mismTok = await new Promise((resolve) => {
+    const ws = new WebSocket(`${base}?t=join&code=${code}&v=0.0.1&proto=${PROTO}&want=2&tok=${TOK2 + 1}`, { headers: origin ? { Origin: origin } : {} });
+    const got = {};
+    ws.onmessage = (e) => (got.msg = JSON.parse(e.data));
+    ws.onclose = (e) => resolve({ ...got, close: e.code });
+  });
+  ok(mismTok.msg && mismTok.msg.code === "version_mismatch" && mismTok.close === 4426, "version_mismatch vem antes de bad_token", mismTok);
+  ok(a.closeCode === null && a.inbox.length === 0, "reentrada recusada nao mexe no socket do slot", { close: a.closeCode, inbox: a.inbox });
+
+  // live socket swapped (half-open phone): old one gets replaced + 4411, nobody hears peer_left
+  host.inbox.length = 0;
+  b.inbox.length = 0;
+  const a2 = await open(`t=join&code=${code}&name=Ana&want=2&tok=${TOK2}&ep=3`);
+  const rejoined = await a2.type("joined");
+  ok(rejoined && rejoined.id === 2 && rejoined.peers.length === 3, "token certo: joined no mesmo id, com 4 conexoes vivas", rejoined);
+  const replaced = await a.type("error");
+  ok(replaced && replaced.code === "replaced" && (await a.closed()) === 4411, "socket antigo: replaced + 4411", replaced);
+  const pjHost = await host.type("peer_joined");
+  ok(pjHost && pjHost.id === 2 && pjHost.name === "Ana" && pjHost.ep === 3, "anfitriao recebe peer_joined com ep", pjHost);
+  const pjOther = await b.type("peer_joined");
+  ok(pjOther && pjOther.id === 2 && pjOther.ep === 3, "os demais recebem peer_joined com ep", pjOther);
+  host.send(new Uint8Array([2, 0, 1, 0x5a]));
+  const relNew = await a2.bin();
+  ok(relNew && Array.from(relNew).join() === "1,0,1,90", "relay depois da troca chega ao socket novo", relNew && Array.from(relNew));
+  a2.send(new Uint8Array([1, 0, 1, 0x5b]));
+  const relBack = await host.bin();
+  ok(relBack && Array.from(relBack).join() === "2,0,1,91", "socket novo fala com o anfitriao", relBack && Array.from(relBack));
+  await sleep(300);
+  const strayLeft = host.inbox.find((m) => !(m instanceof Uint8Array) && m.t === "peer_left");
+  ok(strayLeft === undefined, "troca de socket nao emite peer_left", strayLeft);
+
+  // socket that just closed: peer_left without clean; the slot comes back with the same token
+  host.inbox.length = 0;
+  a2.ws.close();
+  const dropLeft = await host.type("peer_left");
+  ok(dropLeft && dropLeft.id === 2 && dropLeft.clean === undefined, "socket fechado: peer_left sem clean", dropLeft);
+  const a3 = await open(`t=join&code=${code}&name=Ana&want=2&tok=${TOK2}&ep=4`);
+  const rejoined3 = await a3.type("joined");
+  ok(rejoined3 && rejoined3.id === 2, "slot vazio: reentrada no mesmo id", rejoined3);
+  const pj3 = await host.type("peer_joined");
+  ok(pj3 && pj3.id === 2 && pj3.ep === 4, "peer_joined da segunda volta leva a epoca nova", pj3);
+
+  // explicit leave: clean; then the host revokes the slot
+  host.inbox.length = 0;
+  a3.json({ t: "leave" });
+  const cleanLeft = await host.type("peer_left");
+  ok(cleanLeft && cleanLeft.id === 2 && cleanLeft.clean === true, "leave: peer_left com clean", cleanLeft);
+  host.json({ t: "lock", locked: true, tokens: { 3: TOK3 } });
+  await sleep(150);
+  const revoked = await joinFail(`t=join&code=${code}&name=Ana&want=2&tok=${TOK2}`);
+  ok(revoked.err && revoked.err.code === "bad_token" && revoked.code === 4401, "slot revogado: bad_token + 4401", revoked);
+  host.json({ t: "lock", locked: false });
+  await sleep(150);
+  const afterUnlock = await joinFail(`t=join&code=${code}&name=Cris&want=3&tok=${TOK3}`);
+  ok(afterUnlock.err && afterUnlock.err.code === "bad_token" && afterUnlock.code === 4401, "destrancar apaga os tokens: bad_token + 4401", afterUnlock);
+  const aBack = await open(`t=join&code=${code}&name=Ana&want=2`);
+  const aBackJoined = await aBack.type("joined");
+  ok(aBackJoined && aBackJoined.id === 2, "sala destrancada aceita entrada normal de novo", aBackJoined);
+  const pjNormal = await host.type("peer_joined");
+  ok(pjNormal && pjNormal.id === 2 && pjNormal.ep === 0, "entrada normal: peer_joined com ep 0", pjNormal);
+
   console.log("regra da estrela");
   c.json({ t: "signal", to: 2, data: {} });
   const starErr = await c.type("error");
@@ -206,11 +284,11 @@ async function main() {
   if (idle > 0) {
     console.log(`sala parada por ${idle} s`);
     await sleep(idle * 1000);
-    a.json({ t: "signal", to: 1, data: { kind: "candidate" } });
+    aBack.json({ t: "signal", to: 1, data: { kind: "candidate" } });
     const afterIdle = await host.type("signal");
     ok(afterIdle && afterIdle.from === 2, "signal depois da pausa", afterIdle);
     host.send(new Uint8Array([2, 0, 1, 7]));
-    const afterBin = await a.bin();
+    const afterBin = await aBack.bin();
     ok(afterBin && Array.from(afterBin).join() === "1,0,1,7", "relay binario depois da pausa", afterBin && Array.from(afterBin));
     const late = await open(`t=join&code=${code}&name=Tardio`);
     const lateJoined = await late.type("joined");
@@ -226,7 +304,7 @@ async function main() {
   ok(rl !== null && (await flood.closed()) === 4429, "rajada: rate_limited + 4429", rl);
 
   console.log("anfitriao sai");
-  a.ws.close();
+  aBack.ws.close();
   host.ws.close();
   const hl = await b.type("host_left");
   ok(hl !== null && (await b.closed()) === 4410, "host_left + 4410 para os demais", hl);

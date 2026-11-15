@@ -14,6 +14,9 @@ extends Node
 ##   --deadlines: instead of the two players, runs net_deadlines.gd (F5): real sessions in this process
 ##   against the server: stall warning, host timeout, absent / removed clients, load deadline, room lock,
 ##   Net.flush, ping/pong, server dying mid-hunt. Shortened timeouts unless --real-timeouts is also passed.
+##   --rejoin: instead of the two players, runs net_rejoin.gd (F8, docs/multiplayer.md section 4.7): a client
+##   cut off in the hunt comes back to the same slot (plain drop and half-open socket), tampered token, cut
+##   longer than the grace period, cut longer than the client's patience, explicit leave, backoff.
 ## Exit code 0 and "NET_E2E checks=N failures=0" when green.
 
 const PEER_ARG: String = "--e2e-peer="
@@ -24,6 +27,7 @@ const KEEP_ARG: String = "--keep"
 const DROP_ARG: String = "--host-drops"     # scenario: the host process exits mid-hunt instead of the client
 const DEADLINES_ARG: String = "--deadlines"  # scenario: stalls, absences, timeouts, lock, flush (net_deadlines.gd)
 const REAL_TIMEOUTS_ARG: String = "--real-timeouts"   # with --deadlines: data/net.json values, not shortened ones
+const REJOIN_ARG: String = "--rejoin"        # scenario: reconnection of a client in the hunt (net_rejoin.gd)
 const SERVER_ARG: String = "--server="       # read by the autoload Net in the children
 
 const HOST_ADDR: String = "127.0.0.1"
@@ -129,6 +133,15 @@ func _run() -> void:
 		add_child(deadlines)
 		await deadlines.call("run", url, _ok, func() -> void: OS.kill(int(_pids["bun"])),
 			OS.get_cmdline_user_args().has(REAL_TIMEOUTS_ARG))
+		_finish()
+		return
+
+	# Reconnection scenario (F8): sessions in this process as well (net_rejoin.gd).
+	if OS.get_cmdline_user_args().has(REJOIN_ARG):
+		var rejoin: Node = (load("res://src/net/debug/net_rejoin.gd") as GDScript).new()
+		rejoin.name = "NetRejoin"
+		add_child(rejoin)
+		await rejoin.call("run_rejoin", url, _ok)
 		_finish()
 		return
 
@@ -238,7 +251,7 @@ func _check_results() -> void:
 		_ok(bool(client.get("drop_hunt_over", false)) and int(client.get("drop_outcome", -1)) == int(client.get("drop_outcome_expected", -2)),
 			"caçada do cliente terminou como DISCONNECTED (outcome %s)" % str(client.get("drop_outcome")))
 		return
-	_ok(bool(host.get("peer_left_seen", false)), "anfitrião recebeu net_peer_left quando o cliente caiu (%s ms)"
+	_ok(bool(host.get("peer_left_seen", false)), "anfitrião recebeu net_peer_left quando o cliente saiu (leave) (%s ms)"
 		% str(host.get("peer_left_ms", "?")))
 	_ok(bool(host.get("hunter_after_left_null", false)), "caçador do cliente saiu do mundo do anfitrião")
 

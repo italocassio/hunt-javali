@@ -18,6 +18,8 @@ const NAME_PIXEL_SIZE: float = 0.0016
 const NAME_LIFT_M: float = 0.25
 const DEFAULT_MAP_RECT: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0)   # only if no world was given
 const STEP_SFX: StringName = &"step_grass"
+const FLAGS_OFFSET: int = NetCodec.HUNTER_STATE_BYTES - 4   # flags byte of a raw HUNTER_STATE (weapon, health, shot_seq follow)
+const SPEED_OFFSET: int = FLAGS_OFFSET - 1
 
 var _visual: HunterVisualBase = null
 var _label: Label3D = null
@@ -34,6 +36,7 @@ var _samples: Array[Dictionary] = []
 var _last_raw: PackedByteArray = PackedByteArray()
 var _last_rx_ms: float = 0.0
 var _has_state: bool = false
+var _last_away: bool = false   # the last received state carried HF_AWAY (host: silent / reconnecting)
 
 # Discrete state already shown on the visual.
 var _flags: int = NetCodec.HF_ALIVE
@@ -132,6 +135,8 @@ func is_local() -> bool:
 
 
 func is_present() -> bool:
+	if _last_away:
+		return false
 	var timeout_s: float = float(_net_cfg.get("peer_absent_s", 3.0))
 	return (_now_ms() - _last_rx_ms) < timeout_s * 1000.0
 
@@ -211,6 +216,13 @@ func get_visual() -> HunterVisualBase:
 ## Host relay: the host re-sends every hunter in the snapshot, so a remote writes the last state it received.
 func net_write_state(out: StreamPeerBuffer) -> void:
 	if _last_raw.size() == NetCodec.HUNTER_STATE_BYTES:
+		if _has_state and not is_present():
+			# Host only (docs/multiplayer.md 4.7.7): a hunter that went quiet is relayed as away and standing still.
+			var away_raw: PackedByteArray = _last_raw.duplicate()
+			away_raw[FLAGS_OFFSET] = int(away_raw[FLAGS_OFFSET]) | NetCodec.HF_AWAY
+			away_raw[SPEED_OFFSET] = 0
+			out.put_data(away_raw)
+			return
 		out.put_data(_last_raw)
 		return
 	var rect: Rect2 = _map_rect()
@@ -241,13 +253,21 @@ func net_apply_state(inp: StreamPeerBuffer) -> void:
 	var weapon: int = buf.get_u8()
 	var health: int = buf.get_u8()
 	var shot_seq: int = buf.get_u8()
+	var now: float = _now_ms()
+	var away: bool = (flags & NetCodec.HF_AWAY) != 0
+	if away:
+		speed = 0.0   # an away hunter shows no locomotion
+	# A long silence, or the first state after an away one, is a jump: snap instead of gliding across the gap.
+	var gap_ms: float = now - _last_rx_ms
+	var snap: bool = _has_state and (gap_ms > float(_net_cfg.get("peer_absent_s", 3.0)) * 1000.0 or (_last_away and not away))
 	_last_raw = bytes
-	_last_rx_ms = _now_ms()
+	_last_rx_ms = now
+	_last_away = away
 	var sample: Dictionary = {
 		"t": _last_rx_ms, "pos": Vector3(xz.x, y, xz.y), "yaw": yaw, "speed": speed, "pitch": pitch,
 		"flags": flags, "weapon": weapon, "health": health, "shot_seq": shot_seq,
 	}
-	if not _has_state:
+	if not _has_state or snap:
 		_has_state = true
 		_snap_to(sample)
 		return

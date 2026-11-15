@@ -15,6 +15,11 @@ signal message_received(msg: int)
 signal dog_mark_received(boar_id: int, duration_s: float)
 ## The host ended the hunt. entries: Array of {slot, kills, money}.
 signal hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)
+## Rejoin (section 4.7.6): the EV_FULL_SYNC header was read and step 1 is done here; the world does step 2
+## (baits, crop health) before the replayed records arrive.
+signal full_sync_started(crop_pct: float)
+## Rejoin, step 4: the last replayed record went through. killed/total are the ones of the sync header.
+signal full_sync_finished(killed: int, total: int)
 
 const SPAWN_BYTES: int = 9
 const HIT_BYTES: int = 8
@@ -39,6 +44,7 @@ const BAIT_BYTES: int = 5
 const MESSAGE_BYTES: int = 2
 const HUNT_END_HEADER_BYTES: int = 8
 const HUNT_END_ENTRY_BYTES: int = 6
+const FULL_SYNC_BYTES: int = 10          # t_ms u32, crop u16, killed u8, total u8, n_records u16
 const CROP_WIRE_SCALE: float = 100.0     # crop u16 in 0.01 %
 const PATCH_BYTES: int = 2
 const SNAP_FLAG_CROP_ATTACK: int = 1     # H_SNAPSHOT flags b0
@@ -69,6 +75,12 @@ var _eaten_scratch: PackedInt32Array = PackedInt32Array()
 var _dogs: Dictionary = {}              # owner slot -> DogPuppet
 var _dogs_seen: PackedInt32Array = PackedInt32Array()
 var _dog_breeds: Dictionary = {}        # owner slot -> breed id (roster); no entry = that slot has no dog
+## Reconnecting (section 4.7.7): no charge is judged and no C_* is queued, from net_reconnect_changed(true) to
+## the last replayed record of the EV_FULL_SYNC.
+var _suspended: bool = false
+var _replay_left: int = 0               # replayed records still to come after an EV_FULL_SYNC header
+var _sync_killed: int = 0
+var _sync_total: int = 0
 
 # Counters for tests and diagnostics.
 var baits_claimed: int = 0
@@ -77,6 +89,7 @@ var shots_claimed: int = 0
 var hits_claimed: int = 0
 var charge_hits: int = 0
 var dog_commands_claimed: int = 0
+var full_syncs_applied: int = 0
 
 
 func setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void:
@@ -126,7 +139,7 @@ func _process(delta: float) -> void:
 	for id: int in _alive_ids:
 		var p: BoarPuppet = _puppets[id]
 		p.update_pose(t, delta)
-		if not over and local != null and p.try_charge_hit(local):
+		if not over and not _suspended and local != null and p.try_charge_hit(local):
 			charge_hits += 1
 			_queue_charge_claim(id)
 	for slot: int in _dogs:
@@ -231,7 +244,7 @@ func get_local_dog() -> DogPuppet:
 
 ## C_DOG_CMD (no body): the local hunter pressed the dog key. Only if this hunter has a dog in the hunt.
 func request_dog_command() -> void:
-	if _world == null or _world.is_hunt_over() or get_local_dog() == null:
+	if _suspended or _world == null or _world.is_hunt_over() or get_local_dog() == null:
 		return
 	var at: int = _begin_claim(NetCodec.C_DOG_CMD)
 	_end_claim(at)
@@ -252,6 +265,66 @@ func _on_dog_command(inp: StreamPeerBuffer) -> void:
 # --- Events (host -> client) ---------------------------------------------------------------------
 
 func apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void:
+	if type == NetCodec.EV_FULL_SYNC:
+		if length >= FULL_SYNC_BYTES:
+			_on_full_sync(inp)
+		return
+	_apply_record(type, inp, length)
+	if _replay_left > 0:
+		_replay_left -= 1
+		if _replay_left == 0:
+			_end_full_sync()
+
+
+# --- Rejoin (sections 4.7.6 and 4.7.7) -----------------------------------------------------------
+
+## This client lost the host and is trying to come back: stop judging charges, drop what was waiting to be
+## claimed (nothing is resent on the new link) and queue no C_* until a full sync has been replayed.
+func suspend() -> void:
+	_suspended = true
+	_replay_left = 0
+	_claims.clear()
+	_pending_hits.clear()
+	_pending_shot_id = 0
+
+
+func is_suspended() -> bool:
+	return _suspended
+
+
+## True from the EV_FULL_SYNC header to its last replayed record (the record being applied included).
+func is_replaying() -> bool:
+	return _replay_left > 0
+
+
+## EV_FULL_SYNC: t_ms u32, crop u16 (x0.01 %), killed u8, total u8, n_records u16. Step 1 of section 4.7.6; the
+## n_records records that follow go through the usual handlers, all of them safe to repeat.
+func _on_full_sync(inp: StreamPeerBuffer) -> void:
+	inp.get_u32()   # t_ms: the clock is rebuilt from the next snapshot
+	var crop_pct: float = float(inp.get_u16()) / CROP_WIRE_SCALE
+	_sync_killed = inp.get_u8()
+	_sync_total = inp.get_u8()
+	var records: int = inp.get_u16()
+	suspend()
+	_replay_left = records
+	_has_offset = false
+	for id: int in _alive_ids:
+		(_puppets[id] as BoarPuppet).clear_samples()
+	for slot: int in _dogs:
+		(_dogs[slot] as DogPuppet).clear_samples()
+	full_syncs_applied += 1
+	full_sync_started.emit(crop_pct)
+	if _replay_left == 0:
+		_end_full_sync()
+
+
+## Step 4: charges are judged and C_* accepted again.
+func _end_full_sync() -> void:
+	_suspended = false
+	full_sync_finished.emit(_sync_killed, _sync_total)
+
+
+func _apply_record(type: int, inp: StreamPeerBuffer, length: int) -> void:
 	match type:
 		NetCodec.EV_BOAR_SPAWN:
 			if length >= SPAWN_BYTES:
@@ -406,8 +479,8 @@ func _on_death(inp: StreamPeerBuffer) -> void:
 ## The local weapon hit a puppet zone: show it now and keep it for this shot's C_SHOT.
 func _on_local_hit(p: BoarPuppet, hit: HitInfo) -> void:
 	var zone_index: int = NetCodec.ZONES.find(hit.zone)
-	if zone_index < 0:
-		return
+	if zone_index < 0 or _suspended:
+		return   # reconnecting: the hit could never be claimed, so it is not shown either
 	if _pending_hits.is_empty():
 		_pending_shot_id = hit.shot_id
 	elif hit.shot_id != _pending_shot_id:
@@ -426,6 +499,10 @@ func _on_local_hit(p: BoarPuppet, hit: HitInfo) -> void:
 ## damage u16 (x0.1), dist u16 (x0.1 m) }.
 func _on_shot_fired(weapon_id: StringName, origin: Vector3, _direction: Vector3, _noise_radius_m: float) -> void:
 	if _world == null or not is_inside_tree():
+		return
+	if _suspended:
+		_pending_hits.clear()
+		_pending_shot_id = 0
 		return
 	var shot_id: int = _pending_shot_id if not _pending_hits.is_empty() \
 		else NetCodec.make_shot_id(_world.get_local_slot(), 0)
@@ -459,6 +536,8 @@ func _queue_charge_claim(boar_id: int) -> void:
 
 ## C_BAIT: xz 2 x u16. The local hunter used a corn bait; the host places the one that attracts boars.
 func queue_bait_claim(at: Vector3) -> void:
+	if _suspended:
+		return
 	var pos: int = _begin_claim(NetCodec.C_BAIT)
 	NetCodec.put_xz(_claims, _rect, at.x, at.z)
 	_end_claim(pos)
@@ -466,7 +545,7 @@ func queue_bait_claim(at: Vector3) -> void:
 
 
 func take_claims(out: StreamPeerBuffer) -> void:
-	if _claims.get_size() == 0:
+	if _claims.get_size() == 0 or _suspended:
 		return
 	out.put_data(_claims.data_array)
 	_claims.clear()

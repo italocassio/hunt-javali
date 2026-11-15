@@ -10,6 +10,7 @@ signal failed(code: StringName, message: String)   # the session is already clos
 signal roster_changed()
 signal hunt_go()
 signal stall_changed(stalled: bool)
+signal reconnect_changed(active: bool)   # client: true = trying to get back into the hunt, false = it is back
 
 # Same values as the enums of the autoload Net (Role, RoomState).
 const ROLE_OFFLINE: int = 0
@@ -36,6 +37,10 @@ const LOBBY_FLAG_LOADED: int = 4
 const LOBBY_FLAG_RTC: int = 8
 const DEFAULT_NAME: String = "Caçador %d"
 const HOST_V_UNKNOWN: String = "?"
+const EPOCH_MAX: int = 15         # link epochs of the re-entries cycle through 1..15; 0 is the first link
+const APP_CLOSE_MIN: int = 4400   # close codes the room server chooses (section 4.2): never retried
+const APP_CLOSE_MAX: int = 4429
+const TRAFFIC_WINDOW_MS: int = 1000
 
 ## WebSocket close codes of the room server (section 4.2). The server sends {"t":"error"} and closes right
 ## away; native Godot drops a text frame that arrives together with the close, so the close code is what
@@ -43,6 +48,7 @@ const HOST_V_UNKNOWN: String = "?"
 const CLOSE_CODES: Dictionary = {
 	4400: &"bad_request", 4403: &"room_full", 4404: &"room_not_found", 4408: &"expired", 4409: &"retry",
 	4410: &"host_left", 4413: &"too_big", 4423: &"in_progress", 4426: &"version_mismatch", 4429: &"rate_limited",
+	4401: &"bad_token", 4411: &"replaced",
 }
 
 ## Player-facing texts of Net.room_error (section 6.11).
@@ -74,8 +80,31 @@ var _peers: Dictionary = {}            # slot -> NetPeerInfo
 var _links: Dictionary = {}            # remote peer id -> NetLink
 var _remote_rtc: Dictionary = {}       # client: slot -> bool, the host's link to that peer is on RTC
 var _sig: NetSignaling = null
-var _closing_sig: NetSignaling = null
+var _closing_sigs: Array[NetSignaling] = []   # sockets closing after leave / failure / a rejoin attempt
 var _create_attempts: int = 0
+
+# Reconnection (docs/multiplayer.md section 4.7).
+var _token: int = 0                    # client: identity of this session for the re-entry, in every L_READY
+var _tokens: Dictionary = {}           # host: slot -> last token that slot sent
+var _server_gone: Dictionary = {}      # client, LOADING/IN_HUNT: slot -> true, the room server no longer lists it
+var _server_joined: Dictionary = {}    # client, LOADING/IN_HUNT: slot -> name the room server announced meanwhile
+var _epoch: int = 0                    # client: link epoch of the latest rejoin attempt
+var _rejoining: bool = false
+var _rejoin_joined: bool = false       # the attempt in flight got "joined"; waiting for EV_FULL_SYNC
+var _rejoin_started_ms: int = 0
+var _rejoin_failures: int = 0
+var _rejoin_next_ms: int = -1          # when the next attempt starts; -1 = one is in flight
+var _probed: bool = false              # the socket was already probed in this episode of host silence
+var _cut_until_ms: int = 0             # tests (debug_cut): rejoin attempts fail without a socket until then
+var _parked: Array[NetSignaling] = []  # tests (debug_cut half-open): muted sockets kept up until the session ends
+
+# Diagnostics of the reconnection (tests).
+var rejoin_entries: int = 0            # times this client started reconnecting
+var rejoin_returns: int = 0            # times it came back (EV_FULL_SYNC)
+var rejoin_connections: int = 0        # sockets opened by rejoin attempts
+var rejoin_attempt_ms: PackedInt32Array = PackedInt32Array()   # every attempt of the last episode, ms since it began
+var readmissions: int = 0              # host: re-entries served (full syncs written)
+var rejoin_refusal: StringName = &""   # error the room server answered the last refused attempt with
 
 var _map_id: StringName = &""
 var _contract_index: int = 0
@@ -95,6 +124,13 @@ var _absent: Dictionary = {}           # slot -> true while that peer is silent 
 var _last_hunt_ms: int = 0             # wall clock of the previous hunt tick: a big gap means this machine froze
 var _scratch: StreamPeerBuffer = StreamPeerBuffer.new()
 
+# Traffic of the last closed second (section 4.7.8).
+var _traffic_ms: int = 0
+var _traffic_seen: Dictionary = {}     # remote peer id -> [link, sent_bytes, received_bytes] at the last sample
+var _traffic_links: Array = []         # [{slot, path, up_bps, down_bps}]
+var _traffic_up: int = 0
+var _traffic_down: int = 0
+
 
 ## cfg = Data.get_net(). env = { url, version, name, rtc, drop_ice } resolved by the autoload.
 ## env["router"] = false (tests only): LOADING does not call Router.start_hunt.
@@ -106,6 +142,7 @@ func setup(cfg: Dictionary, env: Dictionary) -> void:
 	_rtc = bool(env.get("rtc", false))
 	_drop_ice = bool(env.get("drop_ice", false))
 	_use_router = bool(env.get("router", true))
+	_token = maxi(randi(), 1)   # never 0: 0 means "no token" (section 4.7.1)
 
 
 static func message_for(code: StringName, args: Array = []) -> String:
@@ -177,11 +214,24 @@ func get_link_path(slot: int) -> int:
 	return link.get_path() if link != null else NetLink.PATH_NONE
 
 
-## The socket being closed after leave/failure: the autoload keeps polling it until the close leaves.
+## Client: true from the moment the connection of the hunt is lost until the EV_FULL_SYNC of the re-entry
+## (or until the session gives up and ends).
+func is_reconnecting() -> bool:
+	return _rejoining
+
+
+## Rate of the last closed second: {"up_bps", "down_bps", "links": [{"slot", "path", "up_bps", "down_bps"}]}.
+## Bytes per second of frames (application bytes, no wire overhead), links ordered by slot.
+func get_traffic() -> Dictionary:
+	return {"up_bps": _traffic_up, "down_bps": _traffic_down, "links": _traffic_links.duplicate(true)}
+
+
+## A socket being closed after leave / failure / a rejoin attempt (one per call, null when none is left):
+## the autoload keeps polling it until the close leaves.
 func take_closing_socket() -> NetSignaling:
-	var out: NetSignaling = _closing_sig
-	_closing_sig = null
-	return out
+	if _closing_sigs.is_empty():
+		return null
+	return _closing_sigs.pop_front()
 
 
 func get_link(slot: int) -> NetLink:   # tests and diagnostics
@@ -261,11 +311,29 @@ func _teardown() -> void:
 	_remote_rtc.clear()
 	if _sig != null:
 		_sig.close(Time.get_ticks_msec())
-		_closing_sig = _sig
+		_closing_sigs.append(_sig)
 		_sig = null
+	for muted: NetSignaling in _parked:
+		muted.release()
+	_parked.clear()
 	if _stalled:
 		_stalled = false
 		stall_changed.emit(false)
+	# No reconnect_changed(false) here: false means "it is back" (section 4.7.3). Giving up or leaving
+	# ends the hunt on this machine instead; is_reconnecting() simply stops being true.
+	_rejoining = false
+	_rejoin_joined = false
+	_rejoin_next_ms = -1
+	_probed = false
+	_cut_until_ms = 0
+	_tokens.clear()
+	_server_gone.clear()
+	_server_joined.clear()
+	_traffic_seen.clear()
+	_traffic_links = []
+	_traffic_up = 0
+	_traffic_down = 0
+	_traffic_ms = 0
 	_world = null
 	_queued_events.clear()
 	_queued_states.clear()
@@ -318,6 +386,8 @@ func process(delta: float) -> void:
 		return
 	_update_loading(now)
 	_update_hunt(delta, now)
+	if _state != STATE_NONE:
+		_update_traffic(now)
 
 
 func _pump_socket(now: int) -> void:
@@ -337,6 +407,8 @@ func _pump_socket(now: int) -> void:
 		if link != null:
 			link.receive_relay(payloads[i])
 	if sig.is_closed():
+		if sig.is_muted():
+			_parked.append(sig)   # half-open (tests): this end gave up, the connection stays up
 		_on_socket_closed(sig.close_code, sig.close_reason)
 
 
@@ -362,11 +434,28 @@ func _pump_links(now: int) -> void:
 				return
 
 
+## The event window of a link overflowed. In the hunt this opens the way back instead of ending things
+## (section 4.7): the host drops the link and keeps the slot for peer_timeout_s; the client reconnects.
 func _on_link_lost(id: int) -> void:
 	if _role == ROLE_HOST:
-		_remove_peer(id - 1)
+		if _state == STATE_IN_HUNT:
+			_drop_link(id)
+			roster_changed.emit()
+		else:
+			_remove_peer(id - 1)
+	elif _rejoining:
+		_rejoin_attempt_failed(Time.get_ticks_msec())
+	elif _can_rejoin():
+		_enter_rejoin(Time.get_ticks_msec())
 	else:
 		_fail(&"connection_lost")
+
+
+func _drop_link(id: int) -> void:
+	var link: NetLink = _links.get(id) as NetLink
+	if link != null:
+		_links.erase(id)
+		link.close()
 
 
 ## The socket closed with no room message (the error frame, if any, was lost with the close): the close
@@ -375,6 +464,14 @@ func _on_link_lost(id: int) -> void:
 func _on_socket_closed(close_code: int, close_reason: String) -> void:
 	_sig = null
 	var code: StringName = CLOSE_CODES.get(close_code, &"")
+	var app_close: bool = close_code >= APP_CLOSE_MIN and close_code <= APP_CLOSE_MAX
+	if _rejoining:
+		# The socket of a rejoin attempt: the server refusing is final, anything else is tried again.
+		if app_close:
+			_rejoin_refused(code)
+		else:
+			_rejoin_attempt_failed(Time.get_ticks_msec())
+		return
 	if code == &"host_left":
 		_fail(code)
 		return
@@ -388,22 +485,31 @@ func _on_socket_closed(close_code: int, close_reason: String) -> void:
 	if _state != STATE_IN_HUNT:
 		_fail(&"connection_lost")
 		return
-	for id: int in _links.keys():
-		var link: NetLink = _links[id]
-		if link.get_path() == NetLink.PATH_RTC:
-			continue
-		if _role == ROLE_HOST:
-			_remove_peer(id - 1)
-		else:
-			_links.erase(id)
-			link.close()
-	if _links.is_empty():
-		_fail(&"connection_lost")
+	if _role == ROLE_HOST:
+		# The room is gone from the server: nobody without a direct link can come back (section 4.7.4).
+		for slot: int in _peers.keys():
+			var host_link: NetLink = _links.get(slot + 1) as NetLink
+			if slot != _local_slot and (host_link == null or host_link.get_path() != NetLink.PATH_RTC):
+				_remove_peer(slot)
+		if _links.is_empty():
+			_fail(&"connection_lost")
+		return
+	var link: NetLink = _links.get(HOST_ID) as NetLink
+	if link != null and link.get_path() == NetLink.PATH_RTC:
+		return   # keeps playing without the server; if the direct path stops too, _check_host reconnects
+	if not app_close and _can_rejoin():
+		_enter_rejoin(Time.get_ticks_msec())   # condition G1 of section 4.7.3
+		return
+	_drop_link(HOST_ID)
+	_fail(&"connection_lost")
 
 
 # --- room server messages (section 4.2) ---------------------------------------------------------
 
 func _on_message(msg: Dictionary) -> void:
+	if _rejoining:
+		_on_rejoin_message(msg)
+		return
 	match str(msg.get("t", "")):
 		"created":
 			_code = str(msg.get("code", ""))
@@ -427,23 +533,67 @@ func _on_message(msg: Dictionary) -> void:
 			_set_state(STATE_LOBBY)
 		"peer_joined":
 			var slot: int = int(msg.get("id", 0)) - 1
+			if _in_hunt_states():
+				# The hunt roster is the host's (section 4.7.3). Client: only note what the server lists.
+				# Host: the room is locked, so this is a hunter coming back to its slot.
+				if _role == ROLE_CLIENT:
+					_note_server_joined(slot, str(msg.get("name", "")))
+				elif _state == STATE_IN_HUNT and slot != _local_slot and _peers.has(slot):
+					_readmit(slot, int(msg.get("ep", 0)))
+				return   # a slot the host already removed: no link, no roster; that client gives up by itself
 			_add_peer(slot, str(msg.get("name", "")))
 			if _role == ROLE_HOST:
 				_make_link(slot + 1)
 				_broadcast_lobby()
 			roster_changed.emit()
 		"peer_left":
-			_remove_peer(int(msg.get("id", 0)) - 1)
+			_on_peer_left(int(msg.get("id", 0)) - 1, bool(msg.get("clean", false)))
 		"host_left":
 			_fail(&"host_left")
 		"signal":
-			var link: NetLink = _links.get(int(msg.get("from", 0))) as NetLink
-			var rtc: NetRtc = link.get_direct() as NetRtc if link != null else null
-			var data: Variant = msg.get("data")
-			if rtc != null and data is Dictionary:
-				rtc.handle_signal(data)
+			_on_signal(msg)
 		"error":
 			_on_server_error(StringName(str(msg.get("code", ""))), msg)
+
+
+## WebRTC signaling relayed by the room server. data carries the epoch of the link it belongs to: what was
+## still on the way for a link that has been replaced is ignored (section 4.7.5).
+func _on_signal(msg: Dictionary) -> void:
+	var link: NetLink = _links.get(int(msg.get("from", 0))) as NetLink
+	var rtc: NetRtc = link.get_direct() as NetRtc if link != null else null
+	var data: Variant = msg.get("data")
+	if rtc == null or not data is Dictionary:
+		return
+	if int((data as Dictionary).get("ep", 0)) != link.get_epoch():
+		return
+	rtc.handle_signal(data)
+
+
+## Client in LOADING/IN_HUNT: what the room server says about who is connected is only noted. It becomes
+## the roster again when this machine goes back to the lobby (unbind_world).
+func _note_server_joined(slot: int, peer_name: String) -> void:
+	_server_gone.erase(slot)
+	_server_joined[slot] = peer_name
+
+
+func _note_server_left(slot: int) -> void:
+	_server_gone[slot] = true
+	_server_joined.erase(slot)
+
+
+## peer_left from the room server. clean = that peer asked to leave; without it the socket just closed.
+func _on_peer_left(slot: int, clean: bool) -> void:
+	if _role == ROLE_CLIENT and _in_hunt_states():
+		_note_server_left(slot)   # who really left the hunt comes from the host's L_LOBBY
+		return
+	if _role == ROLE_HOST and _state == STATE_IN_HUNT and not clean:
+		# A drop: the slot stays for peer_timeout_s, counted from its last state (section 4.7.4).
+		var link: NetLink = _links.get(slot + 1) as NetLink
+		if link != null and link.get_path() != NetLink.PATH_RTC:
+			_drop_link(slot + 1)
+			roster_changed.emit()
+		return   # on RTC: that client keeps playing without the server
+	_remove_peer(slot)
 
 
 func _on_server_error(code: StringName, msg: Dictionary) -> void:
@@ -458,7 +608,7 @@ func _on_server_error(code: StringName, msg: Dictionary) -> void:
 				return
 			if _sig != null:   # null when only the close code arrived (see CLOSE_CODES)
 				_sig.close(Time.get_ticks_msec(), false)
-				_closing_sig = _sig
+				_closing_sigs.append(_sig)
 			_connect_socket()
 		&"room_not_found", &"in_progress":
 			_fail(code)
@@ -501,11 +651,13 @@ func _remove_peer(slot: int) -> void:
 	_last_rx_ms.erase(slot)
 	_absent.erase(slot)
 	_queued_states.erase(slot)
+	_server_gone.erase(slot)
 	if _role == ROLE_HOST:
-		var link: NetLink = _links.get(slot + 1) as NetLink
-		if link != null:
-			_links.erase(slot + 1)
-			link.close()
+		_drop_link(slot + 1)
+		var had_token: bool = int(_tokens.get(slot, 0)) != 0
+		_tokens.erase(slot)
+		if had_token and _in_hunt_states():
+			_send_lock(true)   # revoked: the lock goes again without that slot (section 4.7.2)
 		_broadcast_lobby()
 	if _in_hunt_states():
 		var world: HuntWorld = _live_world()
@@ -525,19 +677,21 @@ func _path_shown(slot: int) -> int:
 	return NetLink.PATH_RTC if bool(_remote_rtc.get(slot, false)) else NetLink.PATH_RELAY
 
 
-func _make_link(remote_id: int) -> void:
+## epoch: 0 for the link of the first entry; the epoch of the rejoin attempt for a link that replaces one.
+func _make_link(remote_id: int, epoch: int = 0) -> NetLink:
 	var link: NetLink = NetLink.new()
-	link.setup(_cfg, remote_id, _relay_send.bind(remote_id))
+	link.setup(_cfg, remote_id, _relay_send.bind(remote_id), epoch)
 	link.path_changed.connect(_on_link_path_changed)
 	link.set_relay_alive_check(_is_socket_up)
 	_links[remote_id] = link
 	if not _rtc:
-		return
+		return link
 	# The client offers, the host answers (section 4.2). A peer that never offers leaves this
 	# connection idle until ice_timeout_s closes it: the link just stays on the relay.
 	var rtc: NetRtc = NetRtc.new()
-	if rtc.start(_cfg["ice_servers"], _role == ROLE_CLIENT, _drop_ice, _signal_send.bind(remote_id)):
+	if rtc.start(_cfg["ice_servers"], _role == ROLE_CLIENT, _drop_ice, _signal_send.bind(remote_id, epoch)):
 		link.set_direct(rtc, Time.get_ticks_msec() + int(float(_cfg["ice_timeout_s"]) * 1000.0))
+	return link
 
 
 func _is_socket_up() -> bool:
@@ -548,9 +702,29 @@ func _relay_send(payload: PackedByteArray, to_id: int) -> bool:
 	return _sig != null and _sig.send_relay(to_id, payload)
 
 
-func _signal_send(data: Dictionary, to_id: int) -> void:
-	if _sig != null:
-		_sig.send_json({"t": "signal", "to": to_id, "data": data})
+func _signal_send(data: Dictionary, to_id: int, epoch: int) -> void:
+	var link: NetLink = _links.get(to_id) as NetLink
+	if _sig == null or link == null or link.get_epoch() != epoch:
+		return   # signaling of a transport whose link was replaced
+	var out: Dictionary = data.duplicate()
+	out["ep"] = epoch
+	_sig.send_json({"t": "signal", "to": to_id, "data": out})
+
+
+## Host: locks / unlocks the room on the server. Locked, it lists who may come back: the token of every
+## client slot that sent one (key = peer id). Each lock replaces the list; unlocking erases it.
+func _send_lock(locked: bool) -> void:
+	if _sig == null:
+		return
+	var msg: Dictionary = {"t": "lock", "locked": locked}
+	if locked:
+		var tokens: Dictionary = {}
+		for slot: int in _peers:
+			if slot != _local_slot and int(_tokens.get(slot, 0)) != 0:
+				tokens[str(slot + 1)] = int(_tokens[slot])
+		if not tokens.is_empty():
+			msg["tokens"] = tokens
+	_sig.send_json(msg)
 
 
 func _on_link_path_changed() -> void:
@@ -632,8 +806,7 @@ func host_start_hunt() -> bool:
 			return false
 	_refresh_local_info()
 	_rng_seed = maxi(randi(), 1)   # never 0: 0 means "randomize" in HuntRequest
-	if _sig != null:
-		_sig.send_json({"t": "lock", "locked": true})
+	_send_lock(true)
 	var slots_mask: int = 0
 	for slot: int in _peers:
 		slots_mask |= 1 << slot
@@ -670,6 +843,8 @@ func _enter_loading() -> void:
 	_queued_states.clear()
 	_pending_left = PackedInt32Array()
 	_absent.clear()
+	_server_gone.clear()
+	_server_joined.clear()
 	if not _use_router:
 		_set_state(STATE_LOADING)
 		return
@@ -724,6 +899,9 @@ func unbind_world(world: HuntWorld) -> void:
 	_world = null
 	if not _in_hunt_states():
 		return
+	if _rejoining:
+		_fail(&"connection_lost")   # the hunt scene went away with no connection to go back to the lobby with
+		return
 	_queued_events.clear()
 	_queued_states.clear()
 	_pending_left = PackedInt32Array()
@@ -738,16 +916,29 @@ func unbind_world(world: HuntWorld) -> void:
 	if _state != STATE_LOBBY:
 		return
 	if _role == ROLE_HOST:
-		if _sig != null:
-			_sig.send_json({"t": "lock", "locked": false})
+		# Whoever was still inside its grace period has no link to be in a lobby with.
+		for slot: int in _peers.keys():
+			if slot != _local_slot and not _links.has(slot + 1):
+				_remove_peer(slot)
+		_send_lock(false)   # also erases the tokens on the server
 		_broadcast_lobby()
+	else:
+		# Back in the lobby the roster is the room server's again: drop who it stopped listing and add
+		# who entered the (already unlocked) room while this machine was still in the hunt scene.
+		for slot: int in _server_gone.keys():
+			_remove_peer(slot)
+		_server_gone.clear()
+		for slot: int in _server_joined:
+			if slot != _local_slot and not _peers.has(slot):
+				_add_peer(slot, str(_server_joined[slot]))
+		_server_joined.clear()
 	roster_changed.emit()
 
 
 ## Sends now the events the world has queued (end of hunt), without waiting for the tick.
 func flush() -> void:
 	var world: HuntWorld = _live_world()
-	if world != null and _in_hunt_states():
+	if world != null and _in_hunt_states() and not _rejoining:
 		_send_events_to_all(_take_world_events(world))
 	for id: int in _links:
 		(_links[id] as NetLink).flush_now()   # relay: ignores the rate; RTC frames already left in send_events
@@ -798,12 +989,16 @@ func _update_hunt(delta: float, now: int) -> void:
 		# buffers. Everybody gets a fresh window instead of being blamed for our own freeze.
 		for slot: int in _peers:
 			_last_rx_ms[slot] = now
+		if _rejoining:
+			_rejoin_started_ms = now   # the freeze does not count against rejoin_timeout_s either
 	if _role == ROLE_HOST:
 		_check_peers(now)
+	elif _rejoining:
+		_update_rejoin(now)
 	else:
 		_check_host(now)
-	if _state != STATE_IN_HUNT:
-		return
+	if _state != STATE_IN_HUNT or _rejoining:
+		return   # reconnecting: no C_STATE and no C_* go out (section 4.7.3)
 	var world: HuntWorld = _live_world()
 	if world == null:
 		return
@@ -838,7 +1033,7 @@ func _update_hunt(delta: float, now: int) -> void:
 
 
 ## Host: a client silent for peer_absent_s is marked absent (still in the room); for peer_timeout_s it
-## is treated as gone, even if the server never said so (section 6.9).
+## is removed, with or without a link: that is the end of its grace period (sections 6.9 and 4.7.4).
 func _check_peers(now: int) -> void:
 	var absent_ms: int = int(float(_cfg["peer_absent_s"]) * 1000.0)
 	var limit_ms: int = int(float(_cfg["peer_timeout_s"]) * 1000.0)
@@ -864,15 +1059,276 @@ func _check_peers(now: int) -> void:
 ## nothing at all for host_timeout_s ends the connection.
 func _check_host(now: int) -> void:
 	var silent_ms: int = now - int(_last_rx_ms.get(HOST_ID - 1, now))
+	var stalled: bool = silent_ms > int(float(_cfg["host_stall_warn_s"]) * 1000.0)
+	if _can_rejoin():
+		# Conditions G1 and G2 of section 4.7.3, checked every frame.
+		var link: NetLink = _links.get(HOST_ID) as NetLink
+		var socket_open: bool = _sig != null and _sig.is_open()
+		if link != null and link.is_lost():
+			_enter_rejoin(now)
+			return
+		if not socket_open and (link == null or link.get_path() != NetLink.PATH_RTC or stalled):
+			_enter_rejoin(now)
+			return
+		if stalled and socket_open and not _probed:
+			# Silence with the socket apparently open: is it the host, or a half-open socket? One probe
+			# per episode. No pong: the socket is aborted and the next frame reconnects. Pong: it is the
+			# host that is silent, and host_timeout_s below keeps counting.
+			_probed = true
+			_sig.probe(now, int(float(_cfg["rejoin_probe_s"]) * 1000.0))
+	if not stalled:
+		_probed = false
 	if silent_ms > int(float(_cfg["host_timeout_s"]) * 1000.0):
 		_fail(&"connection_lost")
 		return
-	var stalled: bool = silent_ms > int(float(_cfg["host_stall_warn_s"]) * 1000.0)
 	if stalled != _stalled:
 		_stalled = stalled
 		_absent[HOST_ID - 1] = stalled
 		stall_changed.emit(stalled)
 		roster_changed.emit()
+
+
+# --- reconnection, client (section 4.7.3) --------------------------------------------------------
+
+## Only a client in a hunt that is still running reconnects; everything else ends as before F8.
+func _can_rejoin() -> bool:
+	if _role != ROLE_CLIENT or _state != STATE_IN_HUNT or _rejoining:
+		return false
+	var world: HuntWorld = _live_world()
+	return world != null and not world.is_hunt_over()
+
+
+func _enter_rejoin(now: int) -> void:
+	_drop_link(HOST_ID)
+	_discard_socket(now)
+	if _stalled:
+		_stalled = false
+		stall_changed.emit(false)
+	_absent.erase(HOST_ID - 1)
+	_probed = false
+	_rejoining = true
+	_rejoin_joined = false
+	_rejoin_started_ms = now
+	_rejoin_failures = 0
+	_rejoin_next_ms = now   # the first attempt is immediate
+	rejoin_entries += 1
+	rejoin_attempt_ms = PackedInt32Array()
+	roster_changed.emit()
+	reconnect_changed.emit(true)
+	if _rejoining and _state == STATE_IN_HUNT:
+		_update_rejoin(now)
+
+
+## Closes the current socket without saying leave (the slot must stay) and lets go of it.
+func _discard_socket(now: int) -> void:
+	var sig: NetSignaling = _sig
+	_sig = null
+	if sig == null:
+		return
+	if sig.is_muted():
+		if not _parked.has(sig):
+			_parked.append(sig)   # half-open (tests): it stays up until the session ends
+		return
+	if not sig.is_closed():
+		sig.close(now, false)
+		_closing_sigs.append(sig)
+
+
+func _update_rejoin(now: int) -> void:
+	if now - _rejoin_started_ms > int(float(_cfg["rejoin_timeout_s"]) * 1000.0):
+		_fail(&"connection_lost")
+		return
+	if _rejoin_next_ms >= 0 and now >= _rejoin_next_ms:
+		_rejoin_attempt(now)
+
+
+## One connection per attempt, to the same slot, with the token and a new link epoch.
+func _rejoin_attempt(now: int) -> void:
+	_epoch = _epoch % EPOCH_MAX + 1
+	_rejoin_next_ms = -1
+	_rejoin_joined = false
+	rejoin_attempt_ms.append(now - _rejoin_started_ms)
+	if now < _cut_until_ms:
+		_rejoin_attempt_failed(now)   # tests (debug_cut): the network is still down, no socket is opened
+		return
+	var params: Dictionary = {"t": "join", "code": _code, "want": _local_slot + 1, "tok": _token, "ep": _epoch,
+		"v": _version, "proto": NetCodec.PROTOCOL_VERSION, "name": _name}
+	var sig: NetSignaling = NetSignaling.new()
+	if not sig.open(NetSignaling.build_url(_url, params), _cfg, now):
+		_rejoin_attempt_failed(now)
+		return
+	rejoin_connections += 1
+	_sig = sig
+
+
+## The socket did not open, closed without a code, ran out of time, or dropped after "joined": the next
+## attempt waits rejoin_backoff_s[min(failures so far, last)].
+func _rejoin_attempt_failed(now: int) -> void:
+	_drop_link(HOST_ID)
+	_discard_socket(now)
+	_rejoin_joined = false
+	var backoff: Array = _cfg["rejoin_backoff_s"]
+	var wait_s: float = float(backoff[mini(_rejoin_failures, backoff.size() - 1)]) if not backoff.is_empty() else 0.0
+	_rejoin_failures += 1
+	_rejoin_next_ms = now + int(wait_s * 1000.0)
+
+
+## The room server answered the attempt with an error: there is no way back.
+func _rejoin_refused(code: StringName) -> void:
+	rejoin_refusal = code
+	if code == &"room_not_found" or code == &"host_left":
+		_fail(&"host_left")
+	else:
+		_fail(&"connection_lost")   # bad_token, in_progress, version_mismatch, expired, replaced, ...
+
+
+## Room server messages on the socket of a rejoin attempt.
+func _on_rejoin_message(msg: Dictionary) -> void:
+	match str(msg.get("t", "")):
+		"joined":
+			if int(msg.get("id", 0)) - 1 != _local_slot:
+				_fail(&"connection_lost")   # never: the server gives the token's slot or refuses
+				return
+			# The roster is not touched and L_READY is not sent again: the host still has this slot.
+			var listed: Dictionary = {}
+			var others: Variant = msg.get("peers", [])
+			if others is Array:
+				for entry: Variant in others:
+					if entry is Dictionary:
+						listed[int((entry as Dictionary).get("id", 0)) - 1] = true
+			_server_gone.clear()
+			for slot: int in _peers:
+				if slot != _local_slot and not listed.has(slot):
+					_server_gone[slot] = true
+			for slot: int in _server_joined.keys():
+				if not listed.has(slot):
+					_server_joined.erase(slot)
+			_rejoin_joined = true
+			_make_link(HOST_ID, _epoch)   # on the relay; on the Web a new NetRtc offers again
+		"peer_joined":
+			_note_server_joined(int(msg.get("id", 0)) - 1, str(msg.get("name", "")))
+		"peer_left":
+			_note_server_left(int(msg.get("id", 0)) - 1)
+		"host_left":
+			_fail(&"host_left")
+		"signal":
+			_on_signal(msg)
+		"error":
+			_rejoin_refused(StringName(str(msg.get("code", ""))))
+
+
+## EV_FULL_SYNC arrived on the new link: this client is back.
+func _finish_rejoin() -> void:
+	_rejoining = false
+	_rejoin_joined = false
+	_rejoin_next_ms = -1
+	_probed = false
+	_last_rx_ms[HOST_ID - 1] = Time.get_ticks_msec()
+	rejoin_returns += 1
+	roster_changed.emit()
+	reconnect_changed.emit(false)
+
+
+# --- reconnection, host (section 4.7.4) ----------------------------------------------------------
+
+## A hunter came back to its slot: new link of the epoch it announced, then the state of the hunt.
+func _readmit(slot: int, epoch: int) -> void:
+	var now: int = Time.get_ticks_msec()
+	var id: int = slot + 1
+	_drop_link(id)                                    # 1. the old link, alive or not
+	var link: NetLink = _make_link(id, epoch & 0x0F)
+	_last_rx_ms[slot] = now                           # 2. its grace period starts again
+	var world: HuntWorld = _live_world()
+	if world != null:
+		# 3. What was waiting for the tick goes only to the links that already existed: for the new one
+		#    it is already inside the sync.
+		var pending: PackedByteArray = _take_world_events(world)
+		for other_id: int in _links:
+			if other_id != id:
+				(_links[other_id] as NetLink).send_events(pending)
+	_broadcast_lobby()                                # 4. L_LOBBY (to the others it is only the path change) ...
+	if world != null:
+		_scratch.clear()
+		world.net_write_full_sync(_scratch)           #    ... then EV_FULL_SYNC and the replayed records
+		link.send_events(_scratch.data_array)
+		readmissions += 1
+	link.flush_now()                                  # 5.
+	if _sig != null:
+		_sig.flush()
+	roster_changed.emit()
+
+
+# --- traffic (section 4.7.8) -----------------------------------------------------------------------
+
+## Once per second: bytes of frames sent and received by each link since the previous sample.
+func _update_traffic(now: int) -> void:
+	if _traffic_ms == 0:
+		_traffic_ms = now
+		return
+	var elapsed_ms: int = now - _traffic_ms
+	if elapsed_ms < TRAFFIC_WINDOW_MS:
+		return
+	_traffic_ms = now
+	var seen: Dictionary = {}
+	var links: Array = []
+	var up: int = 0
+	var down: int = 0
+	var ids: Array = _links.keys()
+	ids.sort()
+	for id: int in ids:
+		var link: NetLink = _links[id]
+		var before: Array = _traffic_seen.get(id, [])
+		var same: bool = before.size() == 3 and before[0] == link   # a replaced link starts from zero
+		var link_up: int = (link.sent_bytes - (int(before[1]) if same else 0)) * 1000 / elapsed_ms
+		var link_down: int = (link.received_bytes - (int(before[2]) if same else 0)) * 1000 / elapsed_ms
+		seen[id] = [link, link.sent_bytes, link.received_bytes]
+		links.append({"slot": id - 1, "path": link.get_path(), "up_bps": link_up, "down_bps": link_down})
+		up += link_up
+		down += link_down
+	_traffic_seen = seen
+	_traffic_links = links
+	_traffic_up = up
+	_traffic_down = down
+
+
+# --- tests only ------------------------------------------------------------------------------------
+
+## Drops the room socket and the direct transport now; for duration_s every rejoin attempt fails without
+## opening a socket. half_open: the socket goes mute instead of closing (nothing read or written, never
+## closed until the session ends), so the session has to find out by the probe and the server still sees it.
+func debug_cut(duration_s: float, half_open: bool = false) -> void:
+	if _state == STATE_NONE:
+		return
+	var now: int = Time.get_ticks_msec()
+	_cut_until_ms = now + int(duration_s * 1000.0)
+	for id: int in _links:
+		var direct: NetLink.Direct = (_links[id] as NetLink).get_direct()
+		if direct != null:
+			direct.close()
+	var sig: NetSignaling = _sig
+	if sig == null:
+		return
+	if half_open:
+		sig.debug_mute()
+		return
+	sig.abort()
+	_on_socket_closed(sig.close_code, sig.close_reason)
+
+
+## The token this session presents to come back (tests: a tampered one must be refused).
+func debug_set_token(token: int) -> void:
+	_token = token
+
+
+func debug_get_token() -> int:
+	return _token
+
+
+## The muted sockets of debug_cut(_, true), handed over: the caller now owns them (release() when done).
+func debug_take_parked() -> Array[NetSignaling]:
+	var out: Array[NetSignaling] = _parked
+	_parked = []
+	return out
 
 
 ## Host: queued EV_* records. Client: queued C_* records.
@@ -928,6 +1384,17 @@ func _dispatch(from_slot: int, records: PackedByteArray, lane: int) -> void:
 
 
 func _on_record(from_slot: int, type: int, body: PackedByteArray, lane: int) -> void:
+	if _rejoining:
+		# Until the EV_FULL_SYNC of the new link nothing of the hunt is applied: a snapshot or an event
+		# that came first would be laid over a world that is still missing what happened meanwhile.
+		if lane != NetCodec.LANE_EVENT:
+			return
+		if type == NetCodec.L_LOBBY:
+			_on_lobby(body)
+		elif type == NetCodec.EV_FULL_SYNC and _rejoin_joined:
+			_finish_rejoin()
+			_on_hunt_event(from_slot, type, body)
+		return
 	if lane == NetCodec.LANE_STATE:
 		if type == (NetCodec.C_STATE if _role == ROLE_HOST else NetCodec.H_SNAPSHOT):
 			_on_state(from_slot, body)
@@ -1023,7 +1490,7 @@ func _send_ready() -> void:
 	body.put_u8(_index_of(weapons, me.weapon_id))
 	body.put_u8(_index_of(weapons, request.weapon_ids[1]) if request.weapon_ids.size() > 1 else NO_INDEX)
 	body.put_u8(_index_of(Data.get_dog_ids(), me.dog_id))
-	body.put_u32(0)
+	body.put_u32(_token)
 	link.send_events(_record(NetCodec.L_READY, body.data_array))
 
 
@@ -1034,6 +1501,7 @@ func _on_ready(from_slot: int, body: PackedByteArray) -> void:
 	info.ready = body[0] != 0
 	info.weapon_id = _id_at(Data.get_weapon_ids(), body[1])
 	info.dog_id = _id_at(Data.get_dog_ids(), body[3])
+	_tokens[from_slot] = body.decode_u32(4)   # 0 from a client of before F8: it cannot come back
 	_broadcast_lobby()
 	roster_changed.emit()
 
@@ -1079,12 +1547,14 @@ func _on_lobby(body: PackedByteArray) -> void:
 	var weapons: Array = Data.get_weapon_ids()
 	var dogs: Array = Data.get_dog_ids()
 	var count: int = body[3]
+	var listed: Dictionary = {}
 	for i: int in count:
 		var at: int = L_LOBBY_HEADER_BYTES + i * L_LOBBY_ENTRY_BYTES
 		if at + L_LOBBY_ENTRY_BYTES > body.size():
 			break
 		var slot: int = body[at]
 		var flags: int = body[at + 1]
+		listed[slot] = true
 		var info: NetPeerInfo = _peers.get(slot) as NetPeerInfo
 		# Who is in the room comes from the room server (joined / peer_joined / peer_left), which is
 		# ordered; an L_LOBBY relayed before a peer_left may still list that peer and must not bring it back.
@@ -1098,6 +1568,14 @@ func _on_lobby(body: PackedByteArray) -> void:
 		info.loaded = (flags & LOBBY_FLAG_LOADED) != 0
 		info.weapon_id = _id_at(weapons, body[at + 2])
 		info.dog_id = _id_at(dogs, body[at + 3])
+	if body[0] >= STATE_LOADING and _in_hunt_states() and listed.size() == count:
+		# In the hunt, who left comes from the host (section 4.7.3): the room server's peer_left may be
+		# just a drop that the host is still waiting for.
+		for slot: int in _peers.keys():
+			if slot != _local_slot and not listed.has(slot):
+				_remove_peer(slot)
+				if _state == STATE_NONE:
+					return
 	roster_changed.emit()
 
 

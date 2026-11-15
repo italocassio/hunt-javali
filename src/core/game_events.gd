@@ -40,6 +40,8 @@ signal hunter_left(slot: int)
 signal hunter_died(slot: int)
 signal spectate_changed(slot: int)
 signal net_stall_changed(stalled: bool)
+signal net_reconnect_changed(active: bool)          # Net -> A Hud, A Player, B HuntController
+signal hunter_away_changed(slot: int, away: bool)   # B HuntController -> A Hud
 
 # HUD
 signal hud_message_requested(text: String, duration_s: float)

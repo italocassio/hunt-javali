@@ -42,7 +42,7 @@ Identificadores em inglês; texto do jogador em PT-BR. Referências `arquivo:lin
 | D4 | WebRTC DataChannels em estrela (cliente↔anfitrião), 2 canais por par: confiável/ordenado e não confiável (`maxRetransmits = 0`). |
 | D4b | Sem TURN: par cujo ICE não fecha trafega pelo WebSocket do servidor de salas (relay binário cego). |
 | D4c | Godot nativo/headless não tem WebRTC: lá o transporte é sempre relay WS ou loopback. Relay é transporte de primeira classe. |
-| D5 | Anfitrião caiu = fim para todos (sem migração). Cliente caiu = caçador some, partida segue. |
+| D5 | Anfitrião caiu = fim para todos (sem migração). Cliente caiu = caçador some, partida segue (F8: some só depois da carência; antes disso ele pode voltar, §4.7). |
 | D6 | Abate paga quem matou; bônus para todos; progressão só para quem já tinha o contrato; consumíveis por jogador; nº de javalis escala por dados. |
 | D7 | Morto vira espectador. Derrota = lavoura 0% ou todos mortos. Vitória = todos os javalis abatidos. |
 | D8 | Cada jogador leva o seu cão; anfitrião simula; dono comanda pela rede (F7, concluída). |
@@ -212,6 +212,8 @@ func get_selected_contract_index() -> int      # (0)
 func get_link_path(slot: int) -> int    # (Path.NONE) Path do enlace com aquele peer (HUD/lobby/testes)
 func get_hunt_seed() -> int             # (0) 0 fora de sala; semente do L_START, igual em todos os peers
 func is_peer_absent(slot: int) -> bool  # (false) ausência curta (peer_absent_s), sem remoção da sala
+func is_reconnecting() -> bool          # (false) F8: cliente tentando voltar à caçada (§4.7.3)
+func get_traffic() -> Dictionary        # ({}) F8: taxa do último segundo, total e por enlace (§4.7.9)
 
 # --- lobby (game-systems) ---
 func create_room() -> void              # nome vem de Profile.get_setting("player_name")
@@ -247,6 +249,8 @@ Ao entrar em `LOADING`, `Net` completa o `Router.get_pending_request()` com `rng
 | `hunter_died(slot: int)` | B `HuntController` | A `Hud`, `SpectatorCamera` | qualquer caçador (local ou remoto) morreu |
 | `spectate_changed(slot: int)` | A `Player` | A `Hud` | começou/trocou de alvo como espectador (−1 = deixou) |
 | `net_stall_changed(stalled: bool)` | `Net` | A `Hud` (faixa "Anfitrião sem resposta…") | cliente ficou `host_stall_warn_s` sem snapshot / voltou |
+| `net_reconnect_changed(active: bool)` (F8) | `Net` | A `Hud` (faixa "Reconectando…"), A `Player` (trava de entrada), B `HuntController` | este cliente começou a reconectar / voltou (§4.7.3) |
+| `hunter_away_changed(slot: int, away: bool)` (F8) | B `HuntController` | A `Hud` (mensagem) | caçador remoto ficou ausente / voltou (§4.7.7) |
 
 `player_died()` continua significando "o caçador **desta máquina** morreu". Sinais de cão
 (`dog_state_changed`, `dog_health_changed`, `dog_command_executed`) passam a valer só para o cão do jogador
@@ -287,7 +291,7 @@ const EV_DOG_MARK: int = 0x27
 const EV_DOG_CMD: int = 0x28
 const EV_MESSAGE: int = 0x29
 const EV_HUNT_END: int = 0x2A
-const EV_FULL_SYNC: int = 0x2B         # reserved (F8)
+const EV_FULL_SYNC: int = 0x2B         # F8: header of a rejoin sync, followed by replayed records (section 4.7.6)
 # Client -> host
 const C_STATE: int = 0x40              # state lane
 const C_SHOT: int = 0x41
@@ -302,6 +306,7 @@ const HF_SPRINT: int = 4
 const HF_ALIVE: int = 8
 const HF_RELOAD: int = 16
 const HF_UNARMED: int = 32             # binoculars / item in hand
+const HF_AWAY: int = 64                # F8: set by the host for a hunter that is silent / reconnecting
 
 const BOAR_STATES: Array[StringName] = [&"wander", &"to_crop", &"eat", &"to_bait", &"alert", &"flee",
 	&"scrape", &"charge", &"recover", &"bayed", &"held", &"dead"]
@@ -457,6 +462,10 @@ func net_peer_left(_slot: int) -> void:                       # that hunter (and
 
 func net_connection_lost() -> void:                           # client: ends DISCONNECTED; host: every remote leaves
 	pass
+
+
+func net_write_full_sync(_out: StreamPeerBuffer) -> void:     # F8, host: EV_FULL_SYNC record + replayed records (4.7.6)
+	pass
 ```
 `Layers` não muda: caçador remoto não tem corpo nem forma de colisão (sem fogo amigo, o raio passa).
 
@@ -496,7 +505,7 @@ Object da sala antes de existir qualquer mensagem. A entrada Bun local aceita ex
 | URL (base `net.server_url`) | Parâmetros | Primeira mensagem do servidor |
 |---|---|---|
 | `…/ws?t=create` | `v` (config/version), `proto` (int), `name` | `{"t":"created","code":"K7QF2","id":1}`. O servidor sorteia o código (5 caracteres, alfabeto sem I, O, 0, 1). Código sorteado já em uso → `error retry` (o cliente tenta de novo, até 3 vezes). |
-| `…/ws?t=join` | `code`, `v`, `proto`, `name`, `want` (id desejado ou 0) | `{"t":"joined","code":"K7QF2","id":2,"peers":[{"id":1,"name":"Italo"}]}`; aos demais: `{"t":"peer_joined","id":2,"name":"Ana"}`. Id = `want` se livre, senão o menor livre em 2..4. |
+| `…/ws?t=join` | `code`, `v`, `proto`, `name`, `want` (id desejado ou 0) | `{"t":"joined","code":"K7QF2","id":2,"peers":[{"id":1,"name":"Italo"}]}`; aos demais: `{"t":"peer_joined","id":2,"name":"Ana"}`. Id = `want` se livre, senão o menor livre em 2..4. F8: `tok` e `ep` opcionais fazem do `join` uma reentrada em sala trancada, e `peer_joined` ganha `ep` (§4.7.2). |
 
 O upgrade é sempre aceito quando a origem é válida; a recusa vem como `error` + close (o navegador não
 mostra o motivo de um upgrade negado). Depois da primeira mensagem:
@@ -504,13 +513,13 @@ mostra o motivo de um upgrade negado). Depois da primeira mensagem:
 | Cliente → servidor | Campos | Efeito |
 |---|---|---|
 | `{"t":"signal"}` | `to`, `data` (objeto opaco) | repassa `{"t":"signal","from":<id>,"data":{…}}`. Não-anfitrião só pode `to: 1`. |
-| `{"t":"lock"}` | `locked` (bool) | só anfitrião. Sala trancada recusa entrada com `in_progress`. |
+| `{"t":"lock"}` | `locked` (bool); F8: `tokens` (opcional) | só anfitrião. Sala trancada recusa entrada com `in_progress`. F8: `tokens` lista quem pode reentrar (§4.7.2). |
 | `{"t":"ping"}` | — (texto exato, sem espaços) | `{"t":"pong"}`. No Worker é resposta automática (§5.2): não acorda o objeto. |
 | `{"t":"leave"}` | — | igual a fechar o socket |
 
 | Servidor → cliente | Quando |
 |---|---|
-| `{"t":"peer_left","id":3}` | um cliente fechou/caiu |
+| `{"t":"peer_left","id":3}` | um cliente fechou/caiu. F8: com `"clean":true` quando saiu por `leave` (§4.7.2) |
 | `{"t":"host_left"}` + close 4410 | o anfitrião fechou/caiu: a sala é destruída e todos os sockets fechados |
 | `{"t":"error","code":…}` + close | ver tabela abaixo; em `version_mismatch` vem `"host_v":"0.4.0"` |
 
@@ -526,12 +535,14 @@ mostra o motivo de um upgrade negado). Depois da primeira mensagem:
 | `rate_limited` | 4429 | estourou a taxa por conexão |
 | `too_big` | 4413 | mensagem acima do limite |
 | `expired` | 4408 | sala passou de `room_max_age_s` |
+| `bad_token` (F8) | 4401 | `join` com `tok` que não vale para aquele slot, ou sala destrancada (§4.7.2) |
+| `replaced` (F8) | 4411 | outra conexão reentrou no mesmo slot com o token certo; esta foi fechada |
 
 Regras adicionais (implementadas): `signal` ou binário para id fora da sala é descartado em silêncio; destino
 proibido (não-anfitrião com `to` ≠ 1) → `bad_request`. O código de sala não diferencia maiúsculas de
 minúsculas. `want` fora de 2..4 é ignorado. Ordem dos erros na entrada: `room_not_found`, `expired`,
-`version_mismatch`, `in_progress`, `room_full`. Em produção o Worker rejeita requisição sem `Origin` (403); o
-servidor Bun local aceita.
+`version_mismatch`, `in_progress`, `room_full` (F8: com `tok`, depois de `version_mismatch` vem só
+`bad_token`). Em produção o Worker rejeita requisição sem `Origin` (403); o servidor Bun local aceita.
 
 Cota diária do plano gratuito esgotada ou serviço fora do ar: a conexão nem abre (ou cai sem código). O
 cliente trata os dois casos como `server_unreachable` (§6.11).
@@ -579,6 +590,9 @@ quadro continua sendo uma mensagem do seu canal. Taxa do relay: média `relay_hz
 - **Keepalive**: caminho RTC ocioso manda um quadro de ack a cada `rtc_stall_s/3`.
 - **Vigia de silêncio**: pausado durante `LOADING` e zerado quando o próprio peer fica sem fazer poll por mais
   de metade de `rtc_stall_s` (aba congelada ou engasgo local; evita rebaixar por culpa própria).
+- **Época (F8)**: o byte 0 do quadro leva a pista nos bits 0–3 e a época do enlace nos bits 4–7 (0 = enlace
+  original). Cliente que volta à caçada ganha um enlace novo, de outra época; quadro de época diferente é
+  descartado (§4.7.5).
 
 ### 4.5 Registros de jogo
 
@@ -604,6 +618,7 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | `EV_DOG_CMD` | H→C | E | por comando | `owner u8, cmd u8 (0 Pega, 1 Volta)` | 2 |
 | `EV_MESSAGE` | H→C | E | raro | `target_slot u8 (255 = todos), msg u8` | 2 |
 | `EV_HUNT_END` | H→C | E | 1× | `outcome u8, crop u16 (×0,01 %), duration_s u16, killed u8, total u8, n u8, n×{slot u8, kills u8, money u32}` | 8+6n |
+| `EV_FULL_SYNC` (F8) | H→C | E | 1× por reentrada | `t_ms u32, crop u16 (×0,01 %), killed u8, total u8, n_records u16`, seguido de `n_records` registros repetidos (§4.7.6) | 10 |
 | `C_SHOT` | C→H | E | por disparo | `shot_id u32, weapon u8, origin xz 2×u16, origin_y i16 (cm), n u8, n×{boar u8, zone u8, damage u16 (×0,1), dist u16 (×0,1 m)}` | 12+6n |
 | `C_CHARGE_HIT` | C→H | E | por investida sofrida | `boar u8` | 1 |
 | `C_BAIT` | C→H | E | por ceva | `xz 2×u16` | 4 |
@@ -619,7 +634,8 @@ dali que o `HuntController` tira a raça de cada slot (§6.5). A constante `DOGS
 
 **`HUNTER_STATE` (14 bytes):** `xz 2×u16, y i16 (cm), yaw u16, pitch i8 (graus), speed u8 (×0,05 m/s),
 flags u8 (NetCodec.HF_*), weapon u8, health u8 (ceil), shot_seq u8` (contador de disparos: quem recebe
-toca `play_fire` + som quando muda).
+toca `play_fire` + som quando muda). F8: `HF_AWAY` (64) é ligado só pelo anfitrião, ao repassar no snapshot um
+caçador ausente (§4.7.7). O `token` do `L_READY` deixa de ser 0 (§4.7.1).
 
 **`H_SNAPSHOT`:**
 ```
@@ -659,6 +675,311 @@ base num canal sem garantia e não compensa a 30 kbit/s. Taxas ficam em `data/ne
 bytes é equivalente (TCP/TLS/WS no lugar de UDP/DTLS/SCTP); o que limita o relay não é banda, é a cota de
 mensagens do plano gratuito (§5.4).
 
+### 4.7 Reconexão (F8)
+
+Estado: **contrato da F8, ainda não implementado.** Onde este item contradiz o resto do documento (que
+descreve a 0.4.8), vale este item.
+
+Escopo: um **cliente** que perde a conexão em `IN_HUNT` volta **na mesma página**, no mesmo slot, sem perder a
+caçada. A `NetSession`, o mundo, o `Player` (posição, vida, munição, consumíveis) e o `HuntResult` parcial
+continuam na memória dele; a rede só devolve o que o anfitrião decidiu enquanto ele esteve fora. Fora:
+anfitrião que cai (a sala morre, como hoje), queda em `LOBBY`/`LOADING` (como hoje), recarregar a página,
+TURN, migração de anfitrião.
+
+#### 4.7.1 Decisões
+
+| Tema | Decisão |
+|---|---|
+| Identidade | slot + `token` u32 sorteado pelo cliente uma vez por `NetSession` (`maxi(randi(), 1)`, nunca 0), enviado em todo `L_READY`. O anfitrião guarda o último token de cada slot e o entrega ao servidor no `lock`. Aceita a sugestão da coordenação: o servidor continua sem estado próprio (o mapa mora no attachment do socket do anfitrião). |
+| Carência do slot | **`net.peer_timeout_s`, que sobe de 30 para 45 s**, contada do último `C_STATE` recebido daquele slot. Não há chave nova: queda avisada pelo servidor e silêncio sem aviso passam a ter o mesmo prazo. Só a saída explícita (`leave`) remove na hora. |
+| Cliente durante a queda | entrada bloqueada, faixa "Reconectando…", réplicas paradas, sem dano. Tenta por `net.rejoin_timeout_s` (30 s); desistiu = caminho de hoje (`DISCONNECTED`, abates pagos). |
+| Ausente no anfitrião | caçador fica parado onde estava, javalis o ignoram, vale como vivo para "todos caídos", cão e placar ficam. |
+| Enlace depois da volta | `NetLink` **novo** (seqs zeradas, RELAY, nova tentativa de RTC). Quadros levam a **época** do enlace para que restos do enlace antigo não o derrubem. Nada é reenviado: os eventos perdidos são substituídos pelo `EV_FULL_SYNC`. |
+| `EV_FULL_SYNC` | cabeçalho de 10 bytes + **repetição de registros comuns** (`EV_BOAR_SPAWN`, `EV_BOAR_DEATH`, `EV_CROP_EATEN`, `EV_BAIT`, `EV_DOG_MARK`, `EV_HUNT_END`) que o cliente aplica pelos tratadores que já existem, todos idempotentes. Não há formato de pedaços: `NetLink.send_events` já reparte registros em quadros. |
+| Estado do próprio caçador | não trafega: o cliente é o dono dele (D3) e nunca saiu da página. Munição e consumíveis idem. |
+| `PROTOCOL_VERSION` | continua 1: `config/version` já separa versões, e servidor e cliente novos convivem com os antigos (§4.7.2). |
+
+#### 4.7.2 Servidor (`server/rooms.js`; `worker.js` e `server.js` não mudam)
+
+Reentrada = `…/ws?t=join&code=K7QF2&v=…&proto=1&name=…&want=<id>&tok=<token>&ep=<época>`.
+
+| Ponto | Mudança |
+|---|---|
+| `parseHello` | devolve também `tok` e `ep` (só em `t=join`). `tok`: decimal `^\d{1,10}$` de 1 a 4294967295 (o `toInt` atual só aceita 9 dígitos: conferir à parte); ausente, vazio ou `0` → `0` = entrada normal. `ep`: inteiro 0..15, ausente → 0. Valor inválido em qualquer um → `null` (`bad_request`). |
+| `admit`, `tok = 0` | exatamente como hoje (sala trancada → `in_progress`). |
+| `admit`, `tok ≠ 0` | depois de `room_not_found`, `expired` e `version_mismatch`: aceita se `host.meta.locked`, `want` está em 2..`max_peers_per_room` e `host.meta.tokens[String(want)] === tok`. O id é `want`; não passa por `in_progress` nem `room_full`. Qualquer outro caso (token errado, slot sem token, sala destrancada) → **`bad_token`**, close **4401**. A `meta` do cliente ganha `ep`. |
+| Slot ainda ocupado | se existe conexão viva com aquele id (celular meio-aberto), `admit` a marca `left`, envia `{"t":"error","code":"replaced"}` e a fecha com **4411** antes de devolver `{meta}`. Não sai `peer_left`; o `onClose` posterior do socket antigo é no-op (já `left`). É o único efeito colateral de `admit`. |
+| `welcome` | `peer_joined` ganha `ep` (0 na entrada normal): `{"t":"peer_joined","id":2,"name":"Ana","ep":3}`. `joined` não muda. |
+| `lock` | `{"t":"lock","locked":true,"tokens":{"2":123456,"3":987654}}`. `tokens` é opcional: objeto com chaves `"2"`..`"4"` e valores inteiros de 1 a 4294967295; outro formato → `bad_request`. Cada `lock` **substitui** o mapa em `host.meta.tokens`; `locked:false` ou `tokens` ausente apaga. Revogar um slot = reenviar o `lock` sem ele. |
+| `leave` | `onClose(peers, peer, clean = false)`; o `{"t":"leave"}` chama com `clean = true` e o aviso sai `{"t":"peer_left","id":3,"clean":true}`. Socket que só fechou: sem `clean`. |
+
+Ordem dos erros na entrada: `room_not_found`, `expired`, `version_mismatch`; depois, com `tok`: `bad_token`; sem
+`tok`: `in_progress`, `room_full`. `meta` do anfitrião: `+ tokens` (≤ 60 bytes; cabe nos 2 kB do attachment e
+sobrevive à hibernação). `meta` do cliente: `+ ep`.
+
+Convivência: cliente 0.4.8 com servidor novo não manda `tokens` nem `tok` (comportamento de hoje). Cliente novo
+com servidor antigo: o `lock` com `tokens` é aceito e ignorado, a reentrada recebe `in_progress` e o cliente
+desiste (comportamento de hoje), **mas** sem o `clean` toda saída explícita vira carência de 45 s. Por isso o
+servidor é publicado **antes** do jogo.
+
+Cota (§5.4): cada tentativa de reentrada é 1 upgrade (1 request do Worker + 1 do objeto); com o backoff abaixo
+são no máximo ~10 em 30 s, e tentativa feita sem rede não chega ao Cloudflare. Somando a renegociação do WebRTC
+(~2 requests), os segundos em relay até o ICE fechar (≤ 8 requests) e o `EV_FULL_SYNC` (≤ 4 mensagens), uma
+reconexão custa ≈ 20 requests de 100.000/dia. O `lock` com tokens é a mesma mensagem de hoje (+1 por revogação).
+Par caído não gasta nada, e a troca do socket meio-aberto libera a conexão presa no objeto.
+
+#### 4.7.3 Cliente (`NetSession`)
+
+`RoomState` continua `IN_HUNT` durante a reconexão (`Net.is_active()` não muda); o estado novo é
+`Net.is_reconnecting()` + sinal `GameEvents.net_reconnect_changed(active)`.
+
+**Quando entra** (papel CLIENT, `IN_HUNT`, mundo vinculado com `is_hunt_over() == false`), conferido todo quadro:
+
+| # | Condição |
+|---|---|
+| G1 | o WebSocket não está aberto **e** (o enlace com o anfitrião não está em RTC **ou** há `host_stall_warn_s` sem snapshot) |
+| G2 | `link.is_lost()` (janela de eventos estourada) |
+
+**Sonda** (torna o G1 verdadeiro em socket meio-aberto, que hoje só seria percebido em `ping_s + pong_timeout_s`
+= 25 s, depois do `host_timeout_s`): ao completar `host_stall_warn_s` sem snapshot com o WebSocket aparentemente
+aberto, a sessão chama `NetSignaling.probe(now_ms, rejoin_probe_s)`: ping imediato e prazo de pong
+`rejoin_probe_s` (3 s); sem pong, o socket é abortado e o G1 dispara (5,5 s depois do último snapshot). Uma
+sonda por episódio de silêncio. Pong chegou: o silencioso é o anfitrião, e vale o `host_timeout_s` de hoje.
+
+**Não reconecta** (caminho de hoje): `host_left`; close com código de aplicação do servidor (4400–4429:
+`expired`, `rate_limited`, `replaced`…); caçada já encerrada. WebSocket caído com o RTC entregando snapshots:
+segue jogando sem servidor, como hoje; se o RTC parar depois, é o G1.
+
+**Ao entrar:** fecha e descarta o enlace (com o `NetRtc`) e o socket (sem `leave`); zera a faixa de anfitrião
+sem resposta (`stall_changed(false)`); emite `net_reconnect_changed(true)`; primeira tentativa imediata.
+Enquanto reconecta: não envia `C_STATE` nem `C_*`; o `host_timeout_s` fica suspenso; snapshot ou evento que
+chegue antes do `EV_FULL_SYNC` é descartado; congelamento da própria máquina (regra de §6.9) reinicia a
+contagem de `rejoin_timeout_s`. `Net.leave_room()` continua valendo (é o "Sair da caçada" da pausa).
+
+**Tentativa:** `época = época % 15 + 1` (1..15; o enlace original é 0) e abre o socket com a URL de §4.7.2,
+`want = slot + 1`, `tok = token`, prazo `connect_timeout_s`.
+
+| Resultado | Ação |
+|---|---|
+| `joined` | cria o enlace novo com a época da tentativa (RELAY; no Web, `NetRtc` novo e oferta, como na entrada). Não toca em `_peers`, não reenvia `L_READY`. Anota em `_server_gone` os slots de `_peers` que não vieram em `joined.peers`. Espera o `EV_FULL_SYNC`. |
+| `EV_FULL_SYNC` no enlace novo | fim: zera o relógio de silêncio do anfitrião, emite `net_reconnect_changed(false)` e entrega o registro ao mundo. |
+| socket não abre, fecha sem código, estoura o prazo, ou cai depois do `joined` | descarta socket e enlace; próxima tentativa depois de `rejoin_backoff_s[min(n, último)]` (n = falhas até aqui). |
+| `bad_token`, `in_progress`, `version_mismatch`, `expired`, `replaced` | desiste: `_fail(&"connection_lost")`. |
+| `room_not_found`, `host_left` | desiste: `_fail(&"host_left")`. |
+| `rejoin_timeout_s` desde a entrada no estado | desiste: `_fail(&"connection_lost")`. |
+
+Desistir é o `_fail` de hoje: `net_connection_lost()` → `DISCONNECTED` (abates pagos, sem bônus, sem
+progressão), depois `room_error`. `CLOSE_CODES` ganha `4401: &"bad_token"` e `4411: &"replaced"`.
+
+**Roster do cliente em `LOADING`/`IN_HUNT`** (muda para todos os clientes, não só para quem caiu):
+`peer_left` e `peer_joined` do servidor não mexem mais em `_peers` nem no mundo; só marcam/apagam o slot em
+`_server_gone`. Quem saiu da caçada vem do anfitrião: `L_LOBBY` com `state ≥ LOADING` que não lista um slot de
+`_peers` (≠ local) → `_remove_peer(slot)` (→ `net_peer_left`). Ao voltar a `LOBBY` (`unbind_world`), o cliente
+remove do roster os slots de `_server_gone`.
+
+#### 4.7.4 Anfitrião (`NetSession` e mundo)
+
+| Situação em `IN_HUNT` | Ação da sessão |
+|---|---|
+| `host_start_hunt` | `lock` com `tokens` de todo slot cliente com token ≠ 0 (chave = id do peer). |
+| `peer_left` com `clean` | `_remove_peer(slot)` (como hoje) + revoga o token (reenvia o `lock`). |
+| `peer_left` sem `clean` | enlace em RTC: nada (o cliente segue jogando sem servidor). Senão fecha e descarta o enlace; **o slot fica** em `_peers`. |
+| Enlace perdido (janela) | fecha e descarta o enlace; o slot fica. |
+| Silêncio > `peer_absent_s` | `is_peer_absent(slot) = true`, como hoje. |
+| Silêncio > `peer_timeout_s` (45 s), com ou sem enlace | `_remove_peer(slot)` + revoga o token. É o fim da carência. |
+| `peer_joined` de slot que está em `_peers` | **reentrada**, esteja o enlace antigo vivo ou não (ver abaixo). |
+| `peer_joined` de slot fora de `_peers` | ignora: sem enlace, sem roster (corrida com a revogação; o cliente desiste por `rejoin_timeout_s`). |
+| WebSocket do próprio anfitrião caiu | como hoje: slots sem RTC saem na hora (a sala deixou de existir no servidor). |
+| `unbind_world` | remove do roster os slots sem enlace e envia `lock false` (apaga os tokens). |
+
+Reentrada, na ordem: (1) fecha o enlace antigo, se houver, e cria o novo com `ep` do `peer_joined` (RELAY; no
+Web, `NetRtc` novo que espera a oferta); (2) relógio de silêncio do slot = agora; (3) tira os eventos pendentes
+do mundo (`net_take_events`) e os envia **só aos enlaces que já existiam** (eles já estarão contados no
+sync); (4) envia ao enlace novo, na pista de eventos: `L_LOBBY` e depois `world.net_write_full_sync(out)`;
+(5) `flush_now()`. Em `LOBBY` e `LOADING` nada muda: queda remove na hora (em `LOADING`, revogando o token).
+
+No mundo (Pacote B, anfitrião), enquanto o slot está ausente:
+
+| Tema | Regra |
+|---|---|
+| Caçador | o `RemoteHunter` fica onde estava, parado (§4.7.7). `is_present() == false` desde `peer_absent_s`: javalis o ignoram e realvam (código de hoje). |
+| Derrota "todos caídos" | o ausente vale pelo último estado: se estava vivo, a caçada não termina por morte enquanto durar a carência (código de hoje). |
+| Cão | nenhuma mudança em `dog.gd`: segue o dono parado e termina o que estava fazendo; não recebe comandos. Sai com o dono no fim da carência. |
+| Abates e placar | ficam em `_slot_stats`, como já ficam para quem sai. |
+| Caçada termina durante a carência | o anfitrião encerra normalmente. Ausente que volta antes do anfitrião sair da cena (`hunt.end_delay_s`): o sync traz o `EV_HUNT_END` e ele recebe o resultado real (bônus incluso). Depois disso a sala está destrancada: `bad_token` → `DISCONNECTED` com os abates pagos. |
+| Fim da carência | `net_peer_left(slot)` de hoje: caçador e cão saem, `hunter_left`. |
+
+#### 4.7.5 Enlace novo e época
+
+- `NetLink.setup(cfg, p_remote_id, relay_sink, p_epoch: int = 0)`. O byte 0 do quadro passa a ser
+  `lane | (epoch << 4)` (pista nos bits 0–3, época nos bits 4–7). Quadro com época diferente da do enlace é
+  contado (`stale_epoch_frames`) e descartado **antes** de olhar `seq`/`ack`. Época 0 = formato de hoje.
+- Motivo: o servidor roteia por id. Entre o servidor aceitar a reentrada e o anfitrião ler o `peer_joined`, o
+  anfitrião ainda envia quadros do enlace antigo, que chegam ao socket novo; sem a época, um `seq` de evento
+  antigo estoura a janela do enlace recém-criado e um `seq` de estado antigo faz os novos parecerem velhos.
+- Sinalização WebRTC: quem envia `signal` acrescenta `"ep": <época>` em `data`; quem recebe ignora `data` com
+  `ep` diferente da época do enlace (ausente = 0).
+- Seqs das duas pistas começam do zero; `_unacked`, adiantados e fila de saída do enlace antigo são
+  descartados nos dois lados. **Perde-se:** `C_SHOT`/`C_BAIT`/`C_DOG_CMD` que estavam em trânsito na queda (o
+  tiro dos últimos instantes pode não contar; a ceva usada é consumida e não aparece). Reenviar duplicaria
+  comando de cão e ceva; não compensa.
+- RTC: o enlace novo tenta de novo (`NetRtc` novo, `ice_timeout_s`), mesmo que o antigo tivesse sido
+  rebaixado. "Não há nova promoção" de §4.4 vale por enlace, não por jogador.
+
+#### 4.7.6 `EV_FULL_SYNC` e repetição
+
+`EV_FULL_SYNC` (`0x2B`), H→C, pista E, uma vez por reentrada, só no enlace que voltou. Corpo de 10 bytes:
+```
+t_ms u32        relógio de sessão do anfitrião (o mesmo do H_SNAPSHOT)
+crop u16        saúde da lavoura ×0,01 %
+killed u8, total u8
+n_records u16   quantos registros de repetição vêm logo a seguir, na mesma pista
+```
+Repetição (formatos de §4.5, sem mudança), nesta ordem; `n_records` conta todos:
+
+| # | Registros | Conteúdo |
+|---|---|---|
+| 1 | `EV_BOAR_SPAWN` e `EV_BOAR_DEATH` | o **diário** do anfitrião: os bytes originais de todo nascimento e de todo abate desde o `L_GO`, na ordem em que aconteceram |
+| 2 | `EV_CROP_EATEN` | todos os canteiros comidos (`CropManager.get_eaten_indices()`), 255 por registro |
+| 3 | `EV_BAIT` | uma por ceva ativa, com `duration_s = ceil(remaining_s)` (1..255) |
+| 4 | `EV_DOG_MARK` | uma por marcação não vencida: `owner = 255`, `boar`, tempo restante ×0,1 s (1..255) |
+| 5 | `EV_HUNT_END` | só se a caçada já terminou no anfitrião (mesmo conteúdo enviado no fim) |
+
+Javalis vivos (pose e estado), cães, caçadores e saúde da lavoura não entram: vêm no `H_SNAPSHOT` seguinte
+(≤ 100 ms). Placar parcial e dinheiro do próprio cliente se recompõem pela repetição dos `EV_BOAR_DEATH` (cada
+um leva `killer_slot` e `reward`).
+
+Tamanho: típico (23 javalis, 10 abatidos, 300 canteiros) ≈ 1,1 kB = 1–2 quadros. Pior caso (63 javalis todos
+abatidos = 1,9 kB; 2555 canteiros = 5,2 kB) ≈ 7,2 kB = 7 quadros de ≤ 1100 B = 4 mensagens de relay de
+≤ 2205 B (< `max_binary_bytes`), dentro de `reliable_window` (64) e do balde do servidor (120).
+
+Anfitrião (`HuntHostSync`): guarda o diário (`StreamPeerBuffer`, ≤ 1,9 kB) copiando para ele cada registro
+`EV_BOAR_SPAWN` e `EV_BOAR_DEATH` no momento em que o enfileira; `write_full_sync(out)` escreve o cabeçalho e a
+repetição. `HuntController.net_write_full_sync(out)` delega e acrescenta cevas, marcações e, se `_over`, o
+`EV_HUNT_END`.
+
+Cliente, ao receber `EV_FULL_SYNC` (`HuntReplica` lê e avisa o `HuntController` por sinal interno):
+1. `HuntReplica`: descarta `_claims` e `_pending_hits`; `_has_offset = false` (o relógio se refaz no próximo
+   snapshot); chama `clear_samples()` em toda `BoarPuppet` viva e em todo `DogPuppet` (método novo nas duas:
+   zera `_count` e `_head`, mantém pose e estado), para a primeira amostra nova valer como pose em vez de
+   interpolar a partir da pose de antes da queda.
+2. `HuntController`: libera todas as cevas locais e `_pending_baits`; `crop.set_replicated_health(crop)`.
+3. Os `n_records` registros seguintes passam pelos tratadores de sempre:
+
+| Registro | Por que repetir é seguro |
+|---|---|
+| `EV_BOAR_SPAWN` | réplica que já existe é ignorada (`_on_spawn`) |
+| `EV_BOAR_DEATH` | réplica já morta é ignorada (`_on_death`); a que o cliente achava viva morre pelo caminho normal: `kill_confirmed` → `_note_kill`, `_credit_kill` (se o abate é dele), `boar_killed`, `boar_counts_changed` |
+| `EV_CROP_EATEN` | canteiro já comido é ignorado (`_eat_patch`) |
+| `EV_BAIT` | as cevas foram liberadas no passo 2; durante a repetição não se compara com `_pending_baits` |
+| `EV_DOG_MARK` | sobrescreve o vencimento |
+| `EV_HUNT_END` | `_finish` ignora se já acabou |
+
+4. Depois do último registro (ou já no passo 2, se `n_records == 0`): a réplica volta a julgar investidas e a
+   aceitar `C_*`; se `_net_killed`/`_net_total` diferirem de `killed`/`total`, valem os do cabeçalho, com
+   `boar_counts_changed` e `push_warning` (não deve acontecer).
+
+Efeito aceito: abates perdidos tocam som e mensagem todos de uma vez na volta.
+
+#### 4.7.7 O jogo durante a queda (Pacotes A e B) e textos
+
+| Onde | Regra |
+|---|---|
+| `Player` (A) | ouve `net_reconnect_changed`: enquanto ativo, toda leitura de entrada (andar, olhar, atirar, itens, cão) se comporta como `set_input_enabled(false)`, por uma trava própria que **não** mexe em `_input_enabled` (a pausa abre e fecha sem destravar). A pausa continua abrindo: é por ela que se sai da caçada. |
+| `HuntController`/`HuntReplica` (B, cliente) | em `net_reconnect_changed(true)`: a réplica para de julgar investidas e descarta `_claims`/`_pending_hits`; `_pending_baits` é limpo. Volta no passo 4 de §4.7.6. |
+| `RemoteHunter` (A) | `NetCodec.HF_AWAY` (64) nos flags do `HUNTER_STATE`. Só o anfitrião o liga: `net_write_state` de um remoto que já recebeu algum estado e está com `is_present() == false` devolve os últimos 14 bytes com `flags \|= HF_AWAY` e `speed = 0` (antes do primeiro estado nunca liga: não há "reconectando" na largada). Em qualquer máquina, amostra com `HF_AWAY` mostra locomoção 0; estado que chega mais de `peer_absent_s` depois do anterior, ou o primeiro sem `HF_AWAY` depois de um com, entra por `_snap_to` (sem deslizar; caído → `play_death(true)`). `is_present()` também é `false` enquanto o último estado tiver `HF_AWAY`. |
+| `HuntController` (B) | acompanha a ausência de cada remoto como já faz com as mortes e emite `hunter_away_changed(slot, away)` na mudança. A fonte é a mesma nas duas pontas: o bit `HF_AWAY` do registro daquele slot no snapshot (o anfitrião lê o que acabou de escrever em `net_write_snapshot`; o cliente, o que recebeu em `net_apply_snapshot`), nunca o silêncio local, que no cliente também acontece quando é o anfitrião que engasga. Não emite para o slot local, depois do fim da caçada, nem para slot removido. |
+| `Hud` (A) | textos abaixo; a faixa de reconexão fica no lugar da faixa "Anfitrião sem resposta…", que some enquanto ela aparece; nenhuma das duas captura toque. |
+
+| Situação | Texto (PT-BR) | Forma |
+|---|---|---|
+| Este cliente está reconectando | "Reconectando…" | faixa fixa enquanto `net_reconnect_changed(true)` |
+| Este cliente voltou | "Conexão restabelecida." | mensagem de contexto |
+| Este cliente desistiu | "Conexão perdida." | fim `DISCONNECTED` (atual) |
+| Aliado ausente | "<Nome> está reconectando…" | contexto, cor do slot |
+| Aliado voltou | "<Nome> voltou." | contexto, cor do slot |
+| Aliado removido ou saiu | "<Nome> saiu da caçada." | contexto (atual) |
+
+Nome desconhecido: "Um caçador" (`ALLY_NAME_FALLBACK`, atual).
+
+#### 4.7.8 Medição em celular
+
+Mínimo para o relatório de fps e banda como anfitrião de 4 (a medição é do dono do jogo, com aparelhos reais):
+
+- `NetLink` conta `sent_bytes` e `received_bytes` (bytes de quadro, nos dois caminhos). `Net.get_traffic()`
+  devolve a taxa do último segundo fechado (§4.7.9).
+- `FpsCounter` (A): com "Mostrar quadros por segundo" ligado **e** `Net.is_active()`, ganha uma segunda linha,
+  atualizada junto com a primeira: `"Rede ↑ 12,3 ↓ 4,1 kB/s · 2 direto, 1 via servidor"` (kB = 1000 bytes;
+  bytes de aplicação, sem os ~85 B por pacote do fio). No solo, nada muda.
+- `window.huntProbe` ganha `net` (o dicionário de `get_traffic()`) e `reconnecting` (bool), para o
+  `coop_probe.py` e para leitura por par no desktop.
+- O dono anota, por aparelho: papel, nº de jogadores, contrato, FPS típico e pior, ↑/↓ e caminhos. Metas:
+  ≥ 30 fps; anfitrião ↑ ≤ 13 kB/s com 3 clientes; cliente ↓ ≤ 5 kB/s. Se faltar fps, o ajuste é em dados
+  (`coop.boar_count_mult_by_players`, `snapshot_hz`), não em código.
+
+#### 4.7.9 Acréscimos de contrato (valem desde já; entram em `docs/arquitetura.md` no fecho da F8)
+
+`src/core` (coordenação):
+```gdscript
+# net_codec.gd
+const EV_FULL_SYNC: int = 0x2B         # header of a rejoin sync, followed by replayed records (section 4.7.6)
+const HF_AWAY: int = 64                # set by the host for a hunter that is silent / reconnecting
+
+# game_events.gd
+signal net_reconnect_changed(active: bool)          # Net -> A Hud, A Player, B HuntController
+signal hunter_away_changed(slot: int, away: bool)   # B HuntController -> A Hud
+
+# hunt_world.gd
+func net_write_full_sync(_out: StreamPeerBuffer) -> void:     # host: EV_FULL_SYNC record + replayed records
+	pass
+```
+Autoload `Net` (Pacote N):
+```gdscript
+func is_reconnecting() -> bool          # (false) cliente tentando voltar à caçada
+func get_traffic() -> Dictionary        # ({}) {"up_bps": int, "down_bps": int,
+                                        #       "links": [{"slot": int, "path": int, "up_bps": int, "down_bps": int}]}
+## Tests only. Drops the room socket and the direct transport now; for duration_s every rejoin attempt fails
+## without opening a socket. half_open: the socket goes mute instead of closing (nothing read or written, never
+## closed until the session ends), so the session has to find out by the probe and the server still sees it.
+func debug_cut(duration_s: float, half_open: bool = false) -> void
+```
+`NetSignaling.probe(now_ms: int, timeout_ms: int) -> void` e `NetLink.setup(..., p_epoch: int = 0)` são
+internos de N (§4.7.3, §4.7.5). `data/net.json` (game-systems):
+```json
+"peer_timeout_s": 45.0,
+"rejoin_timeout_s": 30.0,
+"rejoin_backoff_s": [0.5, 1.0, 2.0, 4.0],
+"rejoin_probe_s": 3.0
+```
+Invariante (teste de unidade): `host_stall_warn_s + rejoin_probe_s + rejoin_timeout_s < peer_timeout_s`
+(35,5 < 45): o anfitrião guarda o slot por mais tempo do que o cliente tenta.
+
+#### 4.7.10 Pacotes, ordem e testes de aceite
+
+| Ordem | Pacote | Arquivos | Entrega |
+|---|---|---|---|
+| 1 | coordenação | `server/rooms.js`, `rooms.test.js`, `check.js`, `README.md`; `src/core/net_codec.gd`, `game_events.gd`, `hunt_world.gd` | §4.7.2 e §4.7.9; publica o Worker antes do jogo |
+| 1 | game-systems | `data/net.json` | chaves de §4.7.9 |
+| 2 | game-developer N (Fable) | `src/net/net_session.gd`, `net_signaling.gd`, `net_link.gd`, `net.gd`, `src/net/debug/*` | §4.7.3–4.7.5, `get_traffic`, `debug_cut` |
+| 2 | game-developer B (Fable) | `src/hunt/hunt_controller.gd`, `hunt_host_sync.gd`, `hunt_replica.gd`, `src/boars/boar_puppet.gd`, `src/dogs/dog_puppet.gd`, `src/hunt/debug/*` | §4.7.4 (mundo), §4.7.6, `hunter_away_changed` |
+| 2 | game-developer A (Sonnet) | `src/player/player.gd`, `remote_hunter.gd`, `src/hud/hud.gd`, `fps_counter.gd`, `src/hud/debug/hud_net_test.gd` | §4.7.7, §4.7.8 |
+| 3 | qa-tester (Sonnet) | `tests/net_test.gd`, `tests/net_unit.gd`, `tests/unit/test_net.gd`, `tests/unit/test_core.gd`, `tests/lib/contract_sigs.gd`, `tests/web/coop_probe.py` | registra os cenários, confere o contrato, roda tudo |
+
+N, B e A trabalham em paralelo: as costuras entre eles são só o `EV_FULL_SYNC` (§4.7.6), `net_write_full_sync`,
+`HF_AWAY` e os dois sinais.
+
+| Teste | Dono | Aceite |
+|---|---|---|
+| `bun test` (`rooms.test.js`), nos dois modos (estável e hibernação) | coordenação | `parseHello` com `tok`/`ep` válidos e inválidos; `lock` guarda, substitui e apaga `tokens`, e recusa formato errado; reentrada com token certo entra no mesmo id em sala trancada, inclusive com 4 conexões vivas; socket antigo vivo recebe `replaced`/4411 sem `peer_left`, e o fechamento dele depois não emite nada; `bad_token`/4401 para token errado, slot sem token, slot revogado e sala destrancada; `join` sem `tok` em sala trancada continua `in_progress`; `version_mismatch` vem antes de `bad_token`; `peer_joined` leva `ep`; relay depois da troca chega só ao socket novo; `peer_left` com `clean` no `leave` e sem `clean` no fechamento. `check.js` ganha o roteiro de reentrada. |
+| `link_selftest` (em `net_unit`) | N | quadro de outra época é contado e descartado sem perder o enlace nem mexer em `seq`/`ack`; época 0 continua compatível byte a byte. |
+| `net_e2e --rejoin` → cenário `relay_rejoin` do `net_test` (servidor Bun local, mundo falso, prazos encurtados como em `net_deadlines.gd`) | N | (a) `debug_cut(2)`: cliente volta no mesmo slot, o anfitrião não chama `net_peer_left`, chama `net_write_full_sync` uma vez, e eventos enviados depois chegam uma vez e em ordem; (b) `debug_cut(2, true)` (meio-aberto): o cliente só percebe pela sonda, e a volta troca o socket antigo no servidor (`replaced`, sem `peer_left` no anfitrião); (c) token adulterado: `bad_token` → `DISCONNECTED` sem nova tentativa; (d) corte maior que `peer_timeout_s`: anfitrião remove o slot e revoga, cliente recebe `bad_token`; (e) corte maior que `rejoin_timeout_s`: cliente desiste sozinho; (f) `leave` explícito remove na hora; (g) as tentativas seguem `rejoin_backoff_s` (uma conexão por passo, contado na sessão). |
+| sandbox de sync em processo único (em `net_unit`) | B | anfitrião com javalis vivos e abatidos (um deles pelo cliente), canteiros comidos, ceva e marcação; cliente que perdeu parte dos eventos aplica a saída de `net_write_full_sync`: mesmos ids vivos, mesmos mortos, mesmos canteiros, mesmo `_slot_stats`, abate próprio perdido creditado uma única vez; aplicar o mesmo sync duas vezes não muda nada. |
+| `net_hunt_e2e --scenario=rejoin` → cenário `rejoin` do `net_test` (N7; dois processos, relay, contrato 0, seed fixa) | B | cliente abate 1; `Net.debug_cut(5.0)` no cliente; durante o corte o anfitrião abate 1 e come lavoura (debug). O cliente volta em ≤ 5 s + 4 s (maior backoff) + 2 s, no mesmo slot, sem `room_error`; `is_reconnecting()` foi `true` e voltou a `false`; num ponto de conferência os dois têm os mesmos javalis vivos, os mesmos canteiros comidos e o mesmo placar parcial; o anfitrião ouviu `hunter_away_changed(1, true)` e `(1, false)` e nunca `hunter_left(1)`. Depois os bots terminam: `VICTORY` nos dois, soma dos abates = total, cada abate em um só resultado, bônus no cliente. |
+| `hud_net_test` | A | faixa e textos de §4.7.7; trava de entrada do `Player` resiste a abrir e fechar a pausa; segunda linha do `FpsCounter` só em rede. |
+| `test_net.gd`, `contract_sigs.gd`, `test_core.gd` | qa | chaves e invariante de §4.7.9; sinais, `HF_AWAY`, `net_write_full_sync`, métodos novos do `Net`. |
+| `coop_probe.py` | qa | dois Chrome em RTC; cliente fica offline 5 s pelo DevTools: `huntProbe.reconnecting` vai a `true` e volta, `path` volta a `rtc` em ≤ `ice_timeout_s`, `boars_alive` igual nos dois. |
+| Regressão | qa | 4 suítes do solo sem mudança; `client_drop` (N5) passa a esperar `peer_timeout_s` + folga pelo `hunter_left` (+45 s na suíte; ajustar `limit_s`); `relay_normal` continua vendo a saída explícita na hora. |
+
 ---
 
 ## 5. Servidor e hospedagem
@@ -674,7 +995,8 @@ sem nenhum caso especial, e de quebra a deixa trivial de testar.
 ```js
 // peer = { meta, vol, send(data /* string | Uint8Array */), close(code, reason), setMeta(meta) }
 //   meta: sobrevive à hibernação (anexo do WebSocket, ≤ 2 kB)
-//         { id, host, name, v, proto, code, locked, born }      locked e born só valem no anfitrião
+//         { id, host, name, v, proto, code, locked, born, left }   locked e born só valem no anfitrião
+//         F8: + tokens (anfitrião: quem pode reentrar), + ep (cliente: época do enlace), §4.7.2
 //   vol:  volátil, pode zerar a qualquer momento                 { tokens, last }  (balde de taxa)
 export function parseHello(url)                       // query → { t, code, v, proto, name, want } | null
 export function makeCode(config, random)              // código novo para t=create
@@ -770,6 +1092,7 @@ operações falham até 00:00 UTC (21h de Brasília).
 | Negociar WebRTC de um par (2 SDP + candidatos) + lobby antes da promoção | ~30–40 | ~2 |
 | Ping (a cada `net.ping_s` = 15 s por conexão; contado aqui como se gastasse, não confirmado) | 240/h por conexão | 12/h por conexão |
 | **Par em relay** a `net.relay_hz` = 10 (1 mensagem por tick em cada direção; as duas entram no objeto) | **20/s = 72.000/h** | **3.600/h** |
+| Reconexão de um cliente (F8, §4.7.2): até ~10 upgrades + renegociação + segundos em relay | ~200 | ~20 por reconexão |
 
 | Cenário | Consumo | Quanto cabe por dia |
 |---|---|---|
@@ -992,7 +1315,9 @@ Consumíveis: cada máquina conta os seus pelo `GameEvents.item_used` local (`hu
   "<Nome> abateu um javali: Macho, 132 kg" (formato `"<Nome> abateu um javali: <tipo>, <kg> kg"`, que evita
   erro de gênero com Fêmea/Leitão).
 - Mensagens: "<Nome> foi abatido!", "<Nome> saiu da caçada", faixa "Anfitrião sem resposta…"
-  (`net_stall_changed`), "Assistindo: <Nome>" (`spectate_changed`).
+  (`net_stall_changed`), "Assistindo: <Nome>" (`spectate_changed`). F8: faixa "Reconectando…", "Conexão
+  restabelecida.", "<Nome> está reconectando…", "<Nome> voltou." e a linha de rede do contador de FPS
+  (§4.7.7, §4.7.8).
 - Fim (`hud.gd:610–625`): `DEFEAT_DEATH` em rede → "Todos os caçadores caíram!"; `DISCONNECTED` →
   "Conexão perdida."
 - `window.huntProbe` (`hud.gd:401–416`) ganha `slot`, `role`, `path`, `boars_alive`,
@@ -1023,12 +1348,12 @@ Consumíveis: cada máquina conta os seus pelo `GameEvents.item_used` local (`hu
 |---|---|---|
 | Anfitrião saiu ou caiu | `host_left` do servidor, ou `net.host_timeout_s` (20) sem snapshot | cliente: `net_connection_lost()` → `Outcome.DISCONNECTED`; abates pagos, consumíveis descontados, sem bônus, sem progressão |
 | Anfitrião congelado (aba em segundo plano, ligação) | `net.host_stall_warn_s` (2,5) sem snapshot | faixa no HUD; réplicas param; o caçador do cliente segue jogável e seus tiros ficam na fila. Voltou antes de 20 s: segue. Medido na F2: após 5 s de aba congelada o delta de `_process` é ~0,07 s (não carrega o tempo perdido); por isso os prazos usam relógio de parede. Ao acordar de um congelamento da própria máquina, os relógios de silêncio são zerados |
-| Cliente saiu ou caiu | `peer_left`, ou `net.peer_timeout_s` (30) sem estado | `net_peer_left(slot)`: caçador e cão dele somem; a caçada segue; se não sobrar vivo, derrota |
+| Cliente saiu ou caiu | `peer_left`, ou `net.peer_timeout_s` (30) sem estado. F8: `peer_left` com `clean`, ou `peer_timeout_s` (45) sem estado; `peer_left` sem `clean` só abre a carência (última linha) | `net_peer_left(slot)`: caçador e cão dele somem; a caçada segue; se não sobrar vivo, derrota |
 | Cliente em silêncio curto | `net.peer_absent_s` (3) | `is_present() = false`: javalis o ignoram |
 | Anfitrião perdeu a rede | WebSocket e todos os enlaces caídos | `net_connection_lost()` no anfitrião: remotos saem, ele **segue a caçada sozinho** (não encerra); mensagem "Conexão perdida: você continua sozinho." |
 | Servidor de salas indisponível ou cota diária esgotada durante a caçada | WebSocket fechado ou envio falhando | enlaces em RTC continuam; enlaces em relay caem (linhas acima). Sem sala nova até o serviço voltar (a cota renova às 21h de Brasília) |
 | Cliente em `LOADING` sem `L_GO` | `net.load_timeout_s` + `net.host_timeout_s` | cliente desiste (`DISCONNECTED`) |
-| Reconexão pelo mesmo código | — | **fora da v1.** Sala trancada recusa `join`. Entra na F8 (mesma página, mesmo slot via `want` + `token`, `EV_FULL_SYNC`, `play_death(true)`); recarregar a página perde munição e contagem de consumíveis e exigiria gravar a caçada pendente |
+| Reconexão pelo mesmo código | cliente: WebSocket caído sem RTC entregando, sonda sem pong ou janela estourada (§4.7.3) | **F8 (contrato em §4.7; até a implementação vale a 0.4.8: sala trancada recusa `join`).** Cliente: entrada bloqueada e faixa "Reconectando…", tenta por `rejoin_timeout_s` (30) com `want` + `tok`; voltou: mesmo slot, enlace novo, `EV_FULL_SYNC`; desistiu: `DISCONNECTED` como na primeira linha. Anfitrião: guarda o slot por `peer_timeout_s` (45) desde o último estado; o ausente fica parado, ignorado pelos javalis e vale como vivo; estourou: linha "Cliente saiu ou caiu". Com a F8, só `peer_left` com `clean` remove na hora. Recarregar a página continua fora (perderia munição e consumíveis e exigiria gravar a caçada pendente) |
 
 `net_connection_lost()` vem antes de `room_error`. No cliente encerra `DISCONNECTED`; no ANFITRIÃO não
 encerra: ele segue sozinho ("Conexão perdida: você continua sozinho."). Cliente removido por silêncio não é avisado:
@@ -1222,6 +1547,9 @@ Fallback: `HunterVisualBase.create_fallback()` (cápsula na cor do slot).
   "name_max_chars": 12
 }
 ```
+F8 (§4.7.9): `peer_timeout_s` passa a `45.0` (é a carência do slot) e entram `"rejoin_timeout_s": 30.0`,
+`"rejoin_backoff_s": [0.5, 1.0, 2.0, 4.0]` e `"rejoin_probe_s": 3.0`.
+
 `server_url` é a produção (`wss://javali-salas.acpw01.workers.dev/ws`, já no lugar do marcador `SUBDOMINIO`);
 `dev_server_url` vale em nativo e em página servida de `localhost`. `relay_hz` é a taxa de envio de um enlace
 enquanto está em relay (uma mensagem por tick por direção, §4.3). Só em página servida de
@@ -1250,6 +1578,11 @@ enquanto está em relay (uma mensagem por tick por direção, §4.3). Só em pá
 | R13 | Bun instável como servidor local no Windows | testes de integração não sobem | `rooms.js` neutro; entrada Node de reserva (§5.1); produção não depende do Bun |
 | R14 | WebRTC revela o IP dos jogadores entre si | privacidade | só salas privadas entre amigos; avisar no lobby se o dono quiser |
 | R15 | Confiança no cliente (D3) | trapaça trivial | aceito: co-op entre amigos; validação leve evita só erro grosseiro |
+| R16 | F8: carência longa com o time caído | se todos os outros morreram, esperam até 45 s por um ausente que pode não voltar | `peer_timeout_s` em dados; a lavoura segue sendo comida, então a caçada não fica presa; quem saiu por vontade (`leave`) sai na hora |
+| R17 | F8: aba congelada por mais que a carência (ligação, troca de app no iOS) | ao acordar o cliente recebe `bad_token` e termina `DISCONNECTED`, como hoje | abates pagos; aumentar `peer_timeout_s` custa só a espera de R16; reconexão depois de recarregar ou de ausência longa fica fora |
+| R18 | F8: publicar o jogo antes do servidor | sem `clean`, toda saída explícita vira 45 s de "está reconectando…"; reentrada sempre recusada | publicar o Worker primeiro; `bun check.js <produção>` com o roteiro de reentrada antes de subir a versão |
+| R19 | F8: o que estava em trânsito na queda se perde | tiro dos últimos instantes pode não contar; ceva usada some | aceito: reenviar duplicaria ceva e comando de cão (§4.7.5) |
+| R20 | F8: token de reentrada na URL e no attachment | quem souber código, slot e token toma o slot durante aquela caçada | só o próprio cliente, o anfitrião e o servidor o conhecem; vale por uma caçada; `wss://` em produção |
 
 ---
 
@@ -1388,13 +1721,22 @@ Status: concluída em 2026-11-14
 - **Fora:** balanceamento de vários cães (dados, game-systems).
 
 ### F8 — Robustez móvel
+Status: implementada e testada em 2026-11-15 (§4.7); falta a medição em celular real como anfitrião de 4
 - **Objetivo:** cair e voltar na mesma página sem perder a caçada; medir e ajustar em aparelhos reais.
-- **Arquivos:** N e B: `want` + `token`, `EV_FULL_SYNC`, carência do slot; ajustes de taxa em `data/net.json`.
-- **Dono / modelo:** game-developer N e B (Fable), qa-tester (Sonnet).
-- **Aceite:** teste que derruba o WebSocket do cliente por 5 s: ele volta no mesmo slot com os mesmos
-  javalis vivos e o mesmo resultado parcial; relatório de fps e banda em celular intermediário como
-  anfitrião de 4.
-- **Fora:** migração de anfitrião, TURN, reconexão depois de recarregar a página.
+- **Contrato:** §4.7 inteiro. Em uma frase: o cliente que cai fica com a entrada bloqueada e tenta voltar por
+  30 s com `want` + `tok`; o anfitrião guarda o slot por 45 s; a volta é um enlace novo (época nova) que
+  recebe `EV_FULL_SYNC` + repetição de registros comuns.
+- **Arquivos, donos e ordem:** tabela de §4.7.10. Coordenação (servidor e `src/core`) e game-systems
+  (`data/net.json`) primeiro; depois game-developer N e B (Fable) e A (Sonnet) em paralelo; qa-tester (Sonnet)
+  por último. O Worker é publicado antes do jogo (R18).
+- **Aceite:** testes de §4.7.10. O principal (`rejoin`, N7): `Net.debug_cut(5.0)` no cliente no meio da caçada;
+  ele volta no mesmo slot com os mesmos javalis vivos, os mesmos canteiros e o mesmo placar parcial, e a
+  caçada termina `VICTORY` nos dois. Mais: token errado e carência estourada terminam `DISCONNECTED` com os
+  abates pagos; `bun test` e `bun check.js` com a reentrada; 4 suítes do solo sem mudança; `coop_probe.py` e
+  `mobile_probe.py` verdes; relatório de fps e banda em celular intermediário como anfitrião de 4, medido pelo
+  dono do jogo com a linha de rede do contador de FPS (§4.7.8).
+- **Fora:** migração de anfitrião, reconexão do anfitrião, TURN, reconexão depois de recarregar a página,
+  queda em `LOBBY`/`LOADING`.
 
 ---
 

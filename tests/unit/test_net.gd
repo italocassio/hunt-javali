@@ -8,7 +8,7 @@ const NET_KEYS: Array[String] = ["version", "server_url", "dev_server_url", "rtc
 	"ice_timeout_s", "rtc_stall_s", "connect_timeout_s", "ping_s", "pong_timeout_s", "max_players", "snapshot_hz",
 	"hunter_state_hz", "relay_hz", "boar_interp_delay_ms", "hunter_interp_delay_ms", "max_frame_bytes",
 	"reliable_window", "load_timeout_s", "host_stall_warn_s", "host_timeout_s", "peer_absent_s", "peer_timeout_s",
-	"hit_claim_tolerance_m", "name_max_chars"]
+	"rejoin_timeout_s", "rejoin_backoff_s", "rejoin_probe_s", "hit_claim_tolerance_m", "name_max_chars"]
 const COOP_KEYS: Array[String] = ["boar_count_mult_by_players", "extra_group_delay_s", "spawn_spacing_m",
 	"spectate_delay_s", "spectate_distance_m", "spectate_height_m", "name_tag_max_m"]
 
@@ -144,6 +144,7 @@ func test_data_net_block() -> void:
 	ok(float(net["host_stall_warn_s"]) < float(net["host_timeout_s"]), "aviso de travamento vem antes do timeout")
 	ok(float(net["peer_absent_s"]) < float(net["peer_timeout_s"]), "ausente vem antes do timeout")
 	ok(int(net["reliable_window"]) < 0x8000, "janela confiavel cabe na comparacao circular de u16")
+	_check_rejoin_keys(net)
 	ok(String(net["server_url"]).begins_with("wss://"), "producao usa wss")
 	ok(String(net["dev_server_url"]).begins_with("ws://"), "dev usa ws")
 
@@ -234,6 +235,51 @@ func test_player_name_through_profile_and_save() -> void:
 	cleanup_test_files()
 
 
+## docs/multiplayer.md 4.7.1 and 4.7.9: the rejoin keys, their values and the invariant between them.
+func _check_rejoin_keys(net: Dictionary) -> void:
+	eq(float(net["peer_timeout_s"]), 45.0, "peer_timeout_s 45 (subiu de 30 na F8)")
+	eq(float(net["rejoin_timeout_s"]), 30.0, "rejoin_timeout_s 30")
+	ok(float(net["rejoin_probe_s"]) > 0.0, "rejoin_probe_s positivo")
+	ok(net["rejoin_backoff_s"] is Array, "rejoin_backoff_s e lista")
+	var backoff: Array = net["rejoin_backoff_s"] if net["rejoin_backoff_s"] is Array else []
+	ok(backoff.size() > 0, "rejoin_backoff_s nao vazia (o indice do passo nao pode cair em lista vazia)")
+	var prev: float = 0.0
+	for step: Variant in backoff:
+		ok(step is float or step is int, "passo de backoff e numero: %s" % str(step))
+		ok(float(step) > 0.0, "passo de backoff positivo (zero abriria um laco de conexoes): %s" % str(step))
+		ok(float(step) >= prev, "backoff nao decresce: %s depois de %s" % [str(step), str(prev)])
+		prev = float(step)
+	# 4.7.9: the host keeps the slot longer than the client keeps trying (35.5 < 45 with the shipped values).
+	var worst_client_s: float = float(net["host_stall_warn_s"]) + float(net["rejoin_probe_s"]) + float(net["rejoin_timeout_s"])
+	ok(worst_client_s < float(net["peer_timeout_s"]),
+		"invariante 4.7.9: host_stall_warn_s + rejoin_probe_s + rejoin_timeout_s (%.1f) < peer_timeout_s (%.1f)" % [
+			worst_client_s, float(net["peer_timeout_s"])])
+
+
+func test_net_reconnect_api_without_session() -> void:
+	ok(not Net.is_reconnecting(), "is_reconnecting falso fora de sessao")
+	eq(Net.get_traffic(), {}, "get_traffic vazio sem sessao")
+	# debug_cut without a session must do nothing (no crash, no state change).
+	Net.debug_cut(1.0)
+	Net.debug_cut(1.0, true)
+	ok(not Net.is_reconnecting(), "debug_cut sem sessao nao liga a reconexao")
+	eq(Net.get_role(), Net.Role.OFFLINE, "debug_cut sem sessao segue OFFLINE")
+	eq(Net.get_room_state(), Net.RoomState.NONE, "debug_cut sem sessao segue NONE")
+
+
+func test_net_reconnect_signals_exist_and_are_inert_offline() -> void:
+	ok(GameEvents.has_signal("net_reconnect_changed"), "GameEvents.net_reconnect_changed")
+	ok(GameEvents.has_signal("hunter_away_changed"), "GameEvents.hunter_away_changed")
+	# Nothing may fire from the offline Net: leave_room without a session emits no reconnect event.
+	var fired: Array = []
+	var cb: Callable = func(active: bool) -> void: fired.append(active)
+	GameEvents.net_reconnect_changed.connect(cb)
+	Net.leave_room()
+	Net.flush()
+	GameEvents.net_reconnect_changed.disconnect(cb)
+	eq(fired.size(), 0, "Net offline nao emite net_reconnect_changed")
+
+
 # --- NetCodec ---
 
 func test_codec_constants_and_tables() -> void:
@@ -253,12 +299,14 @@ func test_codec_constants_and_tables() -> void:
 		ok(not seen.has(t), "tipo de registro 0x%02X unico" % t)
 		seen[t] = true
 	var flags: Array[int] = [NetCodec.HF_CROUCH, NetCodec.HF_AIM, NetCodec.HF_SPRINT, NetCodec.HF_ALIVE,
-		NetCodec.HF_RELOAD, NetCodec.HF_UNARMED]
+		NetCodec.HF_RELOAD, NetCodec.HF_UNARMED, NetCodec.HF_AWAY]
 	var acc: int = 0
 	for f: int in flags:
 		eq(acc & f, 0, "flag %d sem sobreposicao" % f)
 		acc |= f
 	ok(acc <= 255, "flags cabem em u8")
+	eq(NetCodec.HF_AWAY, 64, "HF_AWAY 64 (4.7.9)")
+	eq(NetCodec.EV_FULL_SYNC, 0x2B, "EV_FULL_SYNC 0x2B")
 	eq(NetCodec.BOAR_STATES.size(), 12, "12 estados de javali")
 	eq(NetCodec.DOG_STATES.size(), 7, "7 estados de cao")
 	eq(NetCodec.ZONES.size(), 5, "5 zonas")

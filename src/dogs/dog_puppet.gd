@@ -85,6 +85,13 @@ func push_sample(t_ms: float, xz: Vector2, yaw: float, st: int, health: float) -
 	_count = mini(_count + 1, RING)
 
 
+## Rejoin (docs/multiplayer.md section 4.7.6): forgets the samples from before the drop and keeps pose and state,
+## so the first new sample is taken as the pose instead of being interpolated from the old one.
+func clear_samples() -> void:
+	_count = 0
+	_head = 0
+
+
 ## Moves the puppet to the pose at host time render_t_ms. Holds the oldest/newest pose outside the buffer.
 func update_pose(render_t_ms: float, delta: float) -> void:
 	var before: Vector2 = _xz

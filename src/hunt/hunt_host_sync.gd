@@ -19,6 +19,8 @@ const DEATH_FLAG_ONE_SHOT: int = 1
 const DEATH_FLAG_CLEAN: int = 2
 const MAX_WIRE_ID: int = 255
 const BAIT_CLAIM_BYTES: int = 4
+const BAIT_EVENT_BYTES: int = 5          # EV_BAIT body
+const DOG_MARK_EVENT_BYTES: int = 3      # EV_DOG_MARK body
 const MAX_PATCHES_PER_RECORD: int = 255
 const CROP_WIRE_SCALE: float = 100.0     # crop u16 in 0.01 %
 const MAX_U8: int = 255
@@ -26,6 +28,9 @@ const MAX_U16: int = 65535
 const MARK_WIRE_SCALE: float = 10.0      # EV_DOG_MARK duration u8 in 0.1 s
 const DOG_CMD_ATTACK: int = 0            # EV_DOG_CMD cmd: 0 "Pega!", 1 "Volta!"
 const DOG_CMD_RECALL: int = 1
+const FULL_SYNC_BYTES: int = 10          # EV_FULL_SYNC body: t_ms u32, crop u16, killed u8, total u8, n_records u16
+const FULL_SYNC_COUNT_AT: int = 8        # offset of n_records inside that body
+const SYNC_MARK_OWNER: int = 255         # EV_DOG_MARK owner of a replayed mark (the owner does not matter)
 const DEFAULT_CLAIM_TOLERANCE_M: float = 12.0
 ## Rounding slack of the u16 fields when comparing a claim with the weapon limits.
 const DAMAGE_SLACK: float = 1.0 / DAMAGE_WIRE_SCALE
@@ -39,6 +44,11 @@ var _type_ids: Array[StringName] = []
 var _weapon_ids: Array[StringName] = []
 var _tolerance_m: float = DEFAULT_CLAIM_TOLERANCE_M
 var _eaten: PackedInt32Array = PackedInt32Array()   # patches eaten since the last tick (EV_CROP_EATEN)
+## Rejoin (section 4.7.6): the original bytes of every EV_BOAR_SPAWN and EV_BOAR_DEATH since the hunt began,
+## in the order they happened, and the EV_HUNT_END record once the hunt is over.
+var _journal: StreamPeerBuffer = StreamPeerBuffer.new()
+var _journal_records: int = 0
+var _hunt_end_record: PackedByteArray = PackedByteArray()
 
 # Counters for tests and diagnostics.
 var baits_claimed: int = 0
@@ -50,6 +60,7 @@ var charge_claims_accepted: int = 0
 var charge_claims_rejected: int = 0
 var dog_commands_applied: int = 0
 var dog_commands_ignored: int = 0
+var full_syncs_written: int = 0
 
 
 func setup(world: HuntController, spawner: BoarSpawner) -> void:
@@ -109,20 +120,95 @@ func _on_patch_eaten(index: int) -> void:
 	_eaten.append(index)
 
 
-## EV_CROP_EATEN: n u8, n x patch u16.
 func _write_crop(out: StreamPeerBuffer) -> void:
-	var total: int = _eaten.size()
+	_put_patch_records(out, _eaten)
+	patches_sent += _eaten.size()
+	_eaten.clear()
+
+
+## EV_CROP_EATEN: n u8, n x patch u16. One record per 255 patches; returns how many records were written.
+func _put_patch_records(out: StreamPeerBuffer, patches: PackedInt32Array) -> int:
+	var total: int = patches.size()
 	var start: int = 0
+	var records: int = 0
 	while start < total:
 		var n: int = mini(total - start, MAX_PATCHES_PER_RECORD)
 		out.put_u8(NetCodec.EV_CROP_EATEN)
 		out.put_u16(1 + n * 2)
 		out.put_u8(n)
 		for i: int in n:
-			out.put_u16(_eaten[start + i] & MAX_U16)
+			out.put_u16(patches[start + i] & MAX_U16)
 		start += n
-	patches_sent += total
-	_eaten.clear()
+		records += 1
+	return records
+
+
+# --- Rejoin sync (host -> the client that came back, section 4.7.6) --------------------------------
+
+## EV_FULL_SYNC record (t_ms u32, crop u16 x0.01 %, killed u8, total u8, n_records u16) followed by the first two
+## parts of the replay: the spawn/death journal and every eaten patch. Returns the records replayed so far; the
+## world appends its own (baits, marks, hunt end) and closes the count with set_full_sync_count.
+## Consistent cut: the caller drains net_take_events to the links that already existed BEFORE calling this, so
+## nothing in here is sent again to the link that came back (section 4.7.4, step 3).
+func write_full_sync(out: StreamPeerBuffer) -> int:
+	if has_pending_events():
+		push_warning("HuntHostSync: full sync written with events still queued (they will reach the new link twice)")
+	out.put_u8(NetCodec.EV_FULL_SYNC)
+	out.put_u16(FULL_SYNC_BYTES)
+	out.put_u32(_world.net_time_ms() & 0xFFFFFFFF)
+	out.put_u16(clampi(roundi(_world.get_crop_health_pct() * CROP_WIRE_SCALE), 0, MAX_U16))
+	out.put_u8(mini(_world.get_boars_killed(), MAX_U8))
+	out.put_u8(mini(_world.get_boars_total(), MAX_U8))
+	out.put_u16(0)   # n_records: set_full_sync_count
+	var records: int = _journal_records
+	if _journal.get_size() > 0:
+		out.put_data(_journal.data_array)
+	if _world.crop != null:
+		records += _put_patch_records(out, _world.crop.get_eaten_indices())
+	full_syncs_written += 1
+	return records
+
+
+## Replayed EV_BAIT of an active bait: duration_s = ceil(remaining_s), 1..255.
+func write_bait_replay(out: StreamPeerBuffer, at: Vector3, remaining_s: float) -> void:
+	out.put_u8(NetCodec.EV_BAIT)
+	out.put_u16(BAIT_EVENT_BYTES)
+	NetCodec.put_xz(out, _rect, at.x, at.z)
+	out.put_u8(clampi(ceili(remaining_s), 1, MAX_U8))
+
+
+## Replayed EV_DOG_MARK of a mark that has not expired: owner 255, time left x0.1 s, 1..255.
+func write_mark_replay(out: StreamPeerBuffer, boar_id: int, remaining_s: float) -> void:
+	out.put_u8(NetCodec.EV_DOG_MARK)
+	out.put_u16(DOG_MARK_EVENT_BYTES)
+	out.put_u8(SYNC_MARK_OWNER)
+	out.put_u8(boar_id & MAX_WIRE_ID)
+	out.put_u8(clampi(ceili(remaining_s * MARK_WIRE_SCALE), 1, MAX_U8))
+
+
+## The EV_HUNT_END sent when the hunt ended, byte for byte. Returns 1 if written, 0 if the hunt is still on.
+func write_hunt_end_replay(out: StreamPeerBuffer) -> int:
+	if _hunt_end_record.is_empty():
+		return 0
+	out.put_data(_hunt_end_record)
+	return 1
+
+
+## Writes n_records into the EV_FULL_SYNC record that starts at `sync_at` in `out` (cursor stays at the end).
+func set_full_sync_count(out: StreamPeerBuffer, sync_at: int, records: int) -> void:
+	var end: int = out.get_position()
+	out.seek(sync_at + NetCodec.RECORD_HEADER_BYTES + FULL_SYNC_COUNT_AT)
+	out.put_u16(clampi(records, 0, MAX_U16))
+	out.seek(end)
+
+
+## True while something waits for the next take_events (tests and the cut check of write_full_sync).
+func has_pending_events() -> bool:
+	return _events.get_size() > 0 or not _eaten.is_empty()
+
+
+func get_journal_records() -> int:
+	return _journal_records
 
 
 ## EV_BAIT: xz 2 x u16, duration_s u8. Every bait placed on the host (its own or a client's C_BAIT).
@@ -240,9 +326,16 @@ func _begin(type: int) -> int:
 
 func _end(at: int) -> void:
 	var end: int = _events.get_position()
-	_events.seek(at + 1)
+	_events.seek(at)
+	var type: int = _events.get_u8()
 	_events.put_u16(end - at - NetCodec.RECORD_HEADER_BYTES)
 	_events.seek(end)
+	# Rejoin: births and kills are kept for the whole hunt, the end record once (section 4.7.6).
+	if type == NetCodec.EV_BOAR_SPAWN or type == NetCodec.EV_BOAR_DEATH:
+		_journal.put_data(_events.data_array.slice(at, end))
+		_journal_records += 1
+	elif type == NetCodec.EV_HUNT_END:
+		_hunt_end_record = _events.data_array.slice(at, end)
 
 
 # --- Claims (client -> host) ---------------------------------------------------------------------

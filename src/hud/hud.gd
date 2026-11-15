@@ -23,6 +23,10 @@ const HUNTER_LEFT_TEXT: String = "%s saiu da caçada."
 const HUNTER_DOWN_TEXT: String = "%s foi derrubado."
 const LOCAL_DOWN_TEXT: String = "Você foi derrubado. Aguarde o fim da caçada."
 const STALL_TEXT: String = "Anfitrião sem resposta…"
+const RECONNECTING_TEXT: String = "Reconectando…"
+const RECONNECTED_TEXT: String = "Conexão restabelecida."
+const HUNTER_AWAY_TEXT: String = "%s está reconectando…"
+const HUNTER_BACK_TEXT: String = "%s voltou."
 const ALL_DOWN_TEXT: String = "Todos os caçadores caíram!"
 const DISCONNECTED_TEXT: String = "Conexão perdida."
 const SPECTATE_TEXT: String = "Assistindo: %s"
@@ -67,6 +71,9 @@ var _last_ammo_text: String = ""
 var _last_item_text: String = ""
 var _hunter_names: Dictionary = {}   # slot -> display name seen on hunter_joined (the roster forgets who left)
 var _stall_banner: Label = null
+var _reconnect_banner: Label = null   # takes the place of the stall banner while this client is reconnecting
+var _stalled: bool = false
+var _reconnecting: bool = false
 var _down_banner: Label = null
 var _spectate_banner: Label = null
 var _spectate_hint: Label = null
@@ -348,6 +355,7 @@ func _build_messages() -> void:
 	_dog_msg.set_color(COLOR_WARN)
 	_place_message(_end_msg, "EndMessage", 0.38, 0.14, 44)
 	_stall_banner = _make_banner("StallBanner", STALL_TEXT, STALL_TOP_FRAC, COLOR_WARN)
+	_reconnect_banner = _make_banner("ReconnectBanner", RECONNECTING_TEXT, STALL_TOP_FRAC, COLOR_WARN)
 	_down_banner = _make_banner("DownBanner", LOCAL_DOWN_TEXT, LOCAL_DOWN_TOP_FRAC, COLOR_DANGER)
 	_spectate_banner = _make_banner("SpectateBanner", "", LOCAL_DOWN_TOP_FRAC, COLOR_TEXT)
 	_spectate_hint = _make_banner("SpectateHint", SPECTATE_HINT_KEYS, LOCAL_DOWN_TOP_FRAC + BANNER_HEIGHT_FRAC, COLOR_TEXT)
@@ -411,6 +419,8 @@ func _connect_events() -> void:
 	GameEvents.hunter_died.connect(_on_hunter_died)
 	GameEvents.player_died.connect(_on_player_died)
 	GameEvents.net_stall_changed.connect(_on_net_stall_changed)
+	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
+	GameEvents.hunter_away_changed.connect(_on_hunter_away_changed)
 	GameEvents.spectate_changed.connect(_on_spectate_changed)
 
 
@@ -824,10 +834,36 @@ func _on_spectate_changed(slot: int) -> void:
 
 
 func _on_net_stall_changed(stalled: bool) -> void:
-	_stall_banner.visible = stalled and not _ended
+	_stalled = stalled
+	_refresh_net_banners()
+
+
+## The reconnection banner replaces the "host not answering" one while it is up; neither takes touch.
+func _refresh_net_banners() -> void:
+	_reconnect_banner.visible = _reconnecting and not _ended
+	_stall_banner.visible = _stalled and not _reconnecting and not _ended
+
+
+func _on_net_reconnect_changed(active: bool) -> void:
+	var was: bool = _reconnecting
+	_reconnecting = active
+	_refresh_net_banners()
+	if was and not active and not _ended:
+		_show_ctx(RECONNECTED_TEXT, ALLY_MSG_S)
+
+
+## An ally went quiet or came back (the host decides; docs/multiplayer.md 4.7.7). The local slot is never reported.
+func _on_hunter_away_changed(slot: int, away: bool) -> void:
+	if _ended or slot == Net.get_local_slot():
+		return
+	_show_ctx((HUNTER_AWAY_TEXT if away else HUNTER_BACK_TEXT) % _hunter_name(slot), ALLY_MSG_S,
+		HunterVisualBase.slot_color(slot))
 
 
 func _on_hunt_ended(result: HuntResult) -> void:
+	_ended = true   # whichever of this and on_hunt_ended() runs first, the net banners and messages stop here
+	if _ctx_msg.get_text() == RECONNECTED_TEXT:
+		_ctx_msg.clear()   # giving up must not read "connection restored" right before "connection lost"
 	var text: String = ""
 	var color: Color = COLOR_TEXT
 	var online: bool = Net.get_role() != Net.Role.OFFLINE
@@ -845,6 +881,7 @@ func _on_hunt_ended(result: HuntResult) -> void:
 			text = DISCONNECTED_TEXT
 			color = COLOR_DANGER
 	_stall_banner.visible = false
+	_reconnect_banner.visible = false
 	_down_banner.visible = false
 	_spectate_banner.visible = false
 	_spectate_hint.visible = false

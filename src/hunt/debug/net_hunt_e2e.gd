@@ -13,11 +13,18 @@ extends Node
 ##                net.host_timeout_s + 2 s, its kill paid, no bonus, no progression.
 ##   host_freeze  N4 by deadline: the host process stays up but its Net stops (socket open, no snapshots) ->
 ##                client DISCONNECTED by net.host_timeout_s, within host_timeout_s + 2 s.
-##   client_drop  N5: the client process is killed -> the host sees hunter_left and wins alone.
+##   client_drop  N5: the client process is killed -> the host sees hunter_left (F8: only after net.peer_timeout_s,
+##                the grace period of the slot) and wins alone.
 ##   dogs         N6 (F7): each player brings a dog (host caramelo, client foxhound). Phase 1: the client's dog
 ##                follows the client, the client sends "Pega!" (C_DOG_CMD) and "Volta!": only ITS dog changes
 ##                state, only ITS HUD hears the dog signals, the host's dog and HUD stay quiet, the boar mark
 ##                shows on both machines. Phase 2: the same the other way round, from the host.
+##   rejoin       N7 (F8, docs/multiplayer.md section 4.7): the client kills 1, then Net.debug_cut(5.0) drops its
+##                connection; meanwhile the host kills 1 and the crop is eaten (debug). The client comes back on
+##                its own (same slot, no room_error, is_reconnecting true then false) within cut + largest backoff
+##                + 2 s; at a conference point both have the same live boars, eaten patches and partial
+##                scoreboard; the host heard hunter_away_changed(1, true) and (1, false) and never hunter_left(1).
+##                Then the bots finish as in "victory", with the same checks.
 ##
 ## Run (from the project root; Bun on PATH, in BUN or ~/.bun/bin, or -- --bun=<path>):
 ##   tools/godot.sh --headless --path . res://src/hunt/debug/net_hunt_e2e.tscn [-- --scenario=all]
@@ -29,7 +36,7 @@ const CODE_ARG: String = "--hunt-code="
 const SCENARIO_ARG: String = "--scenario="
 const BUN_ARG: String = "--bun="
 const SERVER_ARG: String = "--server="   # read by the autoload Net in the children
-const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop", "dogs"]
+const SCENARIOS: Array[String] = ["victory", "crop", "death", "host_drop", "host_freeze", "client_drop", "dogs", "rejoin"]
 
 const HOST_ADDR: String = "127.0.0.1"
 const PORT_MIN: int = 20000
@@ -59,7 +66,7 @@ const CROP_FIRST_PCT: float = 40.0
 const CROP_STEP_WAIT_MS: int = 1500
 const SPAWN_WAIT_MS: int = 8000
 const DEAD_CHECK_MS: int = 3000
-const LEFT_WAIT_MS: int = 40000
+const LEFT_SLACK_MS: int = 10000          # on top of net.peer_timeout_s (F8: a dropped client keeps its slot that long)
 const KILL_DAMAGE: float = 100000.0
 const HOST_DOG: StringName = &"caramelo"
 const CLIENT_DOG: StringName = &"foxhound"
@@ -70,6 +77,15 @@ const DOG_EDGE_M: float = 8.0
 const DOG_WAIT_MS: int = 90000
 const DOG_PHASE_MS: int = 150000
 const DOG_SETTLE_MS: int = 1500
+const REJOIN_CUT_S: float = 5.0
+const REJOIN_SLACK_S: float = 2.0
+const REJOIN_SETTLE_MS: int = 1000
+const REJOIN_CROP_PCT: float = 80.0
+const REJOIN_MIN_EATEN: int = 100
+const REJOIN_START_MS: int = 3000
+const REJOIN_PEER_WAIT_MS: int = 40000
+const CONF_STEP_MS: int = 200
+const CONF_MS: int = 20000
 
 # Bot (same idea as tests/bot/hunt_bot.gd, kept here so package B owns its scenario).
 const STAND_M: float = 14.0
@@ -105,6 +121,8 @@ var _dog_cmds: Array = []               # dog_command_executed heard here
 var _dog_marks: int = 0                 # dog_marked_boar heard here (any dog: marks are for the team)
 var _dog_marked_seen: int = 0           # most marked boars listed by the world at a dog_marked_boar
 var _dog_texts: Array = []              # hud messages about dogs
+var _away: Array = []                   # [slot, away] of every hunter_away_changed heard here
+var _reconnects: Array = []             # net_reconnect_changed values heard here
 
 
 ## Peer mode: the scene itself is replaced by hunt.tscn, so the peer runs as a copy under the root.
@@ -222,6 +240,9 @@ func _run_scenario(url: String) -> void:
 			match _scenario:
 				"victory":
 					_check_victory()
+				"rejoin":
+					_check_victory()
+					_check_rejoin()
 				"crop":
 					_check_crop()
 				"death":
@@ -315,6 +336,59 @@ func _check_victory() -> void:
 	print("NET_HUNT_E2E host claims accepted=%s rejected=%s heard=%s charge_acc=%s | client shots=%s hits=%s charges=%s"
 		% [host.get("hits_accepted"), host.get("hits_rejected"), host.get("shots_heard"), host.get("charge_accepted"),
 		client.get("shots_claimed"), client.get("hits_claimed"), client.get("charge_hits")])
+
+
+## N7: what the two peers recorded around the cut (the end of the hunt is checked by _check_victory).
+func _check_rejoin() -> void:
+	var host: Dictionary = _read_json("result_host.json")
+	var client: Dictionary = _read_json("result_client.json")
+	if host.is_empty() or client.is_empty():
+		return
+	var backoff: Array = Data.get_net().get("rejoin_backoff_s", [])
+	var limit_s: float = REJOIN_CUT_S + (float(backoff[backoff.size() - 1]) if not backoff.is_empty() else 0.0) + REJOIN_SLACK_S
+	_ok(int(client.get("kills_before_cut", 0)) >= 1, "[rejoin] cliente abateu antes do corte (%s)" % str(client.get("kills_before_cut")))
+	_ok(bool(client.get("reconnecting_seen", false)) and client.get("reconnects", []) == [true, false],
+		"[rejoin] is_reconnecting foi true e voltou a false; net_reconnect_changed %s" % str(client.get("reconnects")))
+	_ok(bool(client.get("replica_suspended", false)), "[rejoin] réplica do cliente suspensa durante a queda")
+	_ok(float(client.get("back_s", 999.0)) <= limit_s, "[rejoin] cliente voltou em %.2f s (limite %.1f s)" % [float(client.get("back_s", 999.0)), limit_s])
+	_ok(int(client.get("slot_before", -1)) == CLIENT_SLOT and int(client.get("slot_after", -2)) == CLIENT_SLOT
+		and bool(client.get("in_hunt_after", false)) and not bool(client.get("over_at_back", true)),
+		"[rejoin] mesmo slot, sala em caçada, caçada em curso (%s -> %s)" % [str(client.get("slot_before")), str(client.get("slot_after"))])
+	_ok((client.get("errors", []) as Array).is_empty() and (host.get("errors", []) as Array).is_empty(),
+		"[rejoin] sem room_error (cliente %s, anfitrião %s)" % [str(client.get("errors")), str(host.get("errors"))])
+	_ok(int(client.get("full_syncs_applied", -1)) == 1 and int(host.get("full_syncs_written", -1)) == 1,
+		"[rejoin] um EV_FULL_SYNC escrito e um aplicado (%s / %s)" % [str(host.get("full_syncs_written")), str(client.get("full_syncs_applied"))])
+	var conf: Dictionary = client.get("conference", {})
+	var mine: Dictionary = conf.get("client", {})
+	_ok(bool(conf.get("matched", false)), "[rejoin] conferência: mesmos javalis vivos, canteiros e placar parcial (tentativas %s)" % str(conf.get("tries")))
+	print("  [rejoin] conferência anfitrião %s" % str(conf.get("host")))
+	print("  [rejoin] conferência cliente   %s" % str(mine))
+	var board: Array = mine.get("board", [])
+	var kills_by_slot: Dictionary = {}
+	for e: Variant in board:
+		kills_by_slot[int((e as Array)[0])] = int((e as Array)[1])
+	_ok(int(mine.get("killed", 0)) >= 2 and int(kills_by_slot.get(HOST_SLOT, 0)) >= 1
+		and int(kills_by_slot.get(CLIENT_SLOT, 0)) == int(client.get("kills_before_cut", -1)),
+		"[rejoin] na conferência: abate do corte contado e placar parcial do cliente mantido (abatidos %s, placar %s)"
+		% [str(mine.get("killed")), str(board)])
+	_ok(int(mine.get("eaten_n", 0)) >= REJOIN_MIN_EATEN and (mine.get("alive", []) as Array).size() >= 1,
+		"[rejoin] na conferência: %s canteiros comidos, %d javalis vivos" % [str(mine.get("eaten_n")), (mine.get("alive", []) as Array).size()])
+	var before: Array = client.get("credited_before_cut", [])
+	var kept: bool = not before.is_empty()
+	for id: Variant in before:
+		kept = kept and _has_int(client.get("credited", []), int(id))
+	_ok(kept, "[rejoin] abates de antes do corte seguem no resultado do cliente (%s em %s)" % [str(before), str(client.get("credited"))])
+	var away: Array = host.get("away", [])
+	var away_ok: bool = away.size() == 2
+	if away_ok:
+		var went: Array = away[0]
+		var came: Array = away[1]
+		away_ok = int(went[0]) == CLIENT_SLOT and bool(went[1]) and int(came[0]) == CLIENT_SLOT and not bool(came[1])
+	_ok(away_ok, "[rejoin] anfitrião ouviu hunter_away_changed(1, true) e (1, false): %s" % str(away))
+	_ok(not _has_int(host.get("left", []), CLIENT_SLOT) and int(host.get("hunters_at_end", -1)) == 2,
+		"[rejoin] anfitrião nunca ouviu hunter_left(1) %s, 2 caçadores no fim (%s)" % [str(host.get("left")), str(host.get("hunters_at_end"))])
+	_ok(not _has_int(host.get("died", []), CLIENT_SLOT) and not _has_int(client.get("died", []), CLIENT_SLOT),
+		"[rejoin] cliente não morreu durante a queda")
 
 
 func _check_crop() -> void:
@@ -564,6 +638,8 @@ func _run_peer() -> void:
 	GameEvents.boar_killed.connect(func(k: KillInfo) -> void: _killers[k.boar_id] = k.killer_slot)
 	GameEvents.hunter_died.connect(func(s: int) -> void: _died.append(s))
 	GameEvents.hunter_left.connect(func(s: int) -> void: _left.append(s))
+	GameEvents.hunter_away_changed.connect(func(s: int, a: bool) -> void: _away.append([s, a]))
+	GameEvents.net_reconnect_changed.connect(func(a: bool) -> void: _reconnects.append(a))
 	if _role == "host":
 		Net.create_room()
 		if not await _until(func() -> bool: return Net.get_room_state() == Net.RoomState.LOBBY, 15000, "room created"):
@@ -589,7 +665,7 @@ func _run_peer() -> void:
 	_log("go: scenario %s slot %d, total %d" % [_scenario, world.get_local_slot(), world.get_boars_total()])
 	var client: bool = _role == "client"
 	match _scenario:
-		"victory":
+		"victory", "rejoin":
 			if client:
 				await _client_victory(world)
 			else:
@@ -641,6 +717,8 @@ func _fix_seed() -> void:
 
 func _client_victory(world: HuntController) -> void:
 	var player: PlayerBase = world.get_player()
+	if _scenario == "rejoin" and not await _client_rejoin_phase(world, player):
+		return
 	await _kill_until(world, player, func() -> bool: return _credited(world).size() >= CLIENT_KILLS, CLIENT_KILL_S)
 	if not is_instance_valid(world) or _done:
 		return
@@ -651,6 +729,7 @@ func _client_victory(world: HuntController) -> void:
 	_result["shots_claimed"] = replica.shots_claimed
 	_result["hits_claimed"] = replica.hits_claimed
 	_result["charge_hits"] = replica.charge_hits
+	_result["full_syncs_applied"] = replica.full_syncs_applied
 	if not await _until(func() -> bool: return world.is_hunt_over(), int(HOST_KILL_S * 1000.0) + 30000, "end of hunt (EV_HUNT_END)"):
 		return
 	_capture(world)
@@ -662,6 +741,8 @@ func _client_victory(world: HuntController) -> void:
 func _host_victory(world: HuntController) -> void:
 	var player: PlayerBase = world.get_player()
 	_park(world, player)
+	if _scenario == "rejoin" and not await _host_rejoin_phase(world):
+		return
 	await _until(func() -> bool: return _has_file("client_done"), int(CLIENT_KILL_S * 1000.0) + 20000, "", false)
 	await _kill_until(world, player, func() -> bool: return world.is_hunt_over(), HOST_KILL_S)
 	if not is_instance_valid(world) or _done:
@@ -672,6 +753,8 @@ func _host_victory(world: HuntController) -> void:
 	_result["hits_rejected"] = sync.hits_rejected
 	_result["shots_heard"] = sync.shots_heard
 	_result["charge_accepted"] = sync.charge_claims_accepted
+	_result["full_syncs_written"] = sync.full_syncs_written
+	_result["hunters_at_end"] = world.get_hunters().size()
 	if not world.is_hunt_over():
 		_peer_finish("host did not finish")
 		return
@@ -680,6 +763,107 @@ func _host_victory(world: HuntController) -> void:
 	await _stay_for_client()
 	_result["ok"] = _outcome(_result) == HuntResult.Outcome.VICTORY
 	_peer_finish("" if bool(_result["ok"]) else "host did not win")
+
+
+# --- Rejoin scenario (peer side) ---
+
+## Client: one kill, then the connection is cut for REJOIN_CUT_S. The session comes back by itself; the world must
+## then agree with the host's (conference) before the bot goes on.
+func _client_rejoin_phase(world: HuntController, player: PlayerBase) -> bool:
+	await _kill_until(world, player, func() -> bool: return _credited(world).size() >= 1, CLIENT_KILL_S)
+	if not is_instance_valid(world) or _done:
+		return false
+	_park(world, player)
+	await _sleep(REJOIN_SETTLE_MS)
+	_result["kills_before_cut"] = _credited(world).size()
+	_result["credited_before_cut"] = _credited(world)
+	_result["slot_before"] = Net.get_local_slot()
+	_log("cut: %d kill(s) so far, %d boars alive" % [_credited(world).size(), world.get_alive_boar_ids().size()])
+	var cut_ms: int = Time.get_ticks_msec()
+	Net.debug_cut(REJOIN_CUT_S)
+	_write("client_cut", "1")
+	if not await _until(func() -> bool: return Net.is_reconnecting(), REJOIN_START_MS, "Net.is_reconnecting() after the cut"):
+		return false
+	_result["reconnecting_seen"] = true
+	_result["replica_suspended"] = world.debug_replica().is_suspended()
+	var backoff: Array = Data.get_net().get("rejoin_backoff_s", [])
+	var worst_s: float = REJOIN_CUT_S + (float(backoff[backoff.size() - 1]) if not backoff.is_empty() else 0.0) + REJOIN_SLACK_S
+	# Twice the accepted time: a late return is reported with its number instead of as a bare timeout.
+	var back: bool = await _until(func() -> bool: return not Net.is_reconnecting(), int(worst_s * 2000.0), "", false)
+	_result["back_s"] = float(Time.get_ticks_msec() - cut_ms) / 1000.0
+	_result["slot_after"] = Net.get_local_slot()
+	_result["in_hunt_after"] = Net.get_room_state() == Net.RoomState.IN_HUNT
+	_result["over_at_back"] = not is_instance_valid(world) or world.is_hunt_over()
+	_log("back=%s after %.2f s, slot %d, reconnects %s" % [str(back), float(_result["back_s"]), Net.get_local_slot(), str(_reconnects)])
+	if not back or bool(_result["over_at_back"]):
+		_peer_finish("client did not come back from the cut")
+		return false
+	_write("client_back", "1")
+	await _conference(world)
+	_write("conf_done", "1")
+	return not _done
+
+
+## Host: while the client is cut, one kill of its own and the crop eaten; then it publishes its state until the
+## client found a moment in which both agree.
+func _host_rejoin_phase(world: HuntController) -> bool:
+	if not await _until(func() -> bool: return _has_file("client_cut"), int(CLIENT_KILL_S * 1000.0) + 30000, "client cut"):
+		return false
+	if not await _until(func() -> bool: return not world.get_alive_boar_ids().is_empty(), SPAWN_WAIT_MS, "a live boar during the cut"):
+		return false
+	var victim: Boar = world.spawner.get_boar(world.get_alive_boar_ids()[0])
+	victim.killer_slot = HOST_SLOT
+	victim.debug_kill()
+	world.debug_set_crop_health(REJOIN_CROP_PCT)
+	_log("during the cut: killed boar %d, crop %.1f%%" % [victim.boar_id, world.get_crop_health_pct()])
+	if not await _until(func() -> bool: return _has_file("client_back"), REJOIN_PEER_WAIT_MS, "client back"):
+		return false
+	_log("client back: away %s left %s" % [str(_away), str(_left)])
+	var seq: int = 0
+	var limit: int = Time.get_ticks_msec() + CONF_MS + REJOIN_PEER_WAIT_MS
+	while not _has_file("conf_done") and Time.get_ticks_msec() < limit and not _done:
+		_write("conf_host_%d.json" % seq, JSON.stringify(_conf_state(world)))
+		seq += 1
+		await _sleep(CONF_STEP_MS)
+	return not _done
+
+
+## What both peers must agree on after a rejoin: live boars, team count, eaten patches, partial scoreboard.
+func _conf_state(world: HuntController) -> Dictionary:
+	var alive: Array = Array(world.get_alive_boar_ids())
+	alive.sort()
+	var eaten: PackedInt32Array = world.crop.get_eaten_indices() if world.crop != null else PackedInt32Array()
+	var board: Array = []
+	for e: Dictionary in world.debug_scoreboard():
+		board.append([int(e["slot"]), int(e["kills"]), int(e["money"])])
+	return {"alive": alive, "killed": world.get_boars_killed(), "total": world.get_boars_total(),
+		"eaten_n": eaten.size(), "eaten_hash": str(hash(var_to_bytes(eaten))), "board": board}
+
+
+## Client: compares its world with the newest state the host published, until they are equal at some moment
+## (boars keep spawning and eating, so a single sample taken at different instants could differ).
+func _conference(world: HuntController) -> void:
+	var limit: int = Time.get_ticks_msec() + CONF_MS
+	var seq: int = 0
+	var tries: int = 0
+	var host_state: Dictionary = {}
+	var mine: Dictionary = {}
+	var matched: bool = false
+	while Time.get_ticks_msec() < limit and not _done and is_instance_valid(world) and not matched:
+		while _has_file("conf_host_%d.json" % (seq + 1)):
+			seq += 1
+		var data: Dictionary = _read_json("conf_host_%d.json" % seq)
+		if not data.is_empty():
+			host_state = data
+			tries += 1
+			# Through JSON on both sides, so numbers compare as the same type.
+			var parsed: Variant = JSON.parse_string(JSON.stringify(_conf_state(world)))
+			mine = parsed if parsed is Dictionary else {}
+			matched = mine == host_state
+		if not matched:
+			await _sleep(CONF_STEP_MS / 2)
+	_result["conference"] = {"matched": matched, "tries": tries, "host": host_state, "client": mine}
+	_log("conference matched=%s tries=%d client=%s" % [str(matched), tries, str(mine)])
 
 
 func _host_crop(world: HuntController) -> void:
@@ -762,7 +946,8 @@ func _host_client_drop(world: HuntController) -> void:
 	var player: PlayerBase = world.get_player()
 	_park(world, player)
 	await _until(func() -> bool: return _has_file("client_killed"), DROP_WAIT_MS, "", false)
-	await _until(func() -> bool: return _left.has(CLIENT_SLOT), LEFT_WAIT_MS, "", false)
+	var left_wait_ms: int = int(float(Data.get_net().get("peer_timeout_s", 45.0)) * 1000.0) + LEFT_SLACK_MS
+	await _until(func() -> bool: return _left.has(CLIENT_SLOT), left_wait_ms, "", false)
 	_log("client left: %s, hunters %d" % [str(_left), world.get_hunters().size()])
 	await _kill_until(world, player, func() -> bool: return world.is_hunt_over(), HOST_KILL_S)
 	if not is_instance_valid(world) or _done:
@@ -943,6 +1128,8 @@ func _capture(world: HuntController) -> void:
 	_result["killers"] = _killers
 	_result["died"] = _died
 	_result["left"] = _left
+	_result["away"] = _away
+	_result["reconnects"] = _reconnects
 	_result["eaten_n"] = eaten.size()
 	_result["eaten_hash"] = hash(var_to_bytes(eaten))
 	_log("over: outcome %d kills %d money %d bonus %d eaten %d" % [res.outcome, ids.size(), res.money_from_kills,

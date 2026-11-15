@@ -97,6 +97,11 @@ func test_hunt_world_solo_virtuals() -> void:
 	w.net_peer_left(1)
 	w.net_connection_lost()
 	ok(not w.is_hunt_over(), "ganchos de rede da base nao encerram a caçada")
+	# F8 (4.7.9): the base net_write_full_sync writes nothing and changes nothing.
+	var sync_out: StreamPeerBuffer = StreamPeerBuffer.new()
+	w.net_write_full_sync(sync_out)
+	eq(sync_out.get_size(), 0, "net_write_full_sync da base nao escreve nada")
+	ok(not w.is_hunt_over(), "net_write_full_sync da base nao encerra a caçada")
 
 
 func test_hunter_visual_fallback() -> void:

@@ -162,3 +162,7 @@ func net_peer_left(_slot: int) -> void:                       # that hunter (and
 
 func net_connection_lost() -> void:                           # client: ends DISCONNECTED; host: every remote leaves
 	pass
+
+
+func net_write_full_sync(_out: StreamPeerBuffer) -> void:     # host: EV_FULL_SYNC record + replayed records
+	pass

@@ -134,7 +134,7 @@ for (const mode of ["stable", "hibernate"]) {
       host.clear();
       const a = rig.connect(Q("t=join&code=k7qf2&name=Ana"));
       expect(a.texts).toEqual([{ t: "joined", code: "K7QF2", id: 2, peers: [{ id: 1, name: "Italo" }] }]);
-      expect(host.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana" }]);
+      expect(host.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana", ep: 0 }]);
       const b = rig.connect(Q("t=join&code=K7QF2&name=Beto"));
       expect(b.texts[0].peers).toEqual([{ id: 1, name: "Italo" }, { id: 2, name: "Ana" }]);
       expect(b.id).toBe(3);
@@ -286,14 +286,14 @@ for (const mode of ["stable", "hibernate"]) {
       expect(host.texts).toEqual([{ t: "pong" }]);
     });
 
-    test("leave equals closing: peer_left once", () => {
+    test("leave: peer_left once, marked clean", () => {
       const { rig, host } = setup();
       const a = rig.connect(Q("t=join&code=K7QF2"));
       host.clear();
       a.send('{"t":"leave"}');
       rig.settle();
       expect(a.closed).toBe(1000);
-      expect(host.texts).toEqual([{ t: "peer_left", id: 2 }]);
+      expect(host.texts).toEqual([{ t: "peer_left", id: 2, clean: true }]);
     });
 
     test("a client dropping sends peer_left", () => {
@@ -303,6 +303,218 @@ for (const mode of ["stable", "hibernate"]) {
       host.clear();
       rig.drop(a);
       expect(host.texts).toEqual([{ t: "peer_left", id: 2 }]);
+    });
+
+    // --- F8: re-entry (docs/multiplayer.md section 4.7.2) ---
+
+    const TOK_A = 123456;
+    const TOK_B = 4294967295;
+    const lock = (host, tokens) => host.send(JSON.stringify(tokens === undefined ? { t: "lock", locked: true } : { t: "lock", locked: true, tokens }));
+    const rejoin = (rig, want, tok, extra = "") => rig.connect(Q(`t=join&code=K7QF2&name=Ana&want=${want}&tok=${tok}${extra}`));
+    const hostMeta = (rig) => rig.socks[0].meta;
+
+    test("lock stores, replaces and erases tokens", () => {
+      const { rig, host } = setup();
+      lock(host, { 2: TOK_A, 3: TOK_B });
+      expect(hostMeta(rig).locked).toBe(true);
+      expect(hostMeta(rig).tokens).toEqual({ 2: TOK_A, 3: TOK_B });
+      lock(host, { 3: TOK_B });
+      expect(hostMeta(rig).tokens).toEqual({ 3: TOK_B });
+      lock(host);
+      expect(hostMeta(rig).locked).toBe(true);
+      expect(hostMeta(rig).tokens).toBeUndefined();
+      lock(host, { 2: TOK_A });
+      host.send('{"t":"lock","locked":false}');
+      expect(hostMeta(rig).locked).toBe(false);
+      expect(hostMeta(rig).tokens).toBeUndefined();
+      host.send(JSON.stringify({ t: "lock", locked: false, tokens: { 2: TOK_A } }));
+      expect(hostMeta(rig).tokens).toBeUndefined();
+      expect(host.closed).toBeNull();
+      lock(host, { 2: TOK_B, 3: TOK_B, 4: TOK_B });
+      expect(JSON.stringify(hostMeta(rig)).length).toBeLessThan(2048);
+    });
+
+    test("lock refuses a malformed tokens map", () => {
+      const bad = [[1, 2], "x", null, 7, { 1: 5 }, { 5: 5 }, { 2: 0 }, { 2: 4294967296 }, { 2: 1.5 }, { 2: "9" }, { a: 5 }, { "02": 5 }, { 2: -1 }];
+      for (const tokens of bad) {
+        const { rig, host } = setup();
+        host.send(JSON.stringify({ t: "lock", locked: true, tokens }));
+        expect(host.texts.at(-1)).toEqual({ t: "error", code: "bad_request" });
+        expect(host.closed).toBe(4400);
+        expect(hostMeta(rig).tokens).toBeUndefined();
+      }
+    });
+
+    test("re-entry with the right token gets the same id in a locked room", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      const b = rig.connect(Q("t=join&code=K7QF2&name=Beto"));
+      lock(host, { 2: TOK_A, 3: TOK_B });
+      rig.drop(a);
+      host.clear();
+      b.clear();
+      const back = rejoin(rig, 2, TOK_A, "&ep=3");
+      expect(back.closed).toBeNull();
+      expect(back.texts).toEqual([{ t: "joined", code: "K7QF2", id: 2, peers: [{ id: 1, name: "Italo" }, { id: 3, name: "Beto" }] }]);
+      expect(back.sock.meta.ep).toBe(3);
+      expect(host.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana", ep: 3 }]);
+      expect(b.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana", ep: 3 }]);
+      // the largest u32 works too (10 digits)
+      rig.drop(b);
+      expect(rejoin(rig, 3, TOK_B).id).toBe(3);
+    });
+
+    test("re-entry without ep announces ep 0", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      lock(host, { 2: TOK_A });
+      rig.drop(a);
+      host.clear();
+      expect(rejoin(rig, 2, TOK_A).id).toBe(2);
+      expect(host.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana", ep: 0 }]);
+    });
+
+    test("re-entry replaces a live socket even with 4 live connections", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      const b = rig.connect(Q("t=join&code=K7QF2&name=Beto"));
+      const c = rig.connect(Q("t=join&code=K7QF2&name=Cris"));
+      lock(host, { 2: TOK_A, 3: 77, 4: 88 });
+      for (const x of [host, a, b, c]) x.clear();
+      const back = rejoin(rig, 2, TOK_A, "&ep=1");
+      expect(back.id).toBe(2);
+      expect(back.closed).toBeNull();
+      // the old socket is told and closed; nobody hears a peer_left
+      expect(a.texts).toEqual([{ t: "error", code: "replaced" }]);
+      expect(a.closed).toBe(4411);
+      expect(a.sock.meta.left).toBe(true);
+      for (const x of [host, b, c]) expect(x.texts).toEqual([{ t: "peer_joined", id: 2, name: "Ana", ep: 1 }]);
+      // the runtime reports the old socket closed later: nothing is emitted
+      for (const x of [host, b, c, back]) x.clear();
+      onClose(rig.peers(), rig.makePeer(a.sock));
+      rig.drop(a);
+      for (const x of [host, b, c, back]) expect(x.texts).toEqual([]);
+      expect(rig.peers().length).toBe(4);
+    });
+
+    test("relay after the swap reaches only the new socket", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      lock(host, { 2: TOK_A });
+      const back = rejoin(rig, 2, TOK_A, "&ep=2");
+      for (const x of [host, a, back]) x.clear();
+      host.send(new Uint8Array([2, 0, 1, 9]));
+      host.send(JSON.stringify({ t: "signal", to: 2, data: { kind: "answer", ep: 2 } }));
+      expect(a.bins.length).toBe(0);
+      expect(a.texts).toEqual([]);
+      expect(Array.from(back.bins[0])).toEqual([1, 0, 1, 9]);
+      expect(back.texts).toEqual([{ t: "signal", from: 1, data: { kind: "answer", ep: 2 } }]);
+      // and the new socket talks to the host; the replaced one is ignored
+      back.send(new Uint8Array([1, 0, 1, 4]));
+      a.send(new Uint8Array([1, 0, 1, 5]));
+      expect(host.bins.map((m) => Array.from(m))).toEqual([[2, 0, 1, 4]]);
+    });
+
+    test("bad_token: wrong token, slot without token, revoked slot, unlocked room", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      const b = rig.connect(Q("t=join&code=K7QF2&name=Beto"));
+      const refused = (conn) => {
+        expect(conn.texts).toEqual([{ t: "error", code: "bad_token" }]);
+        expect(conn.closed).toBe(4401);
+        expect(conn.sock.closeReason).toBe("bad_token");
+      };
+      // unlocked room (tokens never registered)
+      refused(rejoin(rig, 2, TOK_A));
+      lock(host, { 2: TOK_A });
+      host.clear();
+      a.clear();
+      refused(rejoin(rig, 2, TOK_A + 1)); // wrong token
+      refused(rejoin(rig, 3, TOK_A)); // slot without token
+      refused(rejoin(rig, 0, TOK_A)); // no slot asked
+      refused(rejoin(rig, 1, TOK_A)); // the host slot
+      refused(rejoin(rig, 9, TOK_A)); // outside the room
+      // a refused re-entry touches nobody
+      expect(a.closed).toBeNull();
+      expect(b.closed).toBeNull();
+      expect(a.texts).toEqual([]);
+      expect(host.texts).toEqual([]);
+      lock(host, { 3: 55 }); // revoked: the lock was sent again without slot 2
+      refused(rejoin(rig, 2, TOK_A));
+      lock(host); // locked without tokens
+      refused(rejoin(rig, 3, 55));
+      lock(host, { 2: TOK_A });
+      host.send('{"t":"lock","locked":false}'); // unlocked: tokens are gone
+      refused(rejoin(rig, 2, TOK_A));
+      host.send('{"t":"lock","locked":true}');
+      refused(rejoin(rig, 2, TOK_A));
+    });
+
+    test("join without tok into a locked room is still in_progress", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      lock(host, { 2: TOK_A });
+      rig.drop(a);
+      for (const q of ["t=join&code=K7QF2&want=2", "t=join&code=K7QF2&want=2&tok=0", "t=join&code=K7QF2&want=2&tok=", "t=join&code=K7QF2&want=2&ep=4"]) {
+        const c = rig.connect(Q(q));
+        expect(c.texts).toEqual([{ t: "error", code: "in_progress" }]);
+        expect(c.closed).toBe(4423);
+      }
+    });
+
+    test("entry errors come in order: not found, expired, version, then bad_token", () => {
+      const { rig, host } = setup();
+      rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      lock(host, { 2: TOK_A });
+      const nf = rig.connect(Q(`t=join&code=ZZZZZ&want=2&tok=${TOK_A}`));
+      expect(nf.closed).toBe(4404);
+      const vm = rig.connect(`t=join&code=K7QF2&v=0.3.9&proto=1&want=2&tok=${TOK_A + 1}`);
+      expect(vm.texts).toEqual([{ t: "error", code: "version_mismatch", host_v: "0.4.0" }]);
+      expect(vm.closed).toBe(4426);
+      const vmRight = rig.connect(`t=join&code=K7QF2&v=0.3.9&proto=1&want=2&tok=${TOK_A}`);
+      expect(vmRight.closed).toBe(4426);
+      expect(rig.peers().length).toBe(2); // the live slot 2 was not replaced by a refused entry
+      rig.now += config.room_max_age_s * 1000 + 1;
+      const old = rejoin(rig, 2, TOK_A);
+      expect(old.texts).toEqual([{ t: "error", code: "expired" }]);
+      expect(old.closed).toBe(4408);
+    });
+
+    test("re-entry ignores room_full and the token survives hibernation", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      rig.connect(Q("t=join&code=K7QF2&name=Beto"));
+      rig.connect(Q("t=join&code=K7QF2&name=Cris"));
+      lock(host, { 2: TOK_A });
+      rig.hibernate();
+      rig.drop(a);
+      rig.hibernate();
+      const back = rejoin(rig, 2, TOK_A, "&ep=15");
+      expect(back.id).toBe(2);
+      expect(rig.peers().length).toBe(4);
+      // a second fall and return: the token is still good
+      rig.drop(back);
+      expect(rejoin(rig, 2, TOK_A, "&ep=1").id).toBe(2);
+    });
+
+    test("peer_left is clean on leave and plain on a closed socket", () => {
+      const { rig, host } = setup();
+      const a = rig.connect(Q("t=join&code=K7QF2&name=Ana"));
+      const b = rig.connect(Q("t=join&code=K7QF2&name=Beto"));
+      host.clear();
+      b.clear();
+      rig.drop(a);
+      expect(host.texts).toEqual([{ t: "peer_left", id: 2 }]);
+      expect(b.texts).toEqual([{ t: "peer_left", id: 2 }]);
+      host.clear();
+      b.send('{"t":"leave"}');
+      expect(b.closed).toBe(1000);
+      expect(host.texts).toEqual([{ t: "peer_left", id: 3, clean: true }]);
+      // a peer closed for misbehaving is not a clean exit
+      const c = rig.connect(Q("t=join&code=K7QF2&name=Cris"));
+      host.clear();
+      c.send("not json");
+      expect(host.texts).toEqual([{ t: "peer_left", id: c.id }]);
     });
 
     test("host leaving destroys the room", () => {
@@ -425,10 +637,45 @@ describe("helpers", () => {
 
   test("parseHello", () => {
     expect(parseHello("wss://h/ws?t=join&code=abc12&v=0.4.0&proto=1&name=Ana&want=3"))
-      .toEqual({ t: "join", code: "ABC12", v: "0.4.0", proto: 1, name: "Ana", want: 3 });
-    expect(parseHello("/ws?t=create&v=0.4.0&proto=1")).toEqual({ t: "create", code: "", v: "0.4.0", proto: 1, name: "", want: 0 });
+      .toEqual({ t: "join", code: "ABC12", v: "0.4.0", proto: 1, name: "Ana", want: 3, tok: 0, ep: 0 });
+    expect(parseHello("/ws?t=create&v=0.4.0&proto=1"))
+      .toEqual({ t: "create", code: "", v: "0.4.0", proto: 1, name: "", want: 0, tok: 0, ep: 0 });
     expect(parseHello("/ws?t=create&v=0.4.0&proto=x")).toBeNull();
     expect(parseHello("/ws")).toBeNull();
+  });
+});
+
+describe("parseHello: tok and ep (F8)", () => {
+  const J = (extra) => parseHello("/ws?t=join&code=ABC12&v=0.4.0&proto=1&want=2" + extra);
+
+  test("valid values", () => {
+    expect(J("&tok=123456&ep=3")).toEqual({ t: "join", code: "ABC12", v: "0.4.0", proto: 1, name: "", want: 2, tok: 123456, ep: 3 });
+    expect(J("&tok=1").tok).toBe(1);
+    expect(J("&tok=4294967295").tok).toBe(4294967295); // 10 digits: beyond the 9 of toInt
+    expect(J("&tok=0000000007").tok).toBe(7);
+    expect(J("&tok=5&ep=0").ep).toBe(0);
+    expect(J("&tok=5&ep=15").ep).toBe(15);
+    expect(J("&tok=5&ep=07").ep).toBe(7);
+  });
+
+  test("absent, empty or zero tok is a normal entry", () => {
+    for (const extra of ["", "&tok=", "&tok=0", "&tok=0000000000"]) {
+      const h = J(extra);
+      expect(h.tok).toBe(0);
+      expect(h.ep).toBe(0);
+    }
+  });
+
+  test("invalid values are refused", () => {
+    for (const extra of ["&tok=4294967296", "&tok=99999999999", "&tok=-1", "&tok=1.5", "&tok=abc", "&tok=1e3", "&tok=%201",
+      "&tok=5&ep=16", "&tok=5&ep=-1", "&tok=5&ep=x", "&tok=5&ep=", "&tok=5&ep=1.0", "&ep=99", "&tok=5&ep=100"]) {
+      expect(J(extra)).toBeNull();
+    }
+  });
+
+  test("create ignores tok and ep", () => {
+    expect(parseHello("/ws?t=create&v=0.4.0&proto=1&tok=abc&ep=99"))
+      .toEqual({ t: "create", code: "", v: "0.4.0", proto: 1, name: "", want: 0, tok: 0, ep: 0 });
   });
 });
 

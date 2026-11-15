@@ -9,6 +9,7 @@ enum State { IDLE, CONNECTING, OPEN, CLOSING, CLOSED }
 const PING_TEXT: String = "{\"t\":\"ping\"}"
 const LEAVE_TEXT: String = "{\"t\":\"leave\"}"
 const CLOSE_NORMAL: int = 1000
+const CLOSE_ABRUPT: int = -1      # WebSocketPeer.close: drop the connection without telling the remote peer
 
 var close_code: int = -1
 var close_reason: String = ""
@@ -26,6 +27,8 @@ var _ping_ms: int = 0
 var _pong_timeout_ms: int = 0
 var _next_ping_ms: int = 0
 var _pong_deadline_ms: int = 0
+var _pong_window_ms: int = 0      # how long the pong being waited for may take (pong_timeout_s, or the probe's)
+var _muted: bool = false          # tests: the socket stays up but nothing is read or written (half-open)
 var _last_poll_ms: int = 0
 var _messages: Array[Dictionary] = []
 var _relay_from: PackedInt32Array = PackedInt32Array()
@@ -43,6 +46,7 @@ static func build_url(base: String, params: Dictionary) -> String:
 func open(url: String, cfg: Dictionary, now_ms: int) -> bool:
 	_ping_ms = int(float(cfg["ping_s"]) * 1000.0)
 	_pong_timeout_ms = int(float(cfg["pong_timeout_s"]) * 1000.0)
+	_pong_window_ms = _pong_timeout_ms
 	_connect_deadline_ms = now_ms + int(float(cfg["connect_timeout_s"]) * 1000.0)
 	_ws = WebSocketPeer.new()
 	if _ws.connect_to_url(url) != OK:
@@ -65,11 +69,33 @@ func is_closed() -> bool:
 	return _state == State.CLOSED
 
 
+func is_muted() -> bool:
+	return _muted
+
+
+## Asks the server for a sign of life now (docs/multiplayer.md section 4.7.3): a ping goes out at once and the
+## pong has timeout_ms to arrive; without it the socket is aborted (timed_out, no close code). A regular
+## ping would only find a half-open socket after ping_s + pong_timeout_s.
+func probe(now_ms: int, timeout_ms: int) -> void:
+	if _state != State.OPEN or _ws == null:
+		return
+	if _muted or _ws.send_text(PING_TEXT) == OK:
+		sent_text += 1
+	var deadline_ms: int = now_ms + timeout_ms
+	if _pong_deadline_ms == 0 or deadline_ms < _pong_deadline_ms:
+		_pong_deadline_ms = deadline_ms
+		_pong_window_ms = timeout_ms
+	_next_ping_ms = now_ms + _ping_ms
+
+
 func poll(now_ms: int) -> void:
 	if _ws == null:
 		return
 	var gap_ms: int = now_ms - _last_poll_ms if _last_poll_ms > 0 else 0
 	_last_poll_ms = now_ms
+	if _muted:
+		_poll_muted(now_ms)
+		return
 	_ws.poll()
 	_read_packets()
 	var ready: int = _ws.get_ready_state()
@@ -93,10 +119,10 @@ func poll(now_ms: int) -> void:
 	if _state == State.CONNECTING:
 		_state = State.OPEN
 		_next_ping_ms = now_ms + _ping_ms
-	if _pong_deadline_ms > 0 and gap_ms * 2 >= _pong_timeout_ms:
+	if _pong_deadline_ms > 0 and gap_ms * 2 >= _pong_window_ms:
 		# This machine was not polling (frozen tab): the pong may be sitting in a buffer that was not
 		# read yet, so the server gets a fresh window instead of being declared dead.
-		_pong_deadline_ms = now_ms + _pong_timeout_ms
+		_pong_deadline_ms = now_ms + _pong_window_ms
 	if _pong_deadline_ms > 0 and now_ms >= _pong_deadline_ms:
 		_abort()
 		return
@@ -106,13 +132,61 @@ func poll(now_ms: int) -> void:
 			sent_text += 1
 			if _pong_deadline_ms == 0:
 				_pong_deadline_ms = now_ms + _pong_timeout_ms
+				_pong_window_ms = _pong_timeout_ms
+
+
+## Muted socket (tests): the timers run as if the pings left, and no pong ever comes.
+func _poll_muted(now_ms: int) -> void:
+	if _state != State.OPEN:
+		return
+	if _pong_deadline_ms > 0 and now_ms >= _pong_deadline_ms:
+		_abort()
+		return
+	if now_ms >= _next_ping_ms:
+		_next_ping_ms = now_ms + _ping_ms
+		sent_text += 1
+		if _pong_deadline_ms == 0:
+			_pong_deadline_ms = now_ms + _pong_timeout_ms
+			_pong_window_ms = _pong_timeout_ms
 
 
 func _abort() -> void:
 	timed_out = true
+	_state = State.CLOSED
+	if _muted:
+		return   # half-open: this end gives up, but the connection itself stays up until release()
 	_ws.close()
 	_ws = null
+
+
+## The connection is gone, now: no close handshake, no close code (what a network drop looks like from here).
+func abort() -> void:
+	if _ws != null:
+		_ws.close(CLOSE_ABRUPT)
+		_ws = null
+	_muted = false
 	_state = State.CLOSED
+
+
+## Tests only: from now on nothing is read or written, and the connection is never closed by this end until
+## release(). The server keeps seeing a live socket; this end can only find out by a ping without pong.
+func debug_mute() -> void:
+	if _ws != null and _state == State.OPEN:
+		_muted = true
+
+
+## Tests only: reads again what piled up on a muted socket (to see what the server said to it meanwhile).
+func debug_unmute() -> void:
+	if _muted and _ws != null:
+		_muted = false
+		_state = State.OPEN
+		_pong_deadline_ms = 0
+
+
+## End of a muted socket: the connection is finally dropped.
+func release() -> void:
+	if _muted:
+		abort()
 
 
 func _read_packets() -> void:
@@ -125,6 +199,7 @@ func _read_packets() -> void:
 			var msg: Dictionary = json.data
 			if str(msg.get("t", "")) == "pong":
 				_pong_deadline_ms = 0
+				_pong_window_ms = _pong_timeout_ms
 			else:
 				_messages.append(msg)
 		elif packet.size() >= 1:
@@ -151,6 +226,8 @@ func take_relay() -> Array:
 func send_json(msg: Dictionary) -> bool:
 	if _state != State.OPEN or _ws == null:
 		return false
+	if _muted:
+		return true   # swallowed: the sender cannot tell
 	if _ws.send_text(JSON.stringify(msg)) != OK:
 		return false
 	sent_text += 1
@@ -159,13 +236,15 @@ func send_json(msg: Dictionary) -> bool:
 
 ## Pushes what send_* queued onto the wire now instead of at the next poll (native sockets write in poll).
 func flush() -> void:
-	if _ws != null and _state == State.OPEN:
+	if _ws != null and _state == State.OPEN and not _muted:
 		_ws.poll()
 
 
 func send_relay(to_id: int, payload: PackedByteArray) -> bool:
 	if _state != State.OPEN or _ws == null:
 		return false
+	if _muted:
+		return true   # swallowed: the sender cannot tell
 	var message: PackedByteArray = PackedByteArray([to_id])
 	message.append_array(payload)
 	if _ws.send(message, WebSocketPeer.WRITE_MODE_BINARY) != OK:
@@ -176,6 +255,8 @@ func send_relay(to_id: int, payload: PackedByteArray) -> bool:
 
 ## Starts closing. Keep calling poll() until is_closed() so the close frame really leaves.
 func close(now_ms: int, say_leave: bool = true) -> void:
+	if _muted:
+		abort()
 	if _ws == null:
 		_state = State.CLOSED
 		return

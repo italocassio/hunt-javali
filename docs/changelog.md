@@ -3,6 +3,32 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.4.9 — 15/11/2026
+
+**Reconexão na caçada com amigos.**
+
+O que mudou para o jogador:
+
+- Se a internet de um jogador cair no meio da caçada, ele não sai mais da partida: aparece "Reconectando…",
+  o caçador fica parado e o jogo tenta voltar sozinho por até 30 segundos. Ao voltar, aparece
+  "Conexão restabelecida." e ele continua com os mesmos javalis, a mesma lavoura e o mesmo placar.
+- Os outros veem "<Nome> está reconectando…" e "<Nome> voltou.". Enquanto está fora, o caçador do aliado
+  fica parado e os javalis o ignoram. O anfitrião guarda o lugar por 45 segundos.
+- Se não der para voltar a tempo, a partida termina para ele como antes, com os abates pagos.
+- Com "Mostrar quadros por segundo" ligado, a caçada com amigos mostra também o tráfego de rede
+  (envio e recebimento em kB/s e quantos aliados estão em conexão direta ou via servidor).
+- Só funciona sem recarregar a página. O modo solo não mudou.
+
+O que mudou no projeto:
+
+- Servidor de salas (`server/rooms.js`, publicado): entrada de volta com `tok` e `ep` na sala trancada,
+  erros `bad_token` (4401) e `replaced` (4411), `lock` com os tokens, `clean` no `peer_left`.
+- `src/net/`: reconexão com sonda, tentativas e época do enlace; `Net.is_reconnecting()`, `get_traffic()`.
+- `src/hunt/`: carência do slot no anfitrião, `EV_FULL_SYNC` (diário de eventos repetido na volta).
+- `data/net.json`: `peer_timeout_s` 45, `rejoin_timeout_s` 30, `rejoin_backoff_s`, `rejoin_probe_s`.
+- Contrato em `docs/multiplayer.md` §4.7. Testes novos: `relay_rejoin` e `rejoin` no `tests/net_test.tscn`,
+  sandbox `net_sync` no `tests/net_unit.tscn`, cenário `rejoin` no `tests/web/coop_probe.py`.
+
 ## 0.4.8 — 14/11/2026
 
 **Cães na caçada com amigos.**

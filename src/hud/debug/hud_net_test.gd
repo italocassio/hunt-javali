@@ -1,6 +1,8 @@
 extends Node
 ## Package A sandbox for F4 (networked shooting, player side): shot ids stamped with the local slot, the hit
-## marker ignoring allies' hits and the ally kill message. Runs offline (local slot 0).
+## marker ignoring allies' hits and the ally kill message. F8 (reconnection, docs/multiplayer.md 4.7.7/4.7.8): the
+## reconnecting banner and notices, the Player input lock that survives the pause, RemoteHunter HF_AWAY and the
+## FpsCounter network line. Runs offline (local slot 0).
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/hud/debug/hud_net_test.tscn
 ## Not part of the game.
 
@@ -9,6 +11,7 @@ const ALLY_SHOT_COUNTER: int = 7
 const TARGET_DISTANCE_M: float = 6.0
 const TARGET_RADIUS_M: float = 3.0
 const ALLY_KILL_WEIGHT_KG: float = 132.0
+const ABSENT_S: float = 0.2   # peer_absent_s override for the RemoteHunter checks (the real one is 3 s)
 
 var _passed: int = 0
 var _failed: int = 0
@@ -52,6 +55,9 @@ func _ready() -> void:
 	await _test_spectate_hud()
 	await _test_pause()
 	await _test_fps_counter()
+	await _test_reconnect_hud()
+	await _test_player_reconnect_lock()
+	_test_remote_away()
 	print("RESULT: %d passed, %d failed, 0 skipped" % [_passed, _failed])
 	get_tree().quit(0 if _failed == 0 else 1)
 
@@ -270,7 +276,204 @@ func _test_fps_counter() -> void:
 	_check("fps_hidden_and_idle_when_off", not fps.visible and not fps.is_processing())
 	GameEvents.settings_changed.emit("show_fps", true)
 	_check("fps_shown_again", fps.visible and fps.is_processing())
+	# Solo: one line, no network line, Net never asked. Online: second line from Net.get_traffic().
+	fps.set_enabled(true)
+	_check("fps_solo_single_line", not fps.text.contains("\n") and not fps.text.contains("Rede"), fps.text)
+	var traffic: Dictionary = {"up_bps": 12345, "down_bps": 4100, "links": [
+		{"slot": 1, "path": Net.Path.RTC, "up_bps": 6000, "down_bps": 2000},
+		{"slot": 2, "path": Net.Path.RTC, "up_bps": 6000, "down_bps": 2000},
+		{"slot": 3, "path": Net.Path.RELAY, "up_bps": 345, "down_bps": 100}]}
+	_check("fps_net_line_format", FpsCounter.format_net_line(traffic) == "Rede ↑ 12,3 ↓ 4,1 kB/s · 2 direto, 1 via servidor",
+		FpsCounter.format_net_line(traffic))
+	_check("fps_net_line_empty_traffic", FpsCounter.format_net_line({}) == "Rede ↑ 0,0 ↓ 0,0 kB/s · 0 direto, 0 via servidor")
+	fps.debug_online = 1
+	fps.set_enabled(true)
+	var lines: PackedStringArray = fps.text.split("\n")
+	_check("fps_online_two_lines", lines.size() == 2 and lines[0].ends_with(" FPS") and lines[1].begins_with("Rede ↑ "), fps.text)
+	fps.debug_online = 0
+	fps.set_enabled(true)
+	_check("fps_back_to_one_line", not fps.text.contains("\n"), fps.text)
+	fps.debug_online = 1
+	GameEvents.settings_changed.emit("show_fps", false)
+	_check("fps_hidden_online_is_idle", not fps.visible and not fps.is_processing())
 	hud.queue_free()
+
+
+func _test_reconnect_hud() -> void:
+	var hud: Hud = Hud.new()
+	add_child(hud)
+	await get_tree().process_frame
+	var ctx: KillMessage = hud.get("_ctx_msg") as KillMessage
+	var stall: Label = hud.get("_stall_banner") as Label
+	var banner: Label = hud.get("_reconnect_banner") as Label
+	var label: Label = ctx.get_child(0) as Label
+	_check("reconnect_banner_hidden_initially", not banner.visible)
+	_check("reconnect_banner_ignores_touch", banner.mouse_filter == Control.MOUSE_FILTER_IGNORE and stall.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	_check("reconnect_banner_same_place_as_stall", is_equal_approx(banner.anchor_top, stall.anchor_top))
+	GameEvents.net_stall_changed.emit(true)
+	GameEvents.net_reconnect_changed.emit(true)
+	_check("reconnect_banner_text", banner.visible and banner.text == "Reconectando…", banner.text)
+	_check("reconnect_replaces_stall_banner", not stall.visible)
+	GameEvents.net_stall_changed.emit(true)
+	_check("stall_stays_hidden_while_reconnecting", not stall.visible and banner.visible)
+	GameEvents.net_stall_changed.emit(false)
+	GameEvents.net_reconnect_changed.emit(false)
+	_check("reconnect_banner_off", not banner.visible and not stall.visible)
+	_check("reconnected_message", ctx.get_text() == "Conexão restabelecida.", ctx.get_text())
+	GameEvents.hud_message_requested.emit("outra", 1.0)
+	GameEvents.net_reconnect_changed.emit(false)
+	_check("reconnected_message_only_after_a_drop", ctx.get_text() == "outra", ctx.get_text())
+	# The stall banner comes back if the host is still silent once the reconnection is over.
+	GameEvents.net_stall_changed.emit(true)
+	GameEvents.net_reconnect_changed.emit(true)
+	GameEvents.net_reconnect_changed.emit(false)
+	_check("stall_back_after_reconnect", stall.visible and not banner.visible)
+	GameEvents.net_stall_changed.emit(false)
+	# Allies: away and back, tinted with the slot color; the local slot is never reported.
+	GameEvents.hunter_joined.emit(ALLY_SLOT, "Maria")
+	GameEvents.hunter_away_changed.emit(ALLY_SLOT, true)
+	_check("ally_away_message", ctx.get_text() == "Maria está reconectando…", ctx.get_text())
+	_check("ally_away_color", label.get_theme_color("font_color") == HunterVisualBase.slot_color(ALLY_SLOT))
+	GameEvents.hunter_away_changed.emit(ALLY_SLOT, false)
+	_check("ally_back_message", ctx.get_text() == "Maria voltou.", ctx.get_text())
+	GameEvents.hunter_away_changed.emit(ALLY_SLOT + 1, true)
+	_check("ally_away_fallback_name", ctx.get_text() == "Um caçador está reconectando…", ctx.get_text())
+	var before: String = ctx.get_text()
+	GameEvents.hunter_away_changed.emit(Net.get_local_slot(), true)
+	_check("local_away_not_announced", ctx.get_text() == before)
+	# Giving up: no "restored" text left behind, banner gone, nothing announced afterwards.
+	GameEvents.net_reconnect_changed.emit(true)
+	GameEvents.net_reconnect_changed.emit(false)
+	var result: HuntResult = HuntResult.new()
+	result.outcome = HuntResult.Outcome.DISCONNECTED
+	GameEvents.hunt_ended.emit(result)
+	_check("giving_up_clears_restored_message", is_zero_approx(ctx.modulate.a))
+	var end_msg: KillMessage = hud.get("_end_msg") as KillMessage
+	_check("giving_up_shows_connection_lost", end_msg.get_text() == "Conexão perdida.", end_msg.get_text())
+	GameEvents.net_reconnect_changed.emit(true)
+	_check("no_reconnect_banner_after_end", not banner.visible)
+	var last_text: String = ctx.get_text()
+	GameEvents.hunter_away_changed.emit(ALLY_SLOT, true)
+	_check("no_away_notice_after_end", ctx.get_text() == last_text)
+	GameEvents.net_reconnect_changed.emit(false)
+	hud.queue_free()
+
+
+## The reconnection lock is the Player's own: pausing (set_input_enabled false/true) must neither unlock nor lock.
+func _test_player_reconnect_lock() -> void:
+	var packed: PackedScene = load(ScenePaths.PLAYER) as PackedScene
+	var player: Player = packed.instantiate() as Player
+	add_child(player)
+	await get_tree().process_frame
+	Input.action_press(&"move_forward")
+	_check("lock_off_reads_input", player.call("_input_open") and player.call("_read_move") != Vector2.ZERO)
+	GameEvents.net_reconnect_changed.emit(true)
+	_check("lock_blocks_move_and_look", not player.call("_input_open") and player.call("_read_move") == Vector2.ZERO
+		and not player.call("_can_look"))
+	_check("lock_does_not_touch_input_enabled", bool(player.get("_input_enabled")) and player.is_input_locked_by_reconnect())
+	player.set_input_enabled(false)   # the pause opens
+	player.set_input_enabled(true)    # and closes
+	_check("lock_survives_pause_cycle", not player.call("_input_open") and player.call("_read_move") == Vector2.ZERO)
+	GameEvents.net_reconnect_changed.emit(false)
+	_check("lock_released", player.call("_input_open") and player.call("_read_move") != Vector2.ZERO)
+	player.set_input_enabled(false)
+	GameEvents.net_reconnect_changed.emit(true)
+	GameEvents.net_reconnect_changed.emit(false)
+	_check("unlock_keeps_pause_off", not player.call("_input_open"))
+	Input.action_release(&"move_forward")
+	player.queue_free()
+
+
+func _remote_state(pos: Vector3, flags: int, speed_mps: float) -> StreamPeerBuffer:
+	var out: StreamPeerBuffer = StreamPeerBuffer.new()
+	NetCodec.put_xz(out, RemoteHunter.DEFAULT_MAP_RECT, pos.x, pos.z)
+	out.put_16(roundi(pos.y * 100.0))
+	out.put_u16(NetCodec.angle_to_u16(0.0))
+	out.put_8(0)
+	out.put_u8(roundi(speed_mps / RemoteHunter.SPEED_QUANT_MPS))
+	out.put_u8(flags)
+	out.put_u8(RemoteHunter.NO_WEAPON_INDEX)
+	out.put_u8(100)
+	out.put_u8(0)
+	return out
+
+
+func _new_remote() -> RemoteHunter:
+	var packed: PackedScene = load(ScenePaths.REMOTE_HUNTER) as PackedScene
+	var r: RemoteHunter = packed.instantiate() as RemoteHunter
+	r.setup_remote(ALLY_SLOT, "Ana", &"", null)
+	add_child(r)
+	r.set("_net_cfg", {"peer_absent_s": ABSENT_S, "hunter_interp_delay_ms": 150.0})
+	return r
+
+
+func _feed_remote(r: RemoteHunter, pos: Vector3, flags: int, speed_mps: float) -> void:
+	var buf: StreamPeerBuffer = _remote_state(pos, flags, speed_mps)
+	buf.seek(0)
+	r.net_apply_state(buf)
+
+
+func _relay_bytes(r: RemoteHunter) -> PackedByteArray:
+	var out: StreamPeerBuffer = StreamPeerBuffer.new()
+	r.net_write_state(out)
+	return out.data_array
+
+
+func _sample_count(r: RemoteHunter) -> int:
+	return (r.get("_samples") as Array).size()
+
+
+## RemoteHunter HF_AWAY (docs 4.7.7): the host relays a silent hunter as away and still; any machine shows it
+## without locomotion and snaps (no gliding) when it is back.
+func _test_remote_away() -> void:
+	var alive: int = NetCodec.HF_ALIVE
+	var r: RemoteHunter = _new_remote()
+	var first: PackedByteArray = _relay_bytes(r)
+	_check("away_never_before_first_state", first.size() == NetCodec.HUNTER_STATE_BYTES
+		and (int(first[RemoteHunter.FLAGS_OFFSET]) & NetCodec.HF_AWAY) == 0)
+	_feed_remote(r, Vector3(10.0, 0.0, 0.0), alive, 4.0)
+	var present: PackedByteArray = _relay_bytes(r)
+	_check("present_relay_without_away", (int(present[RemoteHunter.FLAGS_OFFSET]) & NetCodec.HF_AWAY) == 0
+		and int(present[RemoteHunter.SPEED_OFFSET]) == 80 and r.is_present())
+	_feed_remote(r, Vector3(10.5, 0.0, 0.0), alive, 4.0)
+	_check("close_states_do_not_snap", _sample_count(r) == 2)
+	OS.delay_msec(int(ABSENT_S * 1000.0) + 80)
+	_check("silent_remote_not_present", not r.is_present())
+	var away: PackedByteArray = _relay_bytes(r)
+	var last_raw: PackedByteArray = r.get("_last_raw")
+	var same_rest: bool = away.size() == last_raw.size()
+	for i: int in away.size():
+		if i != RemoteHunter.FLAGS_OFFSET and i != RemoteHunter.SPEED_OFFSET and away[i] != last_raw[i]:
+			same_rest = false
+	_check("silent_relay_sets_away_and_stops", (int(away[RemoteHunter.FLAGS_OFFSET]) & NetCodec.HF_AWAY) != 0
+		and (int(away[RemoteHunter.FLAGS_OFFSET]) & NetCodec.HF_ALIVE) != 0 and int(away[RemoteHunter.SPEED_OFFSET]) == 0
+		and same_rest)
+	_check("away_relay_is_repeatable", _relay_bytes(r) == away)
+	# It comes back after a long silence: the first state snaps (no sliding across the gap).
+	_feed_remote(r, Vector3(30.0, 0.0, 5.0), alive, 4.0)
+	_check("long_silence_snaps", _sample_count(r) == 1 and r.global_position.distance_to(Vector3(30.0, 0.0, 5.0)) < 0.2
+		and r.is_present(), str(r.global_position))
+	_check("back_relay_without_away", (int(_relay_bytes(r)[RemoteHunter.FLAGS_OFFSET]) & NetCodec.HF_AWAY) == 0)
+	r.queue_free()
+	# Receiving side: a state with HF_AWAY shows no locomotion and counts as not present.
+	var c: RemoteHunter = _new_remote()
+	_feed_remote(c, Vector3(10.0, 0.0, 0.0), alive, 4.0)
+	_feed_remote(c, Vector3(10.4, 0.0, 0.0), alive | NetCodec.HF_AWAY, 4.0)
+	var samples: Array = c.get("_samples")
+	_check("away_sample_has_no_locomotion", samples.size() >= 1
+		and is_zero_approx(float((samples[samples.size() - 1] as Dictionary)["speed"])))
+	_check("away_state_is_not_present", not c.is_present())
+	_feed_remote(c, Vector3(10.4, 0.0, 0.0), alive | NetCodec.HF_AWAY, 4.0)
+	_check("still_away_not_present", not c.is_present() and _sample_count(c) >= 2)
+	_feed_remote(c, Vector3(25.0, 0.0, 0.0), alive, 4.0)
+	_check("first_state_after_away_snaps", _sample_count(c) == 1 and c.is_present()
+		and c.global_position.distance_to(Vector3(25.0, 0.0, 0.0)) < 0.2, str(c.global_position))
+	var down: RemoteHunter = _new_remote()
+	_feed_remote(down, Vector3(1.0, 0.0, 1.0), alive | NetCodec.HF_AWAY, 0.0)
+	_feed_remote(down, Vector3(2.0, 0.0, 1.0), 0, 0.0)   # back, and fallen: snaps and plays the final pose
+	_check("away_then_fallen_snaps_dead", not down.is_alive() and _sample_count(down) == 1)
+	c.queue_free()
+	down.queue_free()
 
 
 func _on_abandon() -> void:

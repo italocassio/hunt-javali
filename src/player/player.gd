@@ -51,6 +51,7 @@ var _health: float = 100.0
 var _max_health: float = 100.0
 var _alive: bool = true
 var _input_enabled: bool = true
+var _reconnect_lock: bool = false             # own lock while Net reconnects; never touches _input_enabled (docs 4.7.7)
 var _set_up: bool = false
 
 var _pitch: float = 0.0
@@ -102,6 +103,8 @@ func _ready() -> void:
 	_weapon_ids = Data.get_weapon_ids()
 	_read_settings()
 	GameEvents.settings_changed.connect(_on_settings_changed)
+	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
+	_reconnect_lock = Net.is_reconnecting()
 
 
 func _exit_tree() -> void:
@@ -306,6 +309,27 @@ func set_input_enabled(enabled: bool) -> void:
 			GameEvents.thermal_vision_changed.emit(false)
 
 
+## True while gameplay input is read: enabled by the owner and not locked by a reconnection.
+func _input_open() -> bool:
+	return _input_enabled and not _reconnect_lock
+
+
+## Reconnecting client (docs/multiplayer.md 4.7.7): input reads behave as set_input_enabled(false) through a lock of
+## its own, so the pause can open and close without unlocking. The pause itself keeps working ("Sair da cacada").
+func _on_net_reconnect_changed(active: bool) -> void:
+	_reconnect_lock = active
+	if active:
+		_fire_buffer = 0.0
+		_fire_was_down = false
+		if _set_up and not _bot:
+			InputSetup.release_all_actions()
+		_update_thermal()
+
+
+func is_input_locked_by_reconnect() -> bool:
+	return _reconnect_lock
+
+
 func get_current_weapon_id() -> StringName:
 	var w: Weapon = _weapon()
 	return w.weapon_id if w != null else &""
@@ -469,7 +493,7 @@ func request_pause() -> void:
 # ---------------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
-	if _bot or not _input_enabled or not _alive:
+	if _bot or not _input_open() or not _alive:
 		return
 	if event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
@@ -487,7 +511,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _can_look() -> bool:
-	return _alive and _input_enabled and not _bot
+	return _alive and _input_open() and not _bot
 
 
 func _apply_look(rel_rad: Vector2) -> void:
@@ -508,7 +532,7 @@ func _sensitivity_scale() -> float:
 func _read_move() -> Vector2:
 	if _bot:
 		return _bot_move
-	if not _input_enabled or not _alive:
+	if not _input_open() or not _alive:
 		return Vector2.ZERO
 	var v: Vector2 = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 	return Vector2(v.x, -v.y)
@@ -519,7 +543,7 @@ func _want_aim() -> bool:
 		return false
 	if _bot:
 		return _bot_aim
-	return _input_enabled and Input.is_action_pressed(&"aim")
+	return _input_open() and Input.is_action_pressed(&"aim")
 
 
 func _fire_allowed_by_input() -> bool:
@@ -548,7 +572,7 @@ func _process(delta: float) -> void:
 func _pump_discrete_input(delta: float) -> void:
 	_switch_left = maxf(_switch_left - delta, 0.0)
 	_fire_buffer = maxf(_fire_buffer - delta, 0.0)
-	if not _input_enabled or not _alive or _bot:
+	if not _input_open() or not _alive or _bot:
 		return
 	if Input.is_action_just_released(&"fire"):
 		_ignore_fire_until_release = false
@@ -626,7 +650,7 @@ func _items_busy() -> bool:
 
 
 func _update_thermal() -> void:
-	var active: bool = has_thermal() and _aim_active and _alive and _input_enabled
+	var active: bool = has_thermal() and _aim_active and _alive and _input_open()
 	if active != _thermal_emitted:
 		_thermal_emitted = active
 		GameEvents.thermal_vision_changed.emit(active)
@@ -700,7 +724,7 @@ func _physics_process(delta: float) -> void:
 	if move_in.length() > 1.0:
 		move_in = move_in.normalized()
 	var want_aim: bool = _want_aim() or is_binocular_view()
-	var want_sprint: bool = _bot_sprint if _bot else (_input_enabled and Input.is_action_pressed(&"sprint"))
+	var want_sprint: bool = _bot_sprint if _bot else (_input_open() and Input.is_action_pressed(&"sprint"))
 	_sprinting = want_sprint and move_in.y > SPRINT_FORWARD_MIN and not _crouching and not want_aim \
 		and _alive and not _items_busy()
 	var speed: float = float(_cfg.get("walk_speed_mps", 4.0))
@@ -755,7 +779,7 @@ func _reset_zoom() -> void:
 
 func _try_fire() -> bool:
 	var w: Weapon = _weapon()
-	if w == null or not _alive or not _input_enabled and not _bot:
+	if w == null or not _alive or not _input_open() and not _bot:
 		return false
 	if _switch_left > 0.0 or _items_busy() or is_binocular_view():
 		return false

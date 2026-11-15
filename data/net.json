@@ -21,7 +21,10 @@
   "host_stall_warn_s": 2.5,
   "host_timeout_s": 20.0,
   "peer_absent_s": 3.0,
-  "peer_timeout_s": 30.0,
+  "peer_timeout_s": 45.0,
+  "rejoin_timeout_s": 30.0,
+  "rejoin_backoff_s": [0.5, 1.0, 2.0, 4.0],
+  "rejoin_probe_s": 3.0,
   "hit_claim_tolerance_m": 12.0,
   "name_max_chars": 12
 }

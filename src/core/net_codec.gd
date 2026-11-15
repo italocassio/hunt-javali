@@ -29,7 +29,7 @@ const EV_DOG_MARK: int = 0x27
 const EV_DOG_CMD: int = 0x28
 const EV_MESSAGE: int = 0x29
 const EV_HUNT_END: int = 0x2A
-const EV_FULL_SYNC: int = 0x2B         # reserved (F8)
+const EV_FULL_SYNC: int = 0x2B         # header of a rejoin sync, followed by replayed records (section 4.7.6)
 # Client -> host
 const C_STATE: int = 0x40              # state lane
 const C_SHOT: int = 0x41
@@ -44,6 +44,7 @@ const HF_SPRINT: int = 4
 const HF_ALIVE: int = 8
 const HF_RELOAD: int = 16
 const HF_UNARMED: int = 32             # binoculars / item in hand
+const HF_AWAY: int = 64                # set by the host for a hunter that is silent / reconnecting
 
 const BOAR_STATES: Array[StringName] = [&"wander", &"to_crop", &"eat", &"to_bait", &"alert", &"flee",
 	&"scrape", &"charge", &"recover", &"bayed", &"held", &"dead"]

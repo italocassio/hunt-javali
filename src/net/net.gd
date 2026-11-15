@@ -130,6 +130,31 @@ func is_peer_absent(slot: int) -> bool:
 	return _session != null and _session.is_peer_absent(slot)
 
 
+## (false) Client trying to get back into the hunt after losing the connection (docs/multiplayer.md 4.7.3).
+## RoomState stays IN_HUNT meanwhile; GameEvents.net_reconnect_changed tells when it starts and when it is back.
+func is_reconnecting() -> bool:
+	return _session != null and _session.is_reconnecting()
+
+
+## ({}) Rate of the last closed second, in bytes per second of frames (no wire overhead), total and per link:
+## {"up_bps": int, "down_bps": int, "links": [{"slot": int, "path": int, "up_bps": int, "down_bps": int}]}.
+func get_traffic() -> Dictionary:
+	return _session.get_traffic() if _session != null else {}
+
+
+## Tests only. Drops the room socket and the direct transport now; for duration_s every rejoin attempt fails
+## without opening a socket. half_open: the socket goes mute instead of closing (nothing read or written, never
+## closed until the session ends), so the session has to find out by the probe and the server still sees it.
+func debug_cut(duration_s: float, half_open: bool = false) -> void:
+	var session: NetSession = _session
+	if session == null:
+		return
+	session.debug_cut(duration_s, half_open)
+	_collect_socket(session)
+	if session == _session and session.get_state() == NetSession.STATE_NONE:
+		_session = null
+
+
 ## Map seed of the current hunt, equal on every peer (it comes from L_START; never 0 once set).
 ## (0) outside a room or before the first LOADING. Goes into HuntRequest.rng_seed (section 6.10).
 func get_hunt_seed() -> int:
@@ -257,6 +282,7 @@ func _open_session() -> NetSession:
 	session.roster_changed.connect(_on_session_roster)
 	session.hunt_go.connect(_on_session_go)
 	session.stall_changed.connect(_on_session_stall)
+	session.reconnect_changed.connect(_on_session_reconnect)
 	_session = session
 	set_process(true)
 	return session
@@ -264,8 +290,10 @@ func _open_session() -> NetSession:
 
 func _collect_socket(session: NetSession) -> void:
 	var socket: NetSignaling = session.take_closing_socket()
-	if socket != null and not socket.is_closed():
-		_lingering.append(socket)
+	while socket != null:
+		if not socket.is_closed():
+			_lingering.append(socket)
+		socket = session.take_closing_socket()
 
 
 func _on_session_state(state: int) -> void:
@@ -286,6 +314,10 @@ func _on_session_go() -> void:
 
 func _on_session_stall(stalled: bool) -> void:
 	GameEvents.net_stall_changed.emit(stalled)
+
+
+func _on_session_reconnect(active: bool) -> void:
+	GameEvents.net_reconnect_changed.emit(active)
 
 
 func _on_loadout_changed() -> void:

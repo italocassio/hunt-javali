@@ -10,6 +10,9 @@ extends Node
 ##   relay_host_drops  net_e2e --host-drops: the host process exits mid-hunt, the client ends DISCONNECTED
 ##   deadlines         net_e2e --deadlines (F5): stall warning, host_timeout_s, peer_timeout_s, load timeout,
 ##                     Net.flush, locked room, ping/pong, dead server
+##   relay_rejoin      net_e2e --rejoin (F8, section 4.7): a client cut for 2 s comes back in the same slot (full sync once),
+##                     half-open socket found by the probe, forged token, cut past the grace, cut past rejoin_timeout_s,
+##                     explicit leave, backoff steps
 ##   victory           net_hunt_e2e (N3): client and host bots split the boars -> VICTORY on both, same scoreboard
 ##   crop              net_hunt_e2e: the crop is drained -> DEFEAT_CROP on both, same eaten patches
 ##   death             net_hunt_e2e: the client dies (hunt goes on), then the host -> DEFEAT_DEATH on both
@@ -17,10 +20,12 @@ extends Node
 ##   host_freeze       net_hunt_e2e (N4): the host stays up but its Net stops -> client DISCONNECTED by timeout
 ##   client_drop       net_hunt_e2e (N5): the client process dies -> the host sees hunter_left and wins alone
 ##   dogs              net_hunt_e2e (N6, F7): each player brings a dog; puppets, commands, marks, messages, owner leaves
+##   rejoin            net_hunt_e2e (F8): the client is cut for 5 s mid-hunt and comes back: same boars, patches and
+##                     scoreboard on both, away/back on the host, VICTORY on both
 ## Without Bun (PATH, $BUN, ~/.bun/bin or -- --bun=<path>) every selected scenario is reported as SKIP, explicitly.
 ## Exit code 1 if any scenario fails, times out or the child dies without its summary line.
 ##
-## Run (all, ~8 min): tools/godot.sh --headless --path . res://tests/net_test.tscn
+## Run (all, ~9.5 min): tools/godot.sh --headless --path . res://tests/net_test.tscn
 ## Subset:              ... res://tests/net_test.tscn -- --only=victory,crop     (short names, or the groups
 ##                      "relay" and "hunt"; an unknown name is a FAIL, never a silent pass)
 ## Other user args:     --bun=<bun executable>
@@ -32,15 +37,18 @@ const E2E_SCENE: String = "res://src/net/debug/net_e2e.tscn"
 const HUNT_SCENE: String = "res://src/hunt/debug/net_hunt_e2e.tscn"
 const ONLY_ARG: String = "--only="
 const WATCHDOG_SLACK_S: float = 30.0
-## "limit_s" is the per-scenario limit, about 2x the time measured on 2026-11-13 (full run: 353 s; relay_normal 15 s,
+## "limit_s" is the per-scenario limit, about 2x the time measured on 2026-11-13 (F7 full run: 353 s; relay_normal 15 s,
 ## relay_host_drops 16, deadlines 82, victory 71, crop 23, death 25, host_drop 14, host_freeze 34, client_drop 72).
 ## The dogs scenario was added in F7 (about 100 s measured, limit 200 s).
+## F8 (full run 2026-11-15: 562 s, 12 of 12): relay_rejoin 55 s, deadlines 86 s, client_drop 79 s (peer_timeout_s 30 -> 45 s),
+## dogs 73 s, rejoin 72 s. Limits stay about 1.7x to 2x the measured time (relay_rejoin 120, rejoin 150).
 ## The global watchdog is the sum of the limits of the selected scenarios plus WATCHDOG_SLACK_S (990 s for all),
 ## so a filtered run gets a proportionally short watchdog.
 const SCENARIOS: Array[Dictionary] = [
 	{"name": "relay_normal", "group": "relay", "scene": E2E_SCENE, "args": [], "limit_s": 40.0},
 	{"name": "relay_host_drops", "group": "relay", "scene": E2E_SCENE, "args": ["--host-drops"], "limit_s": 40.0},
-	{"name": "deadlines", "group": "relay", "scene": E2E_SCENE, "args": ["--deadlines"], "limit_s": 160.0},
+	{"name": "relay_rejoin", "group": "relay", "scene": E2E_SCENE, "args": ["--rejoin"], "limit_s": 120.0},
+	{"name": "deadlines", "group": "relay", "scene": E2E_SCENE, "args": ["--deadlines"], "limit_s": 180.0},
 	{"name": "victory", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=victory"], "limit_s": 150.0},
 	{"name": "crop", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=crop"], "limit_s": 50.0},
 	{"name": "death", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=death"], "limit_s": 50.0},
@@ -48,6 +56,7 @@ const SCENARIOS: Array[Dictionary] = [
 	{"name": "host_freeze", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=host_freeze"], "limit_s": 80.0},
 	{"name": "client_drop", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=client_drop"], "limit_s": 150.0},
 	{"name": "dogs", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=dogs"], "limit_s": 200.0},
+	{"name": "rejoin", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=rejoin"], "limit_s": 150.0},
 ]
 
 var _totals: Dictionary = {}

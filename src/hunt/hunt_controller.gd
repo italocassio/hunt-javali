@@ -30,6 +30,7 @@ const MSG_HOST_ALONE: String = "Conexão perdida: você continua sozinho."
 const DEFAULT_HUNTER_NAME: String = "Caçador %d"
 ## A client's own bait (shown at once) and the host's EV_BAIT for it are the same bait within this distance.
 const BAIT_MATCH_M: float = 0.25
+const HUNTER_FLAGS_OFFSET: int = 10          # flags byte inside the 14 bytes of HUNTER_STATE
 
 ## Tests set this to false before add_child so the hunt does not change scene when it ends.
 var route_on_finish: bool = true
@@ -103,6 +104,7 @@ var _slot_stats: Dictionary = {}        # slot -> {kills: int, money: int, weigh
 var _host_entries: Array = []           # CLIENT: EV_HUNT_END entries {slot, kills, money}
 var _pending_baits: PackedVector2Array = PackedVector2Array()   # CLIENT: own baits waiting for their EV_BAIT
 var _conn_lost: bool = false
+var _away_slots: Dictionary = {}        # slot -> true while that remote's snapshot record carries HF_AWAY
 
 @onready var _boars_root: Node3D = $Boars
 @onready var _baits_root: Node3D = $Baits
@@ -308,6 +310,9 @@ func _finish_assembly_client() -> void:
 	_replica.bait_received.connect(_on_bait_received)
 	_replica.message_received.connect(_on_net_message)
 	_replica.hunt_end_received.connect(_on_host_hunt_end)
+	_replica.full_sync_started.connect(_on_full_sync_started)
+	_replica.full_sync_finished.connect(_on_full_sync_finished)
+	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
 	GameEvents.hunt_abandon_requested.connect(_on_abandon_requested)
 	GameEvents.item_used.connect(_on_item_used)
 	GameEvents.shot_fired.connect(_on_shot_fired)
@@ -748,9 +753,10 @@ func _spawn_bait(at: Vector3, duration_s: float) -> Bait:
 func _client_bait(at: Vector3) -> void:
 	var effect: Dictionary = Data.get_equipment(Ids.I_CORN_BAIT).get("effect", {})
 	var bait: Bait = _spawn_bait(at, float(effect.get("duration_s", 45.0)))
+	if _replica == null or _replica.is_suspended():
+		return   # reconnecting: no C_BAIT goes out, so no echo will ever come for this one
 	_pending_baits.append(bait.get_xz())
-	if _replica != null:
-		_replica.queue_bait_claim(bait.global_position)
+	_replica.queue_bait_claim(bait.global_position)
 
 
 ## Client: EV_BAIT. The echo of this machine's own bait is skipped; anybody else's appears here.
@@ -758,11 +764,23 @@ func _on_bait_received(at: Vector3, duration_s: float) -> void:
 	if _over:
 		return
 	var xz: Vector2 = Vector2(at.x, at.z)
-	for i: int in _pending_baits.size():
-		if _pending_baits[i].distance_to(xz) <= BAIT_MATCH_M:
-			_pending_baits.remove_at(i)
-			return
+	# Rejoin replay: every local bait was released, so nothing here is an echo (section 4.7.6).
+	if _replica == null or not _replica.is_replaying():
+		for i: int in _pending_baits.size():
+			if _pending_baits[i].distance_to(xz) <= BAIT_MATCH_M:
+				_pending_baits.remove_at(i)
+				return
 	_spawn_bait(at, duration_s)
+
+
+## Client, rejoin: every bait shown here goes away; the host's active ones come back in the replay.
+func _release_baits() -> void:
+	for bait: Bait in _baits:
+		if is_instance_valid(bait):
+			if bait.get_parent() != null:
+				bait.get_parent().remove_child(bait)
+			bait.queue_free()
+	_baits.clear()
 
 
 func get_baits() -> Array[Bait]:
@@ -1060,6 +1078,11 @@ func debug_replica() -> HuntReplica:
 	return _replica
 
 
+## The scoreboard as it stands (slot tally of every kill seen here), before the hunt ends.
+func debug_scoreboard() -> Array[Dictionary]:
+	return _build_scoreboard()
+
+
 # --- Net seam (section 3.6). F2: hunters only; boars, dogs, events and claims arrive in later phases -----
 
 ## Host: body of H_SNAPSHOT. Hunters whose net_write_state does not write exactly HUNTER_STATE_BYTES are
@@ -1072,10 +1095,12 @@ func net_write_snapshot(out: StreamPeerBuffer) -> void:
 		h.net_write_state(_snap_scratch)
 		if _snap_scratch.get_size() != NetCodec.HUNTER_STATE_BYTES:
 			continue
+		var state: PackedByteArray = _snap_scratch.data_array
 		_snap_hunters.put_u8(h.slot)
-		_snap_hunters.put_data(_snap_scratch.data_array)
+		_snap_hunters.put_data(state)
 		count += 1
-	out.put_u32(int(maxf(_elapsed - _go_elapsed, 0.0) * 1000.0) & 0xFFFFFFFF)
+		_note_away(h.slot, state[HUNTER_FLAGS_OFFSET])
+	out.put_u32(net_time_ms() & 0xFFFFFFFF)
 	out.put_u16(clampi(roundi(get_crop_health_pct() * CROP_WIRE_SCALE), 0, 65535))
 	out.put_u8(mini(_killed, 255))
 	out.put_u8(mini(get_boars_total(), 255))
@@ -1114,6 +1139,7 @@ func net_apply_snapshot(inp: StreamPeerBuffer) -> void:
 		_net_total = total
 		GameEvents.boar_counts_changed.emit(_net_killed, total)
 	var record_bytes: int = 1 + NetCodec.HUNTER_STATE_BYTES
+	var raw: PackedByteArray = inp.data_array
 	for i: int in n_hunters:
 		if inp.get_available_bytes() < record_bytes:
 			return
@@ -1122,6 +1148,7 @@ func net_apply_snapshot(inp: StreamPeerBuffer) -> void:
 		var h: PlayerBase = _remotes.get(from_slot) as PlayerBase
 		if from_slot != _local_slot and h != null:
 			h.net_apply_state(inp)
+			_note_away(from_slot, raw[start + HUNTER_FLAGS_OFFSET])
 		inp.seek(start + NetCodec.HUNTER_STATE_BYTES)
 	if inp.get_available_bytes() >= 1:
 		var boars_at: int = inp.get_position()
@@ -1135,6 +1162,83 @@ func net_apply_snapshot(inp: StreamPeerBuffer) -> void:
 		if _replica != null:
 			_replica.apply_snapshot_dogs(inp, _net_t_ms)
 		inp.seek(mini(dogs_at + 1 + n_dogs * SNAPSHOT_DOG_BYTES, inp.get_size()))
+
+
+## Session clock of the host (ms since the hunt was released): t_ms of H_SNAPSHOT and of EV_FULL_SYNC.
+func net_time_ms() -> int:
+	return int(maxf(_elapsed - _go_elapsed, 0.0) * 1000.0)
+
+
+## hunter_away_changed(slot, away) when the HF_AWAY bit of a remote's snapshot record changes (section 4.7.7).
+## Same source on both ends: the host reads what it has just written, the client what it has just received.
+## Never for the local slot, after the end of the hunt or for a hunter that already left.
+func _note_away(for_slot: int, flags: int) -> void:
+	if for_slot == _local_slot or _over or not _remotes.has(for_slot):
+		return
+	var away: bool = (flags & NetCodec.HF_AWAY) != 0
+	if away == _away_slots.has(for_slot):
+		return
+	if away:
+		_away_slots[for_slot] = true
+	else:
+		_away_slots.erase(for_slot)
+	GameEvents.hunter_away_changed.emit(for_slot, away)
+
+
+## Client: this machine lost the host and is trying to come back (section 4.7.7). The replica stops judging
+## charges and claiming; baits waiting for their echo will never get it (the claim is not resent). Everything
+## resumes at the end of the EV_FULL_SYNC replay, not here.
+func _on_net_reconnect_changed(active: bool) -> void:
+	if not active or _over or _replica == null:
+		return
+	_replica.suspend()
+	_pending_baits.clear()
+
+
+## Client, EV_FULL_SYNC header (section 4.7.6, step 2): local baits go, the crop takes the host's health. The
+## replayed records that follow rebuild kills, eaten patches, active baits and marks through the usual handlers.
+func _on_full_sync_started(crop_pct: float) -> void:
+	if _over:
+		return
+	_release_baits()
+	_pending_baits.clear()
+	_net_crop_pct = crop_pct
+	if crop != null:
+		crop.set_replicated_health(crop_pct)
+
+
+## Client, after the last replayed record (step 4): the header's counts win if the replay left others.
+func _on_full_sync_finished(killed: int, total: int) -> void:
+	if _over or (killed == _net_killed and total == _net_total):
+		return
+	push_warning("HuntController: full sync counts %d/%d differ from the replay %d/%d" % [killed, total, _net_killed, _net_total])
+	_net_killed = killed
+	_net_total = total
+	GameEvents.boar_counts_changed.emit(killed, total)
+
+
+## Host (section 4.7.6): EV_FULL_SYNC for the client that came back, then the replay: spawn/death journal and
+## eaten patches (HuntHostSync), one EV_BAIT per active bait, one EV_DOG_MARK per live mark and, if the hunt
+## already ended here, the EV_HUNT_END that was sent. The session drains net_take_events to the other links
+## first, so the cut is consistent.
+func net_write_full_sync(out: StreamPeerBuffer) -> void:
+	if _host_sync == null or not _ready_flag:
+		return
+	var sync_at: int = out.get_position()
+	var records: int = _host_sync.write_full_sync(out)
+	for bait: Bait in _baits:
+		if is_instance_valid(bait) and bait.active and bait.remaining_s > 0.0:
+			_host_sync.write_bait_replay(out, bait.global_position, bait.remaining_s)
+			records += 1
+	for id: int in _marks:
+		var left_s: float = float(_marks[id]) - _elapsed
+		var b: Boar = spawner.get_boar(id) if spawner != null else null
+		if left_s > 0.0 and b != null and b.is_alive():
+			_host_sync.write_mark_replay(out, id, left_s)
+			records += 1
+	if _over:
+		records += _host_sync.write_hunt_end_replay(out)
+	_host_sync.set_full_sync_count(out, sync_at, records)
 
 
 ## Host: EV_* records queued since the last tick.
@@ -1167,6 +1271,7 @@ func net_peer_left(for_slot: int) -> void:
 		return
 	_remove_dog(for_slot)
 	_remotes.erase(for_slot)
+	_away_slots.erase(for_slot)   # no hunter_away_changed for a hunter that left
 	_hunters_list.erase(h)
 	h.queue_free()
 	GameEvents.hunter_left.emit(for_slot)

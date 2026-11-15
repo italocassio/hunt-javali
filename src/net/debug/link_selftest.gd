@@ -33,6 +33,9 @@ func _run() -> void:
 	_downgrade_rate(cfg)
 	_stall_guards(cfg)
 	_flush_paths(cfg)
+	_epoch_compat(cfg)
+	_epoch_stale(cfg)
+	_byte_counters(cfg)
 	print("LINK_SELFTEST checks=%d failures=%d" % [_checks, _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -610,3 +613,203 @@ func _flush_paths(cfg: Dictionary) -> void:
 	b.poll(_now)
 	_drain_events(b, got_b)
 	_ok(got_b == PackedInt32Array([300]), "flush direct: the record is already on the other side (%s)" % str(got_b))
+
+
+# --- link epoch and byte counters (docs/multiplayer.md sections 4.7.5 and 4.7.8) ---------------------
+
+## A bare wire: what a link sends on the relay piles up here until the test hands it to somebody.
+class Wire extends RefCounted:
+	var payloads: Array[PackedByteArray] = []
+
+	func sink(payload: PackedByteArray) -> bool:
+		payloads.append(payload)
+		return true
+
+	func take() -> Array[PackedByteArray]:
+		var out: Array[PackedByteArray] = payloads
+		payloads = []
+		return out
+
+
+## Frames inside the relay payloads of a wire: { len u16, frame }+.
+func _frames_of(payloads: Array[PackedByteArray]) -> Array[PackedByteArray]:
+	var out: Array[PackedByteArray] = []
+	for payload: PackedByteArray in payloads:
+		var pos: int = 0
+		while pos + NetLink.RELAY_LEN_BYTES <= payload.size():
+			var length: int = payload.decode_u16(pos)
+			pos += NetLink.RELAY_LEN_BYTES
+			out.append(payload.slice(pos, pos + length))
+			pos += length
+	return out
+
+
+func _link_on(cfg: Dictionary, wire: Wire, epoch: int = -1) -> NetLink:
+	var link: NetLink = NetLink.new()
+	if epoch < 0:
+		link.setup(cfg, 1, wire.sink)          # the call of before F8: three arguments
+	else:
+		link.setup(cfg, 1, wire.sink, epoch)
+	return link
+
+
+## Epoch 0 is the frame of before F8, byte for byte; any other epoch only changes the high nibble of byte 0.
+func _epoch_compat(cfg: Dictionary) -> void:
+	var legacy_event: PackedByteArray = PackedByteArray([NetCodec.LANE_EVENT, 1, 0, 0, 0])   # lane, seq u16, ack u16
+	legacy_event.append_array(_record(TEST_EVENT, 7))
+	var legacy_state: PackedByteArray = PackedByteArray([NetCodec.LANE_STATE, 1, 0, 0, 0])
+	legacy_state.append_array(_record(TEST_STATE, 9))
+	for epoch: int in [-1, 0, 3, 15]:
+		var wire: Wire = Wire.new()
+		var link: NetLink = _link_on(cfg, wire, epoch)
+		link.send_state(_record(TEST_STATE, 9))
+		link.send_events(_record(TEST_EVENT, 7))
+		link.flush_now()
+		var frames: Array[PackedByteArray] = _frames_of(wire.take())
+		var want: int = maxi(epoch, 0)
+		_ok(link.get_epoch() == want, "epoch %d: get_epoch() = %d" % [epoch, link.get_epoch()])
+		if frames.size() != 2:
+			_ok(false, "epoch %d: one state frame and one event frame (%d)" % [epoch, frames.size()])
+			continue
+		var state_frame: PackedByteArray = frames[0]
+		var event_frame: PackedByteArray = frames[1]
+		_ok(state_frame[0] == (NetCodec.LANE_STATE | (want << 4)) and event_frame[0] == (NetCodec.LANE_EVENT | (want << 4)),
+			"epoch %d: byte 0 = lane | epoch << 4 (0x%02X, 0x%02X)" % [epoch, state_frame[0], event_frame[0]])
+		_ok(state_frame.slice(1) == legacy_state.slice(1) and event_frame.slice(1) == legacy_event.slice(1),
+			"epoch %d: the rest of the frame is unchanged" % epoch)
+		if want == 0:
+			_ok(state_frame == legacy_state and event_frame == legacy_event, "epoch %d: frames identical to before F8, byte for byte" % epoch)
+	# And an epoch-0 link reads a frame written by hand in the old format.
+	var wire0: Wire = Wire.new()
+	var reader: NetLink = _link_on(cfg, wire0)
+	reader.receive_frame(legacy_event)
+	reader.receive_frame(legacy_state)
+	var got: PackedInt32Array = PackedInt32Array()
+	_drain_events(reader, got)
+	var st: PackedByteArray = reader.take_state()
+	_ok(got == PackedInt32Array([7]) and not st.is_empty() and _values(st)[0] == 9 and reader.stale_epoch_frames == 0,
+		"epoch 0: reads the old frame format (events %s)" % str(got))
+
+
+## A new link (epoch 2) gets what the host was still sending on the link it replaced (epoch 0, far-ahead seqs):
+## counted, dropped before seq/ack are read, and the link neither dies nor skips anything of its own epoch.
+func _epoch_stale(cfg: Dictionary) -> void:
+	var window: int = int(cfg["reliable_window"])
+	var old_wire: Wire = Wire.new()
+	var old_host: NetLink = _link_on(cfg, old_wire, 0)      # the host's side of the link that fell
+	var new_wire: Wire = Wire.new()
+	var new_host: NetLink = _link_on(cfg, new_wire, 2)      # the host's side of the link of the re-entry
+	var client_wire: Wire = Wire.new()
+	var client: NetLink = _link_on(cfg, client_wire, 2)     # the client's new link
+	# The old link is far ahead: event seq beyond the window, state seq high.
+	var now: int = 0
+	for i: int in window - 1:
+		now += 200
+		old_host.send_events(_record(TEST_EVENT, 1000 + i))
+		old_host.send_state(_record(TEST_STATE, 1000 + i))
+		old_host.poll(now)
+	old_host.flush_now()
+	var old_frames: Array[PackedByteArray] = _frames_of(old_wire.take())
+	var old_events: int = 0
+	var newest_old_event: PackedByteArray = PackedByteArray()
+	for frame: PackedByteArray in old_frames:
+		if (frame[0] & NetLink.LANE_MASK) == NetCodec.LANE_EVENT:
+			old_events += 1
+			newest_old_event = frame
+	_ok(old_events == window - 1 and newest_old_event.decode_u16(NetLink.SEQ_OFFSET) == window - 1,
+		"stale: the old link is %d event frames ahead" % old_events)
+	# The client has 3 events of its own not acknowledged yet.
+	for i: int in 3:
+		client.send_events(_record(TEST_EVENT, i + 1))
+	_ok(client.get_unacked_count() == 3, "stale: client has 3 unacked events")
+	# An old frame whose ack would confirm them, and whose seq would jump the window if it were read.
+	var forged: PackedByteArray = newest_old_event.duplicate()
+	forged.encode_u16(NetLink.SEQ_OFFSET, window + 5)
+	forged.encode_u16(NetLink.ACK_OFFSET, 3)
+	client.receive_frame(forged)
+	_ok(client.stale_epoch_frames == 1 and not client.is_lost(), "stale: far-ahead frame of another epoch counted, link alive")
+	_ok(client.get_unacked_count() == 3, "stale: its ack was not applied (%d unacked)" % client.get_unacked_count())
+	# Then everything the old link had sent, through the relay path.
+	var relayed: PackedByteArray = PackedByteArray()
+	for frame: PackedByteArray in old_frames:
+		var base: int = relayed.size()
+		relayed.resize(base + NetLink.RELAY_LEN_BYTES)
+		relayed.encode_u16(base, frame.size())
+		relayed.append_array(frame)
+	client.receive_relay(relayed)
+	_ok(client.stale_epoch_frames == 1 + old_frames.size(), "stale: every old frame counted (%d of %d)"
+		% [client.stale_epoch_frames - 1, old_frames.size()])
+	_ok(not client.is_lost() and client.received_frames == 0 and client.malformed_frames == 0,
+		"stale: link not lost, nothing accepted (received_frames %d)" % client.received_frames)
+	var got: PackedInt32Array = PackedInt32Array()
+	_drain_events(client, got)
+	_ok(got.is_empty() and client.take_state().is_empty(), "stale: nothing delivered from the old epoch")
+	# The new epoch starts from zero and is read normally: seq 1.. in order, state seq 1 is not "old".
+	for i: int in 5:
+		new_host.send_events(_record(TEST_EVENT, i + 1))
+	new_host.send_state(_record(TEST_STATE, 42))
+	new_host.flush_now()
+	for payload: PackedByteArray in new_wire.take():
+		client.receive_relay(payload)
+	_drain_events(client, got)
+	var st: PackedByteArray = client.take_state()
+	_ok(_in_order(got, 5), "stale: events of the new epoch delivered in order from seq 1 (%s)" % str(got))
+	_ok(not st.is_empty() and _values(st)[0] == 42 and client.stale_state_frames == 0,
+		"stale: state seq 1 of the new epoch accepted after the old epoch's high seqs")
+	# The ack it sends back counts only its own epoch, and the host's new link takes it.
+	client.poll(100000)
+	client.flush_now()
+	for payload: PackedByteArray in client_wire.take():
+		new_host.receive_relay(payload)
+	_ok(new_host.get_unacked_count() == 0, "stale: host's new link fully acknowledged (%d)" % new_host.get_unacked_count())
+	var from_client: PackedInt32Array = PackedInt32Array()
+	_drain_events(new_host, from_client)
+	_ok(_in_order(from_client, 3), "stale: the client's 3 events reach the host's new link (%s)" % str(from_client))
+	# The other way round: a frame of the new epoch means nothing to a link still on the old one.
+	new_host.send_events(_record(TEST_EVENT, 6))
+	new_host.flush_now()
+	var before_lost: bool = old_host.is_lost()
+	for payload: PackedByteArray in new_wire.take():
+		old_host.receive_relay(payload)
+	_ok(old_host.stale_epoch_frames == 1 and old_host.is_lost() == before_lost and old_host.take_events().is_empty(),
+		"stale: an epoch-0 link drops a frame of epoch 2")
+	print("epoch_stale: %d old frames dropped, new epoch delivered %d events" % [old_frames.size(), got.size()])
+
+
+## sent_bytes / received_bytes count frame bytes on both paths (no relay length prefix).
+func _byte_counters(cfg: Dictionary) -> void:
+	var a: NetLink = NetLink.new()
+	var b: NetLink = NetLink.new()
+	var lp: NetLoopback = NetLoopback.new(99)
+	lp.attach(a, b, cfg, true)
+	var got_a: PackedInt32Array = PackedInt32Array()
+	var got_b: PackedInt32Array = PackedInt32Array()
+	_now = 0
+	for i: int in 60:
+		a.send_events(_record(TEST_EVENT, i + 1))
+		a.send_state(_record(TEST_STATE, i + 1))
+		_exchange(a, b, lp, got_a, got_b)
+	for i: int in 20:
+		_exchange(a, b, lp, got_a, got_b)
+	_ok(a.get_path() == NetLink.PATH_RELAY and a.sent_bytes > 0, "bytes: relay path sent %d bytes" % a.sent_bytes)
+	_ok(a.sent_bytes == b.received_bytes and b.sent_bytes == a.received_bytes,
+		"bytes: relay, what one sends the other receives (a %d/%d, b %d/%d)" % [a.sent_bytes, b.received_bytes, b.sent_bytes, a.received_bytes])
+	var relay_frames: int = lp.relay_bytes_ab - a.sent_bytes
+	_ok(relay_frames > 0 and relay_frames % NetLink.RELAY_LEN_BYTES == 0,
+		"bytes: relay payload = frames + a 2-byte length per frame (%d bytes of lengths in %d messages)" % [relay_frames, lp.relay_messages_ab])
+	var relay_sent: int = a.sent_bytes
+	lp.open_direct()
+	for i: int in 10:
+		_exchange(a, b, lp, got_a, got_b)
+	var direct_base_a: int = a.sent_bytes
+	var direct_base_b: int = b.received_bytes
+	for i: int in 60:
+		a.send_events(_record(TEST_EVENT, 61 + i))
+		_exchange(a, b, lp, got_a, got_b)
+	for i: int in 10:
+		_exchange(a, b, lp, got_a, got_b)
+	_ok(a.get_path() == NetLink.PATH_RTC and a.sent_bytes > direct_base_a and direct_base_a >= relay_sent,
+		"bytes: direct path keeps counting (%d more)" % (a.sent_bytes - direct_base_a))
+	_ok(a.sent_bytes - direct_base_a == b.received_bytes - direct_base_b,
+		"bytes: direct, sent = received (%d / %d)" % [a.sent_bytes - direct_base_a, b.received_bytes - direct_base_b])
+	_ok(_in_order(got_b, 120), "bytes: all 120 events delivered meanwhile (%d)" % got_b.size())

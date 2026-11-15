@@ -5,8 +5,9 @@ extends Node
 ##
 ## A "frozen tab" is a session this node stops calling process() on, while the others keep running; the
 ## scenario S7 freezes the whole process with OS.delay_msec instead. Worlds are stubs that count what Net
-## calls on them. Unless --real-timeouts is passed, host_timeout_s / peer_timeout_s / load_timeout_s and the
-## ping timings are shortened (the logic is the same; the values from data/net.json are used otherwise).
+## calls on them. Unless --real-timeouts is passed, host_timeout_s / peer_timeout_s / load_timeout_s /
+## rejoin_timeout_s and the ping timings are shortened (the logic is the same; the values from data/net.json
+## are used otherwise). net_rejoin.gd extends this script with the reconnection scenarios of F8.
 
 const ROOM_MS: int = 10000
 const SETUP_MS: int = 8000
@@ -14,6 +15,7 @@ const SLACK_MS: int = 2000
 const SHORT_HOST_TIMEOUT_S: float = 6.0
 const SHORT_PEER_TIMEOUT_S: float = 8.0
 const SHORT_LOAD_TIMEOUT_S: float = 4.0
+const SHORT_REJOIN_TIMEOUT_S: float = 4.0
 const SHORT_PING_S: float = 1.0
 const SHORT_PONG_TIMEOUT_S: float = 1.0
 const FLUSH_MS: int = 250
@@ -77,6 +79,8 @@ class Peer extends RefCounted:
 	var world: StubWorld = null
 	var frozen: bool = false
 	var stalls: Array[bool] = []
+	var reconnects: Array[bool] = []      # reconnect_changed, in order
+	var reconnect_ms: Array[int] = []     # ticks_msec of each one
 	var fails: Array[String] = []
 	var fail_messages: Array[String] = []
 	var fail_ms: int = 0
@@ -160,6 +164,7 @@ func run(url: String, ok: Callable, kill_server: Callable, real_timeouts: bool) 
 		_cfg["host_timeout_s"] = SHORT_HOST_TIMEOUT_S
 		_cfg["peer_timeout_s"] = SHORT_PEER_TIMEOUT_S
 		_cfg["load_timeout_s"] = SHORT_LOAD_TIMEOUT_S
+		_cfg["rejoin_timeout_s"] = SHORT_REJOIN_TIMEOUT_S
 	_say("timeouts: stall_warn=%.1f absent=%.1f host_timeout=%.1f peer_timeout=%.1f load_timeout=%.1f s (%s)" % [
 		float(_cfg["host_stall_warn_s"]), float(_cfg["peer_absent_s"]), float(_cfg["host_timeout_s"]),
 		float(_cfg["peer_timeout_s"]), float(_cfg["load_timeout_s"]), "data/net.json" if _real else "shortened"])
@@ -471,6 +476,8 @@ func _s9_ping_pong() -> void:
 
 
 ## S10 (last: it stops the server): the room server dies mid-hunt with every link on the relay.
+## F8: the host loses the room at once (nobody can come back to it); the client tries to reconnect, one
+## connection per attempt, and gives up by itself after rejoin_timeout_s.
 func _s10_server_dies() -> void:
 	_say("S10 room server dies in the hunt")
 	var room: Array[Peer] = await _hunt_room(1)
@@ -478,11 +485,22 @@ func _s10_server_dies() -> void:
 		return
 	var host: Peer = room[0]
 	var client: Peer = room[1]
+	var rejoin_ms: int = _ms("rejoin_timeout_s")
 	await _sleep(500)
 	_kill_server.call()
 	var t0: int = Time.get_ticks_msec()
-	var both: bool = await _wait(func() -> bool: return not host.fails.is_empty() and not client.fails.is_empty(), SETUP_MS)
-	_check(both, "S10 os dois terminaram em %d ms sem o servidor" % (Time.get_ticks_msec() - t0))
+	var host_ended: bool = await _wait(func() -> bool: return not host.fails.is_empty(), SETUP_MS)
+	_check(host_ended, "S10 anfitrião terminou em %d ms sem o servidor" % (Time.get_ticks_msec() - t0))
+	var trying: bool = await _wait(func() -> bool: return client.session.is_reconnecting(), SETUP_MS)
+	_check(trying and str(client.reconnects) == str([true]) and client.fails.is_empty() and client.world.lost == 0,
+		"S10 cliente passou a reconectar em vez de terminar %s" % str(client.reconnects))
+	var both: bool = await _wait(func() -> bool: return not client.fails.is_empty(), rejoin_ms + SLACK_MS * 2)
+	var lag: int = Time.get_ticks_msec() - t0
+	_check(both and lag >= rejoin_ms - 300, "S10 cliente desistiu em %d ms (rejoin_timeout_s = %d ms)" % [lag, rejoin_ms])
+	_check(client.session.rejoin_connections >= 1 and client.session.rejoin_connections == client.session.rejoin_attempt_ms.size(),
+		"S10 uma conexão por tentativa (%d conexões, tentativas em %s ms)" % [client.session.rejoin_connections, str(client.session.rejoin_attempt_ms)])
+	_check(str(client.reconnects) == str([true]) and not client.session.is_reconnecting(),
+		"S10 desistir não anuncia volta (reconnect_changed %s)" % str(client.reconnects))
 	_check(str(host.fails) == str(["connection_lost"]) and str(client.fails) == str(["connection_lost"]),
 		"S10 room_error connection_lost nos dois (%s / %s)" % [str(host.fails), str(client.fails)])
 	_check(client.world.lost == 1 and host.world.lost == 1 and str(host.world.left) == str([1]),
@@ -493,12 +511,16 @@ func _s10_server_dies() -> void:
 
 # --- room helpers --------------------------------------------------------------------------------
 
-func _new_peer(player_name: String, url: String = "") -> Peer:
+## cfg: this peer's own timings (default: the shared ones).
+func _new_peer(player_name: String, url: String = "", cfg: Dictionary = {}) -> Peer:
 	var p: Peer = Peer.new()
 	p.session = NetSession.new()
-	p.session.setup(_cfg, {"url": url if url != "" else _url, "name": player_name, "rtc": false, "router": false,
-		"version": str(ProjectSettings.get_setting("application/config/version", ""))})
+	p.session.setup(cfg if not cfg.is_empty() else _cfg, {"url": url if url != "" else _url, "name": player_name,
+		"rtc": false, "router": false, "version": str(ProjectSettings.get_setting("application/config/version", ""))})
 	p.session.stall_changed.connect(func(stalled: bool) -> void: p.stalls.append(stalled))
+	p.session.reconnect_changed.connect(func(active: bool) -> void:
+		p.reconnects.append(active)
+		p.reconnect_ms.append(Time.get_ticks_msec()))
 	p.session.failed.connect(func(code: StringName, message: String) -> void:
 		p.fails.append(str(code))
 		p.fail_messages.append(message)
@@ -509,16 +531,17 @@ func _new_peer(player_name: String, url: String = "") -> Peer:
 
 
 ## Host plus `clients` clients in the lobby, every client ready. [] (and a failed check) if it did not work.
-func _lobby_room(clients: int) -> Array[Peer]:
+## host_cfg / client_cfg: timings of that side only (default: the shared ones).
+func _lobby_room(clients: int, host_cfg: Dictionary = {}, client_cfg: Dictionary = {}) -> Array[Peer]:
 	var room: Array[Peer] = []
-	var host: Peer = _new_peer("Host")
+	var host: Peer = _new_peer("Host", "", host_cfg)
 	room.append(host)
 	host.session.create()
 	if not _check(await _wait(func() -> bool: return host.session.get_state() == NetSession.STATE_LOBBY, SETUP_MS), "sala criada"):
 		await _close_room(room)
 		return []
 	for i: int in clients:
-		var c: Peer = _new_peer("Cliente %d" % (i + 1))
+		var c: Peer = _new_peer("Cliente %d" % (i + 1), "", client_cfg)
 		room.append(c)
 		c.session.join(host.session.get_code())
 		if not _check(await _wait(func() -> bool: return c.session.get_state() == NetSession.STATE_LOBBY, SETUP_MS), "cliente %d entrou" % (i + 1)):
@@ -547,14 +570,18 @@ func _start_and_wait_loading(room: Array[Peer]) -> bool:
 
 
 func _bind(p: Peer) -> void:
-	p.world = StubWorld.new()
+	p.world = _make_world()
 	p.world.player = StubPlayer.new()
 	p.session.bind_world(p.world)
 
 
+func _make_world() -> StubWorld:
+	return StubWorld.new()
+
+
 ## A room already IN_HUNT on every machine.
-func _hunt_room(clients: int) -> Array[Peer]:
-	var room: Array[Peer] = await _lobby_room(clients)
+func _hunt_room(clients: int, host_cfg: Dictionary = {}, client_cfg: Dictionary = {}) -> Array[Peer]:
+	var room: Array[Peer] = await _lobby_room(clients, host_cfg, client_cfg)
 	if room.is_empty():
 		return []
 	if not _check(await _start_and_wait_loading(room), "caçada iniciada, todos em LOADING"):

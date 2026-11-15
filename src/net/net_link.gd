@@ -6,6 +6,9 @@ extends RefCounted
 ## Owns no socket: the relay is a sink Callable, the direct transport is a NetLink.Direct.
 ##
 ## Frame:  lane u8 | seq u16 | ack u16 | record*          (NetCodec.FRAME_HEADER_BYTES)
+##         byte 0 = lane (bits 0-3) | link epoch (bits 4-7). Epoch 0 is the link of the first entry; a client
+##         that comes back to the hunt gets a new link of another epoch and frames of any other epoch are
+##         dropped before seq/ack are looked at (section 4.7.5).
 ## Relay payload (without the to/from byte): { len u16, frame }+
 
 signal path_changed()
@@ -15,6 +18,9 @@ const PATH_RELAY: int = 1
 const PATH_RTC: int = 2
 
 const SEQ_MASK: int = 0xFFFF
+const LANE_MASK: int = 0x0F
+const EPOCH_SHIFT: int = 4
+const EPOCH_MASK: int = 0x0F
 const SEQ_OFFSET: int = 1
 const ACK_OFFSET: int = 3
 const RELAY_LEN_BYTES: int = 2
@@ -59,7 +65,11 @@ var duplicate_event_frames: int = 0
 var malformed_frames: int = 0
 var oversize_frames: int = 0
 var failed_sends: int = 0
+var stale_epoch_frames: int = 0     # frames of another link epoch (leftovers of the link this one replaced)
+var sent_bytes: int = 0             # frame bytes, both paths (no relay prefix, no wire overhead)
+var received_bytes: int = 0
 
+var _epoch: int = 0
 var _path: int = PATH_RELAY
 var _relay_sink: Callable = Callable()   # func(payload: PackedByteArray) -> bool
 var _direct: Direct = null
@@ -102,8 +112,10 @@ var _lost_reason: StringName = &""
 
 
 ## cfg = Data.get_net(). relay_sink: func(payload: PackedByteArray) -> bool.
-func setup(cfg: Dictionary, p_remote_id: int, relay_sink: Callable) -> void:
+## p_epoch (0..15): both ends of a link use the same one; 0 = the frame format of before F8, byte for byte.
+func setup(cfg: Dictionary, p_remote_id: int, relay_sink: Callable, p_epoch: int = 0) -> void:
 	remote_id = p_remote_id
+	_epoch = p_epoch & EPOCH_MASK
 	_relay_sink = relay_sink
 	_max_frame = int(cfg["max_frame_bytes"])
 	_window = int(cfg["reliable_window"])
@@ -133,6 +145,10 @@ func get_direct() -> Direct:
 
 func get_path() -> int:
 	return _path
+
+
+func get_epoch() -> int:
+	return _epoch
 
 
 func is_lost() -> bool:
@@ -229,7 +245,7 @@ func _queue_event_frame(records: PackedByteArray) -> void:
 func _make_frame(lane: int, seq: int, records: PackedByteArray) -> PackedByteArray:
 	var frame: PackedByteArray = PackedByteArray()
 	frame.resize(NetCodec.FRAME_HEADER_BYTES)
-	frame.encode_u8(0, lane)
+	frame.encode_u8(0, lane | (_epoch << EPOCH_SHIFT))
 	frame.encode_u16(SEQ_OFFSET, seq)
 	frame.encode_u16(ACK_OFFSET, 0)
 	frame.append_array(records)
@@ -242,6 +258,7 @@ func _send_direct(frame: PackedByteArray, reliable: bool) -> void:
 	var sent: bool = _direct.send_event(out) if reliable else _direct.send_state(out)
 	if sent:
 		sent_direct_frames += 1
+		sent_bytes += out.size()
 		_direct_tx_ms = _clock_ms
 		_ack_owed = false
 	else:
@@ -255,17 +272,21 @@ func _flush_relay(all: bool) -> void:
 		return
 	while true:
 		var payload: PackedByteArray = PackedByteArray()
+		var frames: int = 0
 		if not _out_state.is_empty():
 			_append_relay_frame(payload, _out_state)
 			_out_state = PackedByteArray()
+			frames += 1
 		while not _out_events.is_empty() \
 				and payload.size() + RELAY_LEN_BYTES + _out_events[0].size() <= _max_relay_payload:
 			_append_relay_frame(payload, _out_events[0])
 			_out_events.remove_at(0)
+			frames += 1
 		if payload.is_empty():
 			return
 		if bool(_relay_sink.call(payload)):
 			sent_relay_messages += 1
+			sent_bytes += payload.size() - frames * RELAY_LEN_BYTES
 			_ack_owed = false
 		else:
 			failed_sends += 1
@@ -309,8 +330,12 @@ func receive_frame(frame: PackedByteArray) -> void:
 	if frame.size() < NetCodec.FRAME_HEADER_BYTES:
 		malformed_frames += 1
 		return
+	received_bytes += frame.size()
+	if ((frame[0] >> EPOCH_SHIFT) & EPOCH_MASK) != _epoch:
+		stale_epoch_frames += 1   # another link's frame: its seq and ack mean nothing here
+		return
 	received_frames += 1
-	var lane: int = frame[0]
+	var lane: int = frame[0] & LANE_MASK
 	var seq: int = frame.decode_u16(SEQ_OFFSET)
 	_apply_ack(frame.decode_u16(ACK_OFFSET))
 	var records: PackedByteArray = frame.slice(NetCodec.FRAME_HEADER_BYTES)

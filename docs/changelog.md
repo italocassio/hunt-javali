@@ -3,6 +3,21 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.6.1 — 16/11/2026
+
+**Caçada muito mais leve no celular.**
+
+O que mudou para o jogador:
+
+- A caçada roda bem mais fluida: no teste com celular emulado, de ~26 para ~69 quadros por segundo.
+- A imagem da caçada usa no máximo 1,5x a densidade de pixels da tela na qualidade baixa (2x na média e alta),
+  em vez de renderizar o 3D menor e esticar. Menus continuam na nitidez total.
+- A tarde dourada foi reequilibrada na luz, no céu e na névoa, sem o filtro de cor de tela cheia.
+
+Detalhes técnicos: `render_scale` 1,0 em todos os presets e `max_pixel_ratio` novo por preset (`data/game.json`, limitado só durante a caçada);
+`adjustment` do ambiente removido (−4,6 ms em DPR 3); orçamentos da frente "cenário e javalis HD" no contrato
+(§7.1, §7.4, §7.5, §7.6, §7.12, §13.1), a partir da linha de base medida na Etapa 0.
+
 ## 0.6.0 — 16/11/2026
 
 **Armas, braços e caçadores aliados em alto detalhe, 100% gerados por código.**

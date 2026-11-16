@@ -73,8 +73,8 @@
     "name_tag_max_m": 120.0
   },
   "quality_presets": {
-    "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 0.75, "view_distance_m": 160},
-    "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 0.9,  "view_distance_m": 220},
-    "high":   {"shadows": true,  "shadow_distance_m": 45, "flora_density": 1.0,  "render_scale": 1.0,  "view_distance_m": 300}
+    "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 1.0,  "max_pixel_ratio": 1.5, "view_distance_m": 160},
+    "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 1.0,  "max_pixel_ratio": 2.0, "view_distance_m": 220},
+    "high":   {"shadows": true,  "shadow_distance_m": 45, "flora_density": 1.0,  "render_scale": 1.0,  "max_pixel_ratio": 2.0, "view_distance_m": 300}
   }
 }

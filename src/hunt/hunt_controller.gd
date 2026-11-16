@@ -10,6 +10,22 @@ const DOG_SIDE_OFFSET_M: float = 1.5
 const DEFAULT_END_DELAY_S: float = 2.5
 const AMBIENCE_LOOPS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop"]
 const AMBIENCE_DB: float = -6.0
+## Web only: caps window.devicePixelRatio while hunting (preset "max_pixel_ratio"). Godot Web sizes the canvas from it
+## every loop iteration, so this is cheaper than scaling_3d_scale (which adds a fixed intermediate target + blit).
+## The getter is installed once and keeps the browser's real value; window.__huntMaxDpr <= 0 means no cap.
+const JS_DPR_CAP_INSTALL: String = """
+(function () {
+	if (window.__huntDprInstalled) { return; }
+	var d = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+	var real = function () { return (d && d.get) ? d.get.call(window) : (d ? d.value : 1); };
+	Object.defineProperty(window, 'devicePixelRatio', {
+		configurable: true, enumerable: true,
+		get: function () { var m = window.__huntMaxDpr; return (m > 0) ? Math.min(real(), m) : real(); }
+	});
+	window.__huntDprInstalled = true;
+})();
+"""
+const JS_DPR_CAP_READ: String = "(window.__huntMaxDpr > 0) ? window.__huntMaxDpr : 0"
 const MSG_GROUP: String = "Uma vara saiu da mata!"
 const MSG_LONER: String = "Um javali solitário saiu da mata!"
 const MSG_ALPHA: String = "O cachaço alfa entrou na área!"
@@ -74,6 +90,8 @@ var _marked_out: PackedVector3Array = PackedVector3Array()
 var _hit_shots: Dictionary = {}        # shot_id -> true
 var _clean_zones: Array = []
 var _prev_scaling: float = 1.0
+var _prev_max_dpr: float = 0.0
+var _dpr_cap_applied: bool = false
 var _timing: bool = false
 
 # Network (docs/multiplayer.md section 6.1). _net_role == Net.Role.OFFLINE is the solo path.
@@ -150,8 +168,27 @@ func _exit_tree() -> void:
 	var vp: Viewport = get_viewport()
 	if vp != null:
 		vp.scaling_3d_scale = _prev_scaling
+	_restore_pixel_ratio()
 	for id: StringName in AMBIENCE_LOOPS:
 		Sfx.stop_loop(id)
+
+
+## Web only: limits the canvas pixel ratio during the hunt (menus keep the native one). 0 = no cap.
+func _apply_pixel_ratio_cap(max_ratio: float) -> void:
+	if not OS.has_feature("web") or max_ratio <= 0.0:
+		return
+	JavaScriptBridge.eval(JS_DPR_CAP_INSTALL, true)
+	if not _dpr_cap_applied:
+		_prev_max_dpr = float(JavaScriptBridge.eval(JS_DPR_CAP_READ, true))
+	_dpr_cap_applied = true
+	JavaScriptBridge.eval("window.__huntMaxDpr = %s;" % str(max_ratio), true)
+
+
+func _restore_pixel_ratio() -> void:
+	if not _dpr_cap_applied:
+		return
+	_dpr_cap_applied = false
+	JavaScriptBridge.eval("window.__huntMaxDpr = %s;" % str(_prev_max_dpr), true)
 
 
 # --- Assembly (section 8.1) ----------------------------------------------------------------------
@@ -273,6 +310,7 @@ func _assemble() -> void:
 	add_child(_env)
 	_env.apply_quality(quality)
 	get_viewport().scaling_3d_scale = clampf(float(preset.get("render_scale", 1.0)), 0.25, 1.0)
+	_apply_pixel_ratio_cap(float(preset.get("max_pixel_ratio", 0.0)))
 	t = _lap("environment", t)
 	if not await _next_frame():
 		return

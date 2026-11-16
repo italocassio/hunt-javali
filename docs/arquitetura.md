@@ -744,8 +744,12 @@ foi usado.
 - Referência (escala 1 = **100 kg**): comprimento 1,50 m (focinho z = -0.80, cauda z = +0.70), altura na
   cernelha 0,85 m, largura 0,50 m. O gameplay aplica `visual.scale = Vector3.ONE * BoarVisualBase.scale_for_weight(kg)`
   (raiz cúbica de kg/100). O modelo deve caber nas caixas de `BoarVisualBase.HIT_ZONES` (tolerância ±5 cm).
-- Orçamento: ≤ 600 triângulos; ≤ 6 `MeshInstance3D`; pernas com `visibility_range_end = 40.0`;
-  ≤ 1 material por tipo (4 no total, compartilhados). `cast_shadow` ligado só no corpo.
+- Orçamento (HD, LOD por `visibility_range`; malhas compartilhadas entre instâncias do mesmo tipo):
+  - perto (≤ 25 m): ≤ 3 000 triângulos, ≤ 7 `MeshInstance3D` visíveis (corpo, cabeça, 4 pernas, rabo);
+  - médio (25–60 m): ≤ 900 triângulos, ≤ 7 `MeshInstance3D` visíveis;
+  - longe (> 60 m): ≤ 300 triângulos, ≤ 2 `MeshInstance3D` visíveis, sem pernas animadas;
+  - ≤ 1 material por tipo (4 no total, compartilhados); `cast_shadow` ligado só no corpo;
+  - montagem a frio ≤ 40 ms por tipo (desktop), ≈ 0 em cache (javalis nascem no meio da caçada).
 - Variação por tipo (em `setup`): leitão mais claro com listras tênues, fêmea marrom-acinzentada, macho
   escuro com presas visíveis, alfa quase preto, crina dorsal e presas grandes.
 - API (todas virtuais em `BoarVisualBase`; o asset sobrescreve):
@@ -821,13 +825,15 @@ Raiz `Node3D`, sem script obrigatório, sem física. O Pacote B cria a colisão 
 
 | prop_id | Dimensões (X × Y × Z m) | Descrição | Tris máx |
 |---|---|---|---|
-| `farmhouse` | 12 × 6 × 8 | sede: alvenaria branca, telhado de telha, varanda (frente -Z) | 900 |
-| `barn` | 16 × 7 × 10 | galpão de madeira/zinco aberto na frente | 700 |
-| `water_tank` | 3 × 8 × 3 | caixa d'água em torre de madeira | 300 |
-| `fence_segment` | 4 × 1,3 × 0,15 | cerca de arame com 2 mourões, ao longo de X | 80 |
-| `gate` | 4 × 1,4 × 0,2 | porteira de madeira | 120 |
-| `corn_bait` | 1,0 × 0,3 × 1,0 | monte de milho em espiga (ceva) | 150 |
-| `feed_trough` | 3 × 0,6 × 0,8 | cocho | 80 |
+| `farmhouse` | 12 × 6 × 8 | sede: alvenaria branca, telhado de telha, varanda (frente -Z) | 3000 |
+| `barn` | 16 × 7 × 10 | galpão de madeira/zinco aberto na frente | 2400 |
+| `water_tank` | 3 × 8 × 3 | caixa d'água em torre de madeira | 1000 |
+| `fence_segment` | 4 × 1,3 × 0,15 | cerca de arame com 2 mourões, ao longo de X | 240 |
+| `gate` | 4 × 1,4 × 0,2 | porteira de madeira | 400 |
+| `corn_bait` | 1,0 × 0,3 × 1,0 | monte de milho em espiga (ceva) | 500 |
+| `feed_trough` | 3 × 0,6 × 0,8 | cocho | 300 |
+
+Por prop: ≤ 4 `MeshInstance3D`; materiais compartilhados entre props; montagem de todos os props ≤ 150 ms.
 
 Fallback (B): `BoxMesh` do tamanho `collision_size` com cor neutra.
 
@@ -843,16 +849,19 @@ aleatório e escala ±20%. Sem `cast_shadow` em grama, arbusto e lavoura (o B fo
 | id | Referência | Tris máx | Colisão criada pelo B |
 |---|---|---|---|
 | `grass_tuft` | tufo de capim dourado 0,4 m alt. | 8 | — |
-| `shrub` | arbusto do cerrado 1,0 alt. × 1,2 larg. | 60 | — |
-| `cerrado_tree` | árvore retorcida 4,5 m, tronco r 0,2, copa 3 m | 200 | cilindro r 0,2 × 3 m |
-| `ipe` | ipê-amarelo 7 m, tronco r 0,3, copa amarela 5 m | 250 | cilindro r 0,3 × 4 m |
-| `buriti` | palmeira 12 m, tronco r 0,25, leque 6 m | 250 | cilindro r 0,25 × 6 m |
-| `termite_mound` | cupinzeiro 1,2 alt. × 1,2 base, terra vermelha | 60 | cilindro r 0,6 × 1,2 m |
+| `shrub` | arbusto do cerrado 1,0 alt. × 1,2 larg. | 150 | — |
+| `cerrado_tree` | árvore retorcida 4,5 m, tronco r 0,2, copa 3 m | 600 | cilindro r 0,2 × 3 m |
+| `ipe` | ipê-amarelo 7 m, tronco r 0,3, copa amarela 5 m | 750 | cilindro r 0,3 × 4 m |
+| `buriti` | palmeira 12 m, tronco r 0,25, leque 6 m | 600 | cilindro r 0,25 × 6 m |
+| `termite_mound` | cupinzeiro 1,2 alt. × 1,2 base, terra vermelha | 200 | cilindro r 0,6 × 1,2 m |
 | `soy_patch` | moita de soja cobrindo 2×2 m, 0,6 m alt. | 24 | — |
 | `soy_eaten` | soja revirada 2×2 m, 0,15 m alt. | 16 | — |
 | `corn_patch` | milho cobrindo 2×2 m, 2,0 m alt. | 36 | — |
 | `corn_eaten` | milho quebrado 2×2 m, 0,5 m alt. | 20 | — |
 
+Grama e lavoura mantêm os triângulos: a melhora vem de shader (cor, vento, translucidez falsa, variação por
+instância). Tudo em `MultiMesh`, sem alpha blend; alpha scissor só com justificativa (overdraw no celular).
+`build_mesh` de todos os ids somado ≤ 200 ms.
 Shader de vento (vértice) permitido em grama, arbusto, lavoura e copas. Fallback (B): `CylinderMesh`/
 `BoxMesh`/`QuadMesh` coloridos nas dimensões da tabela.
 
@@ -863,6 +872,9 @@ Shader de vento (vértice) permitido em grama, arbusto, lavoura e copas. Fallbac
   cerrado; `COLOR.a` = 1. `UV` = posição mundo XZ / 4,0 (repete a cada 4 m). Normais fornecidas.
 - `res://assets/materials/water.tres` — `ShaderMaterial` para o açude; o B cria um `PlaneMesh` circular
   (`radius_m` do `WaterBody`) 0,3 m abaixo da borda.
+- Orçamento de fragmento (o terreno cobre quase toda a tela; medido com o hook de diagnóstico da Etapa 0):
+  terreno ≤ +1 ms sobre o shader de 0.6.0, ≤ 4 leituras de textura por pixel, sem triplanar; água ≤ +0,5 ms.
+  Ambiente (§7.7): nenhum passe de tela cheia (sem `adjustment`, glow, SSAO, SSR); cor vem de shader e luz.
 - Fallback (B): `StandardMaterial3D` com `vertex_color_use_as_albedo = true` / azul translúcido.
 
 ### 7.7 Ambiente — `res://assets/env/<map_id>_env.tscn` (`ScenePaths.environment(map_id)`)
@@ -996,7 +1008,7 @@ Fallback: `HunterVisualBase.create_fallback()` (cápsula na cor do slot).
 ### 7.12 Estoque de milho do celeiro (horda) — `res://assets/models/props/barn_corn.tscn` (`ScenePaths.BARN_CORN`)
 Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_corn.gd`), no referencial do prop
 `barn`. API `setup(ring_radius_m)`, `set_stock_pct(pct)`, `set_under_attack(on)`, estágios por
-`CornStockVisualBase.stage_for(pct)`; ≤ 900 tris, ≤ 8 `MeshInstance3D`. Fallback:
+`CornStockVisualBase.stage_for(pct)`; ≤ 1 800 tris, ≤ 8 `MeshInstance3D`. Fallback:
 `CornStockVisualBase.create_fallback()`. Contrato completo: `docs/horda.md` §11.1.
 
 ---
@@ -1012,7 +1024,9 @@ Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_
 3. Ambiente: `AssetLoader.instantiate(ScenePaths.environment(map_id))` ou `MapEnvironmentBase.create_fallback()`;
    `apply_quality(qualidade)`. Qualidade = `Profile.get_setting("quality")`; `"auto"` → `Ids.Q_LOW` se
    `InputSetup.is_touch_mode()`, senão `Ids.Q_MEDIUM`. Aplica também `get_viewport().scaling_3d_scale =
-   render_scale` e densidade de flora.
+   render_scale` (1,0 em todos: abaixo de 1 custa um passe fixo de escala na Web) e densidade de flora.
+   Na Web, limita `window.devicePixelRatio` a `max_pixel_ratio` só durante a caçada (menus no DPR nativo),
+   restaurando em `_exit_tree`.
 4. Jogador: `AssetLoader.instantiate(ScenePaths.PLAYER)`; se `null` ou não `PlayerBase`, `FallbackPlayer.new()`.
    `add_child(player)`; `player.global_position` = `PlayerSpawn` com Y = `get_height`; `player.rotation.y` =
    yaw do `PlayerSpawn`; **depois** `player.setup(request, self)`.
@@ -1405,9 +1419,9 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
     "name_tag_max_m": 120.0
   },
   "quality_presets": {
-    "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 0.75, "view_distance_m": 160},
-    "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 0.9,  "view_distance_m": 220},
-    "high":   {"shadows": true,  "shadow_distance_m": 45, "flora_density": 1.0,  "render_scale": 1.0,  "view_distance_m": 300}
+    "low":    {"shadows": false, "shadow_distance_m": 0,  "flora_density": 0.5,  "render_scale": 1.0,  "max_pixel_ratio": 1.5, "view_distance_m": 160},
+    "medium": {"shadows": true,  "shadow_distance_m": 30, "flora_density": 0.75, "render_scale": 1.0,  "max_pixel_ratio": 2.0, "view_distance_m": 220},
+    "high":   {"shadows": true,  "shadow_distance_m": 45, "flora_density": 1.0,  "render_scale": 1.0,  "max_pixel_ratio": 2.0, "view_distance_m": 300}
   }
 }
 ```
@@ -1955,17 +1969,18 @@ resultado de renderização.
 ### 13.1 Orçamento (celular intermediário, WebGL2, 30+ fps; medir em "low"/"medium")
 | Item | Orçamento |
 |---|---|
-| Draw calls por frame (visão típica) | ≤ 150 (pior caso ≤ 200) |
-| Triângulos visíveis | ≤ 150 k |
+| Draw calls por frame (visão típica) | ≤ 165 (pior caso ≤ 200); javalis ≤ 40 típico, ≤ 80 pior caso |
+| Triângulos visíveis | ≤ 200 k típico, ≤ 250 k pior caso; 26 javalis ≤ 40 k |
+| Tempo de quadro do cenário | ≤ +2 ms sobre a linha de base da 0.6.0 (23,5 ms em render scale 1,0, DPR 3, GPU de referência) |
 | Terreno | 256 × 256 m; grade 129×129 (2 m); malha em 2×2 blocos de 64×64 quads = 32 768 tris, 4 draw calls; colisão HeightMapShape3D 257×257 |
 | Flora | só `MultiMeshInstance3D`, blocos de 128 m (2×2) por id; grama `visibility_range_end` 60 m, arbusto 90 m, árvores = view distance; densidade × `flora_density` |
 | Lavoura | patches 2×2 m em `MultiMesh` por blocos de 32×32 m, 2 multimeshes por bloco (saudável/comida; trocar = escalar instância a 0); `visibility_range_end` 110 m; ≈ 30 draw calls |
-| Javalis simultâneos | ≤ 26 vivos (+ carcaças); ≤ 6 MeshInstance por javali, pernas somem a 40 m |
+| Javalis simultâneos | ≤ 26 vivos (+ carcaças); LOD e malhas por javali conforme §7.1 |
 | Física | 1 `CharacterBody3D`; ≤ 200 shapes estáticas; 72 `HitZone`; ≤ 100 raios de visão/s; 0 corpos de IA |
 | Sombras | 1 `DirectionalLight3D`; desligada em "low"; 30/45 m em medium/high; mapa 2048, filtro hard; flora/lavoura/arma sem sombra |
 | Luzes extras | nenhuma |
 | Partículas | `CPUParticles3D`, ≤ 24 cada, ≤ 6 ativas |
-| Materiais únicos | ≤ 24 no total |
+| Materiais únicos | ≤ 32 no total |
 | Texturas | ≤ 512² cada (exceção: arma em 1ª pessoa ≤ 1024², §7.3); preferir ruído no shader; `NoiseTexture2D` ≤ 256² |
 | Áudio | ≤ 18 vozes; ≤ 4 MB de amostras |
 | Carregar a caçada | ≤ 3 s; nenhuma etapa > 700 ms |

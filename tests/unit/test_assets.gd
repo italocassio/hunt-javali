@@ -3,6 +3,10 @@ extends "res://tests/lib/test_case.gd"
 ## triangle/mesh budgets, root transform ownership, dimensions, flora, env, vfx, audio ids, UI theme/icons.
 
 const WEAPON_IDS: Array[StringName] = [&"carbine_22", &"shotgun_12", &"rifle_308", &"rifle_3006", &"rifle_338"]
+## First-person weapon budget (docs/arquitetura.md section 7.3): triangles with arms, mesh nodes, unique materials.
+const WEAPON_MAX_TRIS: int = 12000
+const WEAPON_MAX_MESHES: int = 4
+const WEAPON_MAX_MATERIALS: int = 4
 const BOAR_TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha"]
 const BREEDS: Array[StringName] = [&"caramelo", &"foxhound", &"dogo"]
 
@@ -270,8 +274,12 @@ func test_weapon_views_contract() -> void:
 		ok(view.get_ads_anchor() != null, "%s: get_ads_anchor()" % id)
 		_forbidden(view, "weapon_view/%s" % id)
 		var meshes: Array[MeshInstance3D] = _meshes(view)
-		ok(meshes.size() <= 4, "%s: %d MeshInstance3D (<= 4)" % [id, meshes.size()])
-		ok(_tree_tris(view) <= 1500, "%s: %d triangulos (<= 1500)" % [id, _tree_tris(view)])
+		ok(meshes.size() <= WEAPON_MAX_MESHES, "%s: %d MeshInstance3D (<= %d)" % [id, meshes.size(), WEAPON_MAX_MESHES])
+		var weapon_tris: int = _tree_tris(view)
+		ok(weapon_tris <= WEAPON_MAX_TRIS, "%s: %d triangulos (<= %d)" % [id, weapon_tris, WEAPON_MAX_TRIS])
+		var weapon_materials: int = _unique_materials(meshes).size()
+		print("INFO weapon %s: %d MeshInstance3D, %d triangulos, %d materiais" % [id, meshes.size(), weapon_tris, weapon_materials])
+		ok(weapon_materials <= WEAPON_MAX_MATERIALS, "%s: %d materiais unicos (<= %d)" % [id, weapon_materials, WEAPON_MAX_MATERIALS])
 		for mi: MeshInstance3D in meshes:
 			eq(mi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "%s: %s sem sombra" % [id, mi.name])
 		var snap: Array = _root_transform_snapshot(view)
@@ -293,6 +301,24 @@ func test_weapon_views_contract() -> void:
 		eq(_root_transform_snapshot(view)[2], snap[2], "%s: escala da raiz intacta" % id)
 		var muzzle_pos: Vector3 = (view.get_muzzle() as Node3D).position
 		ok(muzzle_pos.z < 0.0, "%s: Muzzle a frente da origem da camera (z=%.2f)" % [id, muzzle_pos.z])
+
+
+## Distinct materials (by instance id) used by the given meshes: material_override, per-surface overrides and
+## the materials baked into the mesh surfaces.
+func _unique_materials(meshes: Array[MeshInstance3D]) -> Dictionary:
+	var found: Dictionary = {}
+	for mi: MeshInstance3D in meshes:
+		if mi.material_override != null:
+			found[mi.material_override.get_instance_id()] = true
+		if mi.mesh == null:
+			continue
+		for s: int in mi.mesh.get_surface_count():
+			var m: Material = mi.get_surface_override_material(s)
+			if m == null:
+				m = mi.mesh.surface_get_material(s)
+			if m != null:
+				found[m.get_instance_id()] = true
+	return found
 
 
 func test_scoped_weapons_have_scope_data() -> void:

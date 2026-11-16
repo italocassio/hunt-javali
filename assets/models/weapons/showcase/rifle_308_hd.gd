@@ -17,18 +17,28 @@ const SURF_HARD: int = 1
 const SURF_LENS: int = 2
 
 ## Butt plate centre of the bore axis in camera space, and the toe-in toward screen centre.
-const HIP_ORIGIN: Vector3 = Vector3(0.20, -0.175, -0.33)
-const HIP_YAW: float = 0.19
-const HIP_PIVOT: Vector3 = Vector3(0.20, -0.22, -0.30)
+const HIP_ORIGIN: Vector3 = Vector3(0.21, -0.080, -0.24)
+const HIP_YAW: float = 0.10
+const HIP_PIVOT: Vector3 = HIP_ORIGIN + Vector3(0.0, -0.09, -0.03)
+## Viewmodel depth scale k (weapon_view.gd scales Gun by (1, 1, k) about the eye): the gun renders as if with
+## its own narrower FOV, tan(fov'/2) = k * tan(75/2) -> k 0.55 ~ 46 degrees, bigger and closer than the world.
+const VIEW_DEPTH: float = 0.55
+
+## Wrist targets of the arms added by weapon_view.gd (camera space, hip pose).
+const RHAND: Vector3 = HIP_ORIGIN + Vector3(0.0, -0.077, -0.29)
+const LHAND: Vector3 = HIP_ORIGIN + Vector3(0.0, -0.047, -0.64)
 
 const FWD: Vector3 = Vector3(0.0, 0.0, -1.0)
 const NOISE_SIZE: int = 512
+## The broad noise channel is generated at NOISE_SIZE / NOISE_BROAD_DIV and scaled up (1 = full size: the exact
+## original texture, about 35 ms slower).
+const NOISE_BROAD_DIV: int = 1
 const STOCK_POINTS: int = 24
 const SCOPE_Y: float = 0.0490
-const SCOPE_SEGS: int = 28
+const SCOPE_SEGS: int = 18
 const RECV_R: float = 0.0172
 const MUZZLE_S: float = 1.10
-const AO_RAYS: int = 40
+const AO_RAYS: int = 10
 const AO_RADIUS: float = 0.045
 
 # finishes: [albedo sRGB, metallic, roughness]
@@ -152,9 +162,11 @@ func _apply_pose() -> void:
 		var rot: Basis = Basis.from_euler(Vector3(rec * 0.15, HIP_YAW * hip + rec * 0.01, 0.0))
 		var sway: Vector3 = Vector3(0.0, sin(_time * 1.7) * 0.0015 + rec * 0.018, rec * 0.07)
 		base = Transform3D(Basis.IDENTITY, HIP_PIVOT + sway) * Transform3D(rot, Vector3.ZERO) * Transform3D(Basis.IDENTITY, HIP_ORIGIN - HIP_PIVOT)
+		# viewmodel FOV, as in weapon_view.gd
+		base = Transform3D(Basis.from_scale(Vector3(1.0, 1.0, VIEW_DEPTH)), Vector3.ZERO) * base
 	_gun.transform = base
-	_muzzle.transform = base * Transform3D(Basis.IDENTITY, _v(MUZZLE_S, 0.0, 0.0))
-	_ads.transform = base * Transform3D(Basis.IDENTITY, _v(0.27, SCOPE_Y, 0.0))
+	_muzzle.position = base * _v(MUZZLE_S, 0.0, 0.0)
+	_ads.position = base * _v(0.27, SCOPE_Y, 0.0)
 	var lift: float = 0.0
 	var back: float = 0.0
 	if _cycle_t >= 0.0:
@@ -252,11 +264,15 @@ static func get_materials() -> Dictionary:
 
 
 ## One seamless RG noise texture shared by wood and metal: R = broad fbm, G = fine fbm.
+## The broad channel is band-limited (finest wavelength 16 px), so it is generated at a fraction of the size and
+## scaled up: the same field for a fraction of the noise evaluations (NOISE_BROAD_DIV).
 static func _noise_texture() -> Texture2D:
+	@warning_ignore("integer_division")
+	var half: int = NOISE_SIZE / NOISE_BROAD_DIV
 	var broad: FastNoiseLite = FastNoiseLite.new()
 	broad.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	broad.seed = 308
-	broad.frequency = 4.0 / float(NOISE_SIZE)
+	broad.frequency = 4.0 / float(half)
 	broad.fractal_octaves = 4
 	broad.fractal_gain = 0.5
 	var fine: FastNoiseLite = FastNoiseLite.new()
@@ -265,15 +281,16 @@ static func _noise_texture() -> Texture2D:
 	fine.frequency = 14.0 / float(NOISE_SIZE)
 	fine.fractal_octaves = 3
 	fine.fractal_gain = 0.55
-	var a: PackedByteArray = broad.get_seamless_image(NOISE_SIZE, NOISE_SIZE, false, false, 0.2, true).get_data()
+	var broad_img: Image = broad.get_seamless_image(half, half, false, false, 0.2, true)
+	if half != NOISE_SIZE:
+		broad_img.resize(NOISE_SIZE, NOISE_SIZE, Image.INTERPOLATE_CUBIC)
+	var a: PackedByteArray = broad_img.get_data()
 	var b: PackedByteArray = fine.get_seamless_image(NOISE_SIZE, NOISE_SIZE, false, false, 0.2, true).get_data()
-	var step_a: int = a.size() / (NOISE_SIZE * NOISE_SIZE)
-	var step_b: int = b.size() / (NOISE_SIZE * NOISE_SIZE)
 	var rg: PackedByteArray = PackedByteArray()
 	rg.resize(NOISE_SIZE * NOISE_SIZE * 2)
 	for i in NOISE_SIZE * NOISE_SIZE:
-		rg[i * 2] = a[i * step_a]
-		rg[i * 2 + 1] = b[i * step_b]
+		rg[i * 2] = a[i]
+		rg[i * 2 + 1] = b[i]
 	var img: Image = Image.create_from_data(NOISE_SIZE, NOISE_SIZE, false, Image.FORMAT_RG8, rg)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
@@ -325,7 +342,7 @@ static func _stock(k: HDMesh) -> void:
 	s = 0.160
 	while s < 0.356:
 		rings.append(_stock_ring(s))
-		s += 0.0075
+		s += 0.0098   # the grip is under the right glove: coarser rings
 	s = 0.36
 	while s < 0.785:
 		rings.append(_stock_ring(s))
@@ -346,9 +363,9 @@ static func _barrel(k: HDMesh) -> void:
 		Vector3(0.530, 0.0152, 0), Vector3(0.553, 0.0152, 0), Vector3(0.566, 0.0139, 0), Vector3(0.586, 0.0126, 0),
 		Vector3(0.615, 0.0117, 0), Vector3(0.66, 0.0111, 0), Vector3(0.85, 0.0100, 0), Vector3(1.0985, 0.0089, 0),
 		Vector3(1.1000, 0.0079, 0), Vector3(1.1000, 0.0066, 0), Vector3(1.0975, 0.0050, 0), Vector3(1.0975, 0.0039, 0)],
-		20, Vector3.ZERO, FWD)
+		12, Vector3.ZERO, FWD)
 	_fin(k, VOID)
-	k.lathe([Vector3(1.0975, 0.0039, 0), Vector3(1.075, 0.0039, 0), Vector3(1.075, 0.0, 0)], 12, Vector3.ZERO, FWD)
+	k.lathe([Vector3(1.0975, 0.0039, 0), Vector3(1.075, 0.0039, 0), Vector3(1.075, 0.0, 0)], 8, Vector3.ZERO, FWD)
 
 
 static func _receiver(k: HDMesh) -> void:
@@ -475,8 +492,8 @@ static func _scope(k: HDMesh) -> void:
 	# eyepiece lock ring and zoom ring (serrated)
 	k.crease_deg = 35.0
 	_fin(k, SCOPE_GLOSS)
-	k.lathe([Vector3(0.2996, 0.0203, 0), Vector3(0.3001, 0.0212, 0.0006), Vector3(0.3068, 0.0212, 0.0006), Vector3(0.3073, 0.0203, 0)], 48, o, FWD)
-	k.lathe([Vector3(0.3492, 0.0181, 0), Vector3(0.3498, 0.0196, 0.0009), Vector3(0.3672, 0.0196, 0.0009), Vector3(0.3678, 0.0181, 0)], 40, o, FWD)
+	k.lathe([Vector3(0.2996, 0.0203, 0), Vector3(0.3001, 0.0212, 0.0006), Vector3(0.3068, 0.0212, 0.0006), Vector3(0.3073, 0.0203, 0)], 24, o, FWD)
+	k.lathe([Vector3(0.3492, 0.0181, 0), Vector3(0.3498, 0.0196, 0.0009), Vector3(0.3672, 0.0196, 0.0009), Vector3(0.3678, 0.0181, 0)], 22, o, FWD)
 	k.crease_deg = 50.0
 	k.cbox(_v(0.3585, SCOPE_Y + 0.0207, 0.0), Vector3(0.0062, 0.0042, 0.0085), 0.0012)
 	# turrets on the saddle
@@ -501,16 +518,16 @@ static func _turret(k: HDMesh, origin: Vector3, axis: Vector3, up_ref: Vector3, 
 	var t0: float = 0.0175
 	k.bevel_wear = 0.6
 	_fin(k, SCOPE_BLACK)
-	k.lathe([Vector3(t0, radius - 0.0022, 0), Vector3(t0 + 0.0036, radius - 0.0022, 0), Vector3(t0 + 0.0036, radius - 0.0006, 0)], 18, origin, axis, up_ref)
+	k.lathe([Vector3(t0, radius - 0.0022, 0), Vector3(t0 + 0.0036, radius - 0.0022, 0), Vector3(t0 + 0.0036, radius - 0.0006, 0)], 14, origin, axis, up_ref)
 	_fin(k, SCOPE_BLACK, 0.0, 1)
-	k.lathe([Vector3(t0 + 0.0036, radius - 0.0006, 0), Vector3(t0 + 0.0086, radius - 0.0006, 0)], 18, origin, axis, up_ref)
+	k.lathe([Vector3(t0 + 0.0036, radius - 0.0006, 0), Vector3(t0 + 0.0086, radius - 0.0006, 0)], 14, origin, axis, up_ref)
 	k.crease_deg = 35.0
 	_fin(k, SCOPE_GLOSS)
 	var top: float = t0 + 0.0086 + height
 	k.lathe([
 		Vector3(t0 + 0.0086, radius - 0.0006, 0), Vector3(t0 + 0.0090, radius + 0.0004, 0.0010), Vector3(top - 0.0014, radius + 0.0004, 0.0010),
 		Vector3(top, radius - 0.0014, 0), Vector3(top, radius - 0.0045, 0), Vector3(top + 0.0006, radius - 0.0051, 0), Vector3(top + 0.0006, 0.0, 0)],
-		36, origin, axis, up_ref)
+		22, origin, axis, up_ref)
 	k.crease_deg = 50.0
 
 
@@ -521,7 +538,7 @@ static func _scope_rings(k: HDMesh) -> void:
 		_fin(k, BLUED_SATIN)
 		k.lathe([
 			Vector3(sc - 0.008, 0.0150, 0), Vector3(sc - 0.008, 0.0187, 0), Vector3(sc - 0.0069, 0.0197, 0),
-			Vector3(sc + 0.0069, 0.0197, 0), Vector3(sc + 0.008, 0.0187, 0), Vector3(sc + 0.008, 0.0150, 0)], 20, o, FWD)
+			Vector3(sc + 0.0069, 0.0197, 0), Vector3(sc + 0.008, 0.0187, 0), Vector3(sc + 0.008, 0.0150, 0)], 16, o, FWD)
 		# split flanges (upper and lower half) with cap screws
 		for sx: float in [-1.0, 1.0]:
 			k.cbox(_v(sc, SCOPE_Y + 0.0026, sx * 0.0222), Vector3(0.0082, 0.0044, 0.0148), 0.0009)
@@ -535,7 +552,6 @@ static func _scope_rings(k: HDMesh) -> void:
 		k.crease_deg = 30.0
 		k.lathe([Vector3(0.0128, 0.0, 0), Vector3(0.0128, 0.0046, 0), Vector3(0.0162, 0.0046, 0), Vector3(0.0168, 0.0040, 0), Vector3(0.0168, 0.0, 0)], 6, _v(sc, 0.0222, 0.0), Vector3.LEFT, Vector3.UP)
 		k.crease_deg = 50.0
-		_screw(k, _v(sc, 0.0222, 0.0128), Vector3.RIGHT, 0.0026, 0.0014)
 
 
 ## Socket head cap screw: hex-ish head with a dark recess.
@@ -587,19 +603,19 @@ static func _swivels(k: HDMesh) -> void:
 		var s: float = spot[0]
 		var y: float = HDMesh.pchip(_keys_of(BOT), s)
 		_fin(k, BLUED)
-		k.lathe([Vector3(-0.002, 0.0034, 0), Vector3(0.0030, 0.0034, 0), Vector3(0.0040, 0.0026, 0), Vector3(0.0090, 0.0026, 0), Vector3(0.0098, 0.0018, 0), Vector3(0.0098, 0.0, 0)], 10, _v(s, y, 0.0), Vector3.DOWN, FWD)
+		k.lathe([Vector3(-0.002, 0.0034, 0), Vector3(0.0030, 0.0034, 0), Vector3(0.0040, 0.0026, 0), Vector3(0.0090, 0.0026, 0), Vector3(0.0098, 0.0018, 0), Vector3(0.0098, 0.0, 0)], 8, _v(s, y, 0.0), Vector3.DOWN, FWD)
 		# hanging loop: rounded rectangle in the plane across the bore
 		var loop: Array = []
 		var half_w: float = 0.0150
 		var half_h: float = 0.0100
 		var yc: float = y - 0.0062 - half_h
-		for i in 16:
-			var ang: float = TAU * float(i) / 16.0
+		for i in 12:
+			var ang: float = TAU * float(i) / 12.0
 			var cx: float = signf(cos(ang)) * pow(absf(cos(ang)), 0.5)
 			var cy: float = signf(sin(ang)) * pow(absf(sin(ang)), 0.5)
 			loop.append(_v(s, yc + cy * half_h, cx * half_w))
 		k.set_wear(0.25)
-		k.sweep(loop, HDMesh.circle_section(0.0013, 5), FWD, PackedFloat32Array(), true)
+		k.sweep(loop, HDMesh.circle_section(0.0013, 4), FWD, PackedFloat32Array(), true)
 		k.set_wear(0.0)
 
 
@@ -609,14 +625,14 @@ static func _bolt_parts(k: HDMesh) -> void:
 	k.bevel_wear = 0.0
 	# body seen through the ejection port, handle root collar
 	_fin(k, STEEL)
-	k.lathe([Vector3(0.345, 0.0090, 0), Vector3(0.500, 0.0090, 0)], 16, Vector3.ZERO, FWD)
-	k.lathe([Vector3(0.3300, 0.0100, 0), Vector3(0.3300, 0.0120, 0), Vector3(0.3310, 0.0129, 0), Vector3(0.3440, 0.0129, 0), Vector3(0.3450, 0.0120, 0)], 20, Vector3.ZERO, FWD)
+	k.lathe([Vector3(0.345, 0.0090, 0), Vector3(0.500, 0.0090, 0)], 12, Vector3.ZERO, FWD)
+	k.lathe([Vector3(0.3300, 0.0100, 0), Vector3(0.3300, 0.0120, 0), Vector3(0.3310, 0.0129, 0), Vector3(0.3440, 0.0129, 0), Vector3(0.3450, 0.0120, 0)], 16, Vector3.ZERO, FWD)
 	# shroud and cocking piece
 	k.bevel_wear = 0.8
 	_fin(k, BLUED)
 	k.lathe([
 		Vector3(0.2960, 0.0, 0), Vector3(0.2960, 0.0058, 0), Vector3(0.2975, 0.0082, 0), Vector3(0.3020, 0.0104, 0),
-		Vector3(0.3120, 0.0118, 0), Vector3(0.3290, 0.0123, 0), Vector3(0.3300, 0.0115, 0)], 20, Vector3.ZERO, FWD)
+		Vector3(0.3120, 0.0118, 0), Vector3(0.3290, 0.0123, 0), Vector3(0.3300, 0.0115, 0)], 16, Vector3.ZERO, FWD)
 	_fin(k, STEEL_DARK)
 	k.lathe([Vector3(0.2925, 0.0, 0), Vector3(0.2925, 0.0019, 0), Vector3(0.2932, 0.0025, 0), Vector3(0.2962, 0.0025, 0)], 10, Vector3.ZERO, FWD)
 	# handle: swept bar down and back to the ball knob
@@ -630,5 +646,5 @@ static func _bolt_parts(k: HDMesh) -> void:
 	k.crease_deg = 80.0
 	k.sweep(path, HDMesh.circle_section(0.0060, 10), FWD, radii)
 	k.crease_deg = 180.0
-	k.sphere(_v(0.3335, -0.0375, 0.0535), Vector3.ONE * 0.0110, 16, 9)
+	k.sphere(_v(0.3335, -0.0375, 0.0535), Vector3.ONE * 0.0110, 12, 7)
 	k.crease_deg = 50.0

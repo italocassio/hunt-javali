@@ -3,6 +3,23 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.6.0 — 16/11/2026
+
+**Armas, braços e caçadores aliados em alto detalhe, 100% gerados por código.**
+
+O que mudou para o jogador:
+
+- As 5 armas foram refeitas em alto detalhe: madeira com veio, metal, luneta com lente, serrilhado no punho.
+  Cada uma tem silhueta própria (.22 leve de mira aberta, 12 de bomba, .308 de ferrolho, .30-06 semiautomático,
+  .338 com luneta grande e freio de boca).
+- Braços novos em 1ª pessoa: manga cáqui e luvas, segurando cada arma, com animação de ferrolho, bomba e recarga.
+- A arma aparece maior e mais perto na tela (campo de visão próprio da arma), sem mudar a mira.
+- Os caçadores aliados da caçada com amigos foram refeitos: colete e boné na cor do jogador, roupa de campo,
+  versões das armas novas na mão, poses de andar, agachar, mirar, recarregar e cair.
+
+Detalhes técnicos: orçamento da arma em 1ª pessoa ≤ 12 000 triângulos com braços (§7.3) e do caçador aliado
+≤ 5 000 (§7.11). Cada arma é montada em 60–136 ms no desktop na entrada da caçada (cache depois).
+
 ## 0.5.0 — 15/11/2026
 
 **Novo modo na caçada com amigos: Horda Javali.**

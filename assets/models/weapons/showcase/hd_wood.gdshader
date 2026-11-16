@@ -12,6 +12,12 @@ uniform vec3 col_ebony : source_color = vec3(0.03, 0.027, 0.027);
 uniform vec3 col_spacer : source_color = vec3(0.86, 0.82, 0.72);
 uniform float varnish_roughness : hint_range(0.05, 1.0) = 0.23;
 uniform float grain_bump = 0.0;
+// per-instance grain character (defaults = the walnut look): 1 = wandering figure, 0 = straight and calm
+uniform float warp_amount = 1.0;
+uniform float ring_freq = 17.0;          // growth layers per unit of the grain coordinate
+uniform float ring_amount = 0.50;        // strength of the thin dark ring lines
+uniform float smoke_amount = 0.70;       // strength of the dark smoky patches
+uniform float tone_amount = 0.85;        // mid to light tone drift
 uniform float checker_freq = 560.0;      // grooves per metre
 uniform float checker_slope = 0.5;
 uniform vec4 grip_panel = vec4(0.2805, -0.0750, 0.0300, 0.0200);   // centre s, centre y, half length, half width
@@ -76,10 +82,16 @@ void fragment() {
 	// --- grain: warped growth layers cut by the stock surface ------------------------------------
 	float w1 = texture(noise_tex, vec2(s * 0.9 + 0.11, y * 2.2 + 0.3)).r;
 	float w2 = texture(noise_tex, vec2(s * 0.9 + 0.47, x * 2.2 + 0.7)).r;
-	float d = y * 0.92 + x * 0.38 + s * 0.05 + (w1 + w2 - 1.0) * 0.030;
-	vec2 broad = texture(noise_tex, vec2(d * 5.0, s * 0.16 + 0.2)).rg;      // slow tone drift, smoky streaks
-	vec2 rings = texture(noise_tex, vec2(d * 17.0 + 0.5, s * 0.30)).rg;     // growth layers
-	float fibre = texture(noise_tex, vec2(d * 70.0, s * 2.0 + 0.3)).g;
+	// domain warp at three scales + a slow drift along the length: growth layers wander, bunch up and
+	// fan out instead of running as even parallel stripes in side view
+	float wl = texture(noise_tex, vec2(s * 0.33 + 0.6, 0.21)).r;
+	float wf = texture(noise_tex, vec2(s * 0.21 + 0.1, 0.63)).r;
+	float w3 = texture(noise_tex, vec2(s * 2.6 + 0.3, y * 5.5 + 0.5)).g;
+	float d = y * 0.92 + x * 0.38 + s * 0.05 + (w1 + w2 - 1.0) * 0.038 + (w3 - 0.5) * 0.012 + ((wl - 0.5) * 0.10 + (wl - 0.5) * (wf - 0.5) * 0.30 * y) * warp_amount;
+	float dens = 1.0 + (0.40 * (wf - 0.5) + 0.20 * (wl - 0.5)) * warp_amount;
+	vec2 broad = texture(noise_tex, vec2(d * 5.0 * dens, s * 0.16 + 0.2)).rg;      // slow tone drift, smoky streaks
+	vec2 rings = texture(noise_tex, vec2(d * ring_freq * dens + 0.5, s * 0.30)).rg;     // growth layers
+	float fibre = texture(noise_tex, vec2(d * 70.0 * dens, s * 2.0 + 0.3)).g;
 	float pores = texture(noise_tex, vec2(d * 300.0 + 0.2, s * 13.0)).g;
 
 	// thin dark lines where the stretched noise crosses its mid level = growth ring contours;
@@ -90,9 +102,9 @@ void fragment() {
 	float ring_line = smoothstep(0.80, 0.97, ring_a) * mix(0.30, 0.85, figure) + smoothstep(0.88, 0.985, ring_b) * mix(0.50, 0.15, figure);
 	float tone = smoothstep(0.25, 0.75, broad.r);
 	float smoke = smoothstep(0.50, 0.78, rings.r * 0.55 + broad.g * 0.55);
-	vec3 c = mix(col_mid, col_light, tone * 0.85);
-	c = mix(c, col_dark, smoke * 0.70);
-	c = mix(c, col_dark, clamp(ring_line, 0.0, 1.0) * 0.50);
+	vec3 c = mix(col_mid, col_light, tone * tone_amount);
+	c = mix(c, col_dark, smoke * smoke_amount);
+	c = mix(c, col_dark, clamp(ring_line, 0.0, 1.0) * ring_amount);
 	c *= 0.86 + 0.28 * fibre;
 	float pore = smoothstep(0.62, 0.76, pores);
 	c = mix(c, col_dark * 0.7, pore * 0.38);
@@ -128,8 +140,10 @@ void fragment() {
 	float sd = use_grip ? sd_g : sd_f;
 	vec2 puv = vec2(s, y);
 	vec2 pu = vec2(1.0, 0.0);
-	float panel = step(sd, 0.0) * side * (1.0 - max(ebony, spacer));
-	float border = step(abs(sd + 0.0007), 0.0007) * side;
+	// soft mask: checkering relief fades out over 4.5 mm toward the panel edge, no step in colour or normal
+	float pm = 1.0 - smoothstep(-0.0045, 0.0004, sd);
+	float panel = pm * pm * side * (1.0 - max(ebony, spacer));
+	float border = 0.0;
 	vec3 nobj = n;
 	if (panel > 0.0) {
 		vec3 dm = diamonds(puv, checker_freq);

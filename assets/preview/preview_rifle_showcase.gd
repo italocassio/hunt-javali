@@ -42,6 +42,8 @@ void sky() {
 }
 """
 
+## --gun=carbine_22|shotgun_12 renders those HD guns instead (studio shots only).
+var _gun_script: GDScript = RifleHD
 var _out_dir: String = "user://showcase"
 var _frames: int = 40
 var _world: Node3D
@@ -55,6 +57,8 @@ func _ready() -> void:
 			_out_dir = a.trim_prefix("--out=")
 		elif a.begins_with("--shots="):
 			shots = a.trim_prefix("--shots=")
+		elif a.begins_with("--gun="):
+			_gun_script = load("res://assets/models/weapons/showcase/%s_hd.gd" % a.trim_prefix("--gun=")) as GDScript
 		elif a.begins_with("--frames="):
 			_frames = maxi(int(a.trim_prefix("--frames=")), 4)
 	get_tree().create_timer(HARD_TIMEOUT_S).timeout.connect(_on_timeout)
@@ -85,11 +89,13 @@ func _run(shots: PackedStringArray) -> void:
 			"rear": _shot_studio(Vector3(-0.30, 0.17, 0.12), Vector3(0.0, 0.0, -0.40), 34.0)
 			"muzzle": _shot_studio(Vector3(0.30, 0.12, -1.22), Vector3(0.0, 0.01, -0.80), 30.0)
 			"grip": _shot_studio(Vector3(-0.42, -0.02, -0.30), Vector3(0.0, -0.05, -0.33), 30.0)
+			"mid": _shot_studio(Vector3(0.62, 0.10, -0.46), Vector3(0.0, -0.012, -0.46), 30.0)
 			"fore": _shot_studio(Vector3(-0.40, 0.05, -0.80), Vector3(0.0, -0.01, -0.66), 30.0)
 			"bolt_open": _shot_studio(Vector3(0.40, 0.21, -0.05), Vector3(0.0, 0.012, -0.435), 30.0, true)
 			"first_person": _shot_first_person(false)
 			"first_person_close": _shot_first_person(true)
 			"compare": _shot_compare()
+			"lineup": _shot_lineup()
 			_:
 				printerr("preview_rifle_showcase: unknown shot '%s'" % shot)
 				continue
@@ -155,7 +161,7 @@ func _light(rot_deg: Vector3, color: Color, energy: float, shadows: bool) -> voi
 
 
 func _new_rifle(parent: Node, hip: bool) -> Node3D:
-	var rifle: Node3D = RifleHD.new()
+	var rifle: Node3D = _gun_script.new()
 	parent.add_child(rifle)
 	rifle.call(&"set_hip_pose", hip)
 	return rifle
@@ -178,9 +184,14 @@ func _shot_studio(cam_pos: Vector3, target: Vector3, fov: float, bolt_open: bool
 	rifle.call(&"set_cast_shadows", true)
 	if bolt_open:
 		rifle.set_process(false)
-		var bolt: Node3D = rifle.get_node(^"Gun/Bolt")
-		bolt.rotation = Vector3(0.0, 0.0, 1.05)
-		bolt.position = Vector3(0.0, 0.0, 0.06)
+		var bolt: Node3D = rifle.get_node_or_null(^"Gun/Bolt")
+		if bolt == null:
+			bolt = rifle.get_node(^"Gun/Mover")
+		if _gun_script.resource_path.contains("shotgun"):
+			bolt.position = Vector3(0.0, 0.0, 0.13)   # pump racked back
+		else:
+			bolt.rotation = Vector3(0.0, 0.0, 1.05)
+			bolt.position = Vector3(0.0, 0.0, 0.06)
 	_camera(cam_pos, target, fov)
 
 
@@ -228,6 +239,38 @@ func _shot_compare() -> void:
 	_label("ATUAL  rifle_308_view.tscn  (MeshKit, cor por vertice; bracos ocultos)", Vector2(24, 18))
 	var stats: Dictionary = RifleHD.get_stats()
 	_label("NOVO  showcase/rifle_308_hd.gd  (%d triangulos, %d materiais)" % [int(stats["triangles"]), int(stats["materials"])], Vector2(24, 372))
+
+
+## The five guns side by side from the right, same scale (orthographic), butts aligned: 2 columns x 3 rows of the
+## frame (carbine, shotgun, .308 | .30-06, .338). Meant for a 960x540 window.
+func _shot_lineup() -> void:
+	_studio_lighting()
+	var ids: Array[String] = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338"]
+	var view_h: float = 1.375
+	var col_w: float = view_h * 16.0 / 9.0 * 0.5
+	for i in ids.size():
+		var col: int = i / 3
+		var row: int = i % 3
+		var gun: Node3D = (load("res://assets/models/weapons/showcase/%s_hd.gd" % ids[i]) as GDScript).new()
+		_world.add_child(gun)
+		gun.call(&"set_hip_pose", false)
+		gun.call(&"set_cast_shadows", true)
+		# screen right = -z, so the butt of the left column sits at the left edge
+		gun.position = Vector3(0.0, view_h / 3.0 * (1.0 - float(row)) + 0.02, col_w - 0.04 if col == 0 else -0.04)
+		var lbl: Label = Label.new()
+		lbl.text = ids[i]
+		lbl.position = Vector2(12.0 + 640.0 * float(col), 8.0 + 240.0 * float(row))
+		lbl.add_theme_font_size_override(&"font_size", 16)
+		lbl.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.85))
+		_overlay.add_child(lbl)
+	var cam: Camera3D = Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = view_h
+	cam.near = 0.05
+	cam.far = 20.0
+	_world.add_child(cam)
+	cam.look_at_from_position(Vector3(4.0, 0.0, 0.0), Vector3.ZERO, Vector3.UP)
+	cam.make_current()
 
 
 func _label(text: String, pos: Vector2) -> void:

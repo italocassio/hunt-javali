@@ -788,15 +788,19 @@ Ids: `carbine_22`, `shotgun_12`, `rifle_308`, `rifle_3006`, `rifle_338` (caminho
 - Raiz: `Node3D` estendendo `WeaponViewBase` (script compartilhado `res://assets/models/weapons/weapon_view.gd`
   é permitido; `setup(weapon_id)` escolhe o modelo).
 - É filha do `Camera3D` (via `WeaponHolder`). Espaço da câmera: olho na origem, olhando -Z. Em
-  `position = (0,0,0)` a arma aparece na **posição de quadril** (canto inferior direito, coronha ≈
-  (0.20, -0.22, -0.30)).
+  `position = (0,0,0)` a arma aparece na **posição de quadril** (canto inferior direito, origem do cano ≈
+  (0.21, -0.08, -0.24)).
+- FOV próprio da arma: o nó interno `Gun` é escalado em (1, 1, k), com k ≈ 0,55, em torno do olho. Isso equivale
+  a FOV ≈ 46° só para a arma (o mundo segue em 75°). A raiz da view não é escalada. O z de `Muzzle`/`AdsAnchor`
+  já vem comprimido; para a mira só x e y valem.
 - Filhos obrigatórios:
   - `Muzzle` (`Marker3D`) na boca do cano, -Z para fora. Origem dos efeitos visuais; **o raio do tiro sai da câmera**, não do Muzzle.
   - `AdsAnchor` (`Marker3D`) no ponto da linha de mira (alça/massa ou centro da ocular). Na mira, o A move a
     raiz para `Vector3(-AdsAnchor.position.x, -AdsAnchor.position.y, 0.0)`.
 - Inclui braços (manga cáqui, mãos de pele). Comprimento: .22 ≈ 0,95 m; 12 ≈ 1,0 m; rifles ≈ 1,1 m; luneta
   visível no .308/.30-06/.338.
-- Orçamento: ≤ 1500 triângulos com braços; ≤ 4 `MeshInstance3D`; `cast_shadow = OFF`; sem luz no flash.
+- Orçamento: ≤ 12 000 triângulos com braços; ≤ 4 `MeshInstance3D`; ≤ 4 materiais; texturas procedurais
+  ≤ 1024 px; `cast_shadow = OFF`; sem luz no flash.
 - API:
 
 | Método | Contrato |
@@ -972,7 +976,7 @@ libera após `lifetime * 2`. Máximo 6 simultâneos (o A descarta excedentes). F
 - Filhos diretos obrigatórios: `Muzzle` e `NameAnchor` (`Marker3D`), reposicionados pelo asset a cada frame.
   O gameplay lê `global_position` deles no momento do uso (nunca guarda) e só pode pendurar filhos em
   `NameAnchor`.
-- Orçamento: ≤ 600 triângulos, ≤ 10 `MeshInstance3D`, materiais compartilhados entre instâncias (cor por
+- Orçamento: ≤ 5000 triângulos, ≤ 10 `MeshInstance3D`, materiais compartilhados entre instâncias (cor por
   vértice; cor do slot sem material novo por jogador), sombra só no tronco, clarão do tiro sem luz.
 - `setup(slot, weapon_id)` é chamado **exatamente uma vez, antes de `add_child`**. O slot não muda enquanto
   o caçador existe; não há `set_slot` e o gameplay não chama `setup` de novo.
@@ -1962,12 +1966,12 @@ resultado de renderização.
 | Luzes extras | nenhuma |
 | Partículas | `CPUParticles3D`, ≤ 24 cada, ≤ 6 ativas |
 | Materiais únicos | ≤ 24 no total |
-| Texturas | ≤ 512² cada; preferir ruído no shader; `NoiseTexture2D` ≤ 256² |
+| Texturas | ≤ 512² cada (exceção: arma em 1ª pessoa ≤ 1024², §7.3); preferir ruído no shader; `NoiseTexture2D` ≤ 256² |
 | Áudio | ≤ 18 vozes; ≤ 4 MB de amostras |
 | Carregar a caçada | ≤ 3 s; nenhuma etapa > 700 ms |
 | Memória | alvo ≤ 300 MB no total da aba |
 | Alocação | nada de `Array`/`Dictionary` novos por frame em laços de IA; HUD/minimapa a 10 Hz |
-| Aliados (cooperativo) | ≤ 3 `RemoteHunter`, ≤ 600 tris e ≤ 10 `MeshInstance3D` cada, + 1 `Label3D`; draw calls: pior caso ≤ 230 com 3 aliados |
+| Aliados (cooperativo) | ≤ 3 `RemoteHunter`, ≤ 5000 tris e ≤ 10 `MeshInstance3D` cada, + 1 `Label3D`; draw calls: pior caso ≤ 230 com 3 aliados |
 | Rede (cooperativo) | download do cliente ≤ 5 kB/s; quadro de estado ≤ 1100 B (`net.max_frame_bytes`); nenhuma alocação por tick além de um `PackedByteArray` por quadro; raios de visão ≤ 130/s |
 
 ### 13.2 Riscos conhecidos da Web/iOS e mitigação

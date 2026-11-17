@@ -347,6 +347,15 @@ func _assemble() -> void:
 		t = Time.get_ticks_msec()
 		_create_dogs()
 		t = _lap("dog", t)
+		if not await _next_frame():
+			return
+
+	# 5b. Boar visual warm-up: build the cached meshes now, not when the first boar spawns (all roles: puppets too)
+	t = Time.get_ticks_msec()
+	_warm_boar_visuals()
+	t = _lap("boar_warmup", t)
+	if not await _next_frame():
+		return
 
 	# 6. Boars and start
 	if _net_role == Net.Role.CLIENT:
@@ -518,6 +527,24 @@ func _begin_net_hunt() -> void:
 	if _player != null and is_instance_valid(_player):
 		_player.set_input_enabled(true)
 	_announce_start()
+
+
+## Instantiates the boar visual once per boar type and weight (min, middle, max of the type's range from
+## data) so the static mesh caches are filled before the first spawn. Instances are freed outside the tree.
+func _warm_boar_visuals() -> void:
+	for type_id: StringName in Data.get_boar_type_ids():
+		var def: Dictionary = Data.get_boar_type(type_id)
+		var w_min: float = float(def.get("weight_min_kg", 0.0))
+		var w_max: float = maxf(float(def.get("weight_max_kg", w_min)), w_min)
+		for kg: float in [w_min, (w_min + w_max) * 0.5, w_max]:
+			var node: Node = AssetLoader.instantiate(ScenePaths.BOAR_VISUAL)
+			var visual: BoarVisualBase = node as BoarVisualBase
+			if visual == null:
+				if node != null:
+					node.free()
+				return   # asset missing: the fallback needs no warm-up
+			visual.setup(type_id, kg)
+			visual.free()
 
 
 func _next_frame() -> bool:

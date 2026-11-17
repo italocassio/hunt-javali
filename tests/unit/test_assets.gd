@@ -8,6 +8,15 @@ const WEAPON_MAX_TRIS: int = 12000
 const WEAPON_MAX_MESHES: int = 4
 const WEAPON_MAX_MATERIALS: int = 4
 const BOAR_TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha"]
+## Boar LOD contract (docs/arquitetura.md section 7.1): bands by visibility_range at rest (base FOV, no zoom).
+const BOAR_NEAR_END_M: float = 25.0
+const BOAR_MID_END_M: float = 60.0
+const BOAR_MAX_MATERIALS_PER_TYPE: int = 1
+const BOAR_LODS: Array[Dictionary] = [
+	{"name": "near", "max_tris": 3000, "max_meshes": 7, "samples": [0.5, 10.0, BOAR_NEAR_END_M - 0.01]},
+	{"name": "mid", "max_tris": 900, "max_meshes": 7, "samples": [BOAR_NEAR_END_M + 0.01, 40.0, BOAR_MID_END_M - 0.01]},
+	{"name": "far", "max_tris": 300, "max_meshes": 2, "samples": [BOAR_MID_END_M + 0.01, 100.0, 500.0]},
+]
 const BREEDS: Array[StringName] = [&"caramelo", &"foxhound", &"dogo"]
 
 ## prop id -> [size X, Y, Z, max triangles]
@@ -128,6 +137,35 @@ func _root_transform_snapshot(n: Node3D) -> Array:
 # Boar
 # --------------------------------------------------------------------------------------------
 
+## True when `mi` is drawn at camera distance `d` (visibility_range_end == 0 means no upper limit).
+## Margins (hysteresis) are ignored on purpose: the contract is about the rest ranges at the base FOV.
+func _visible_at(mi: MeshInstance3D, d: float) -> bool:
+	if d < mi.visibility_range_begin:
+		return false
+	return mi.visibility_range_end <= 0.0 or d < mi.visibility_range_end
+
+
+## Checks one boar against the three LOD budgets of docs/arquitetura.md section 7.1.
+## Samples distances inside each band (and just inside its edges) and takes the worst case.
+func _check_boar_lods(boar: Node3D, meshes: Array[MeshInstance3D], label: String) -> void:
+	for lod: Dictionary in BOAR_LODS:
+		var worst_tris: int = 0
+		var worst_count: int = 0
+		for d: float in lod["samples"]:
+			var tris: int = 0
+			var count: int = 0
+			for mi: MeshInstance3D in meshes:
+				if _visible_at(mi, d):
+					count += 1
+					tris += _tris(mi.mesh)
+			worst_tris = maxi(worst_tris, tris)
+			worst_count = maxi(worst_count, count)
+			ok(count > 0, "%s: nenhuma malha visivel a %.1f m (buraco entre LODs)" % [label, d])
+		print("INFO boar LOD %-4s %-16s tris=%4d (<= %4d)  malhas=%d (<= %d)" % [lod["name"], label, worst_tris, lod["max_tris"], worst_count, lod["max_meshes"]])
+		ok(worst_tris <= int(lod["max_tris"]), "%s: LOD %s: %d triangulos (<= %d)" % [label, lod["name"], worst_tris, lod["max_tris"]])
+		ok(worst_count <= int(lod["max_meshes"]), "%s: LOD %s: %d MeshInstance3D visiveis (<= %d)" % [label, lod["name"], worst_count, lod["max_meshes"]])
+
+
 func test_boar_visual_contract() -> void:
 	var path: String = ScenePaths.BOAR_VISUAL
 	var root: Node3D = _spawn(path)
@@ -142,21 +180,32 @@ func test_boar_visual_contract() -> void:
 	var snap: Array = _root_transform_snapshot(boar)
 	var materials: Dictionary = {}
 	for type_id: StringName in BOAR_TYPES:
-		var inst: Node3D = _spawn(path)
-		var b: BoarVisualBase = inst as BoarVisualBase
-		var weight: float = (float(Data.get_boar_type(type_id)["weight_min_kg"]) + float(Data.get_boar_type(type_id)["weight_max_kg"])) * 0.5
-		b.setup(type_id, weight)
-		var meshes: Array[MeshInstance3D] = _meshes(b)
-		ok(meshes.size() <= 6, "%s: %d MeshInstance3D (<= 6)" % [type_id, meshes.size()])
-		ok(_tree_tris(b) <= 600, "%s: %d triangulos (<= 600)" % [type_id, _tree_tris(b)])
-		for mi: MeshInstance3D in meshes:
-			var m: Material = mi.material_override
-			if m == null and mi.mesh != null and mi.mesh.get_surface_count() > 0:
-				m = mi.mesh.surface_get_material(0)
-			if m != null:
-				materials[m.get_instance_id()] = true
+		var spec: Dictionary = Data.get_boar_type(type_id)
+		var w_min: float = float(spec["weight_min_kg"])
+		var w_max: float = float(spec["weight_max_kg"])
+		# Min, mean and max weight: the tusk bucket (and so the head mesh) changes with the weight.
+		for weight: float in [w_min, (w_min + w_max) * 0.5, w_max]:
+			var b: BoarVisualBase = _spawn(path) as BoarVisualBase
+			b.setup(type_id, weight)
+			var label: String = "%s @%.0fkg" % [type_id, weight]
+			var type_materials: Dictionary = {}
+			var meshes: Array[MeshInstance3D] = _meshes(b)
+			_check_boar_lods(b, meshes, label)
+			for mi: MeshInstance3D in meshes:
+				var shadow_on: bool = mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				ok(shadow_on == (mi.get_parent().name == &"Rig"), "%s: %s sombra so no corpo (cast_shadow=%d)" % [label, mi.get_path(), mi.cast_shadow])
+				ok(mi.mesh != null, "%s: %s tem malha" % [label, mi.get_path()])
+				if mi.mesh == null:
+					continue
+				for s: int in mi.mesh.get_surface_count():
+					var m: Material = mi.mesh.surface_get_material(s)
+					ok(m != null, "%s: %s superficie %d tem material" % [label, mi.get_path(), s])
+					if m != null:
+						type_materials[m.get_instance_id()] = true
+						materials[m.get_instance_id()] = true
+			ok(type_materials.size() <= BOAR_MAX_MATERIALS_PER_TYPE, "%s: %d materiais (<= %d)" % [label, type_materials.size(), BOAR_MAX_MATERIALS_PER_TYPE])
 	# Materials are shared between instances: not one per spawned boar.
-	ok(materials.size() <= 4 + 1, "materiais distintos nos 4 tipos: %d (<= 4 + realce)" % materials.size())
+	ok(materials.size() <= BOAR_TYPES.size() + 1, "materiais distintos nos 4 tipos: %d (<= 4 + realce)" % materials.size())
 	# Every API call, with plausible and extreme arguments.
 	boar.setup(Ids.ALPHA, 220.0)
 	for speed: float in [0.0, 1.5, 4.0, 5.5, 9.0, 1000.0, -3.0]:

@@ -834,6 +834,8 @@ Raiz `Node3D`, sem script obrigatório, sem física. O Pacote B cria a colisão 
 | `feed_trough` | 3 × 0,6 × 0,8 | cocho | 300 |
 
 Por prop: ≤ 4 `MeshInstance3D`; materiais compartilhados entre props; montagem de todos os props ≤ 150 ms.
+Mourões e esteios podem descer até 0,15 m abaixo de Y=0 (enterrados); as dimensões da tabela valem para a parte
+acima do chão.
 
 Fallback (B): `BoxMesh` do tamanho `collision_size` com cor neutra.
 

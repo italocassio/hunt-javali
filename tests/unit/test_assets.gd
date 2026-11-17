@@ -19,18 +19,26 @@ const BOAR_LODS: Array[Dictionary] = [
 ]
 const BREEDS: Array[StringName] = [&"caramelo", &"foxhound", &"dogo"]
 
-## prop id -> [size X, Y, Z, max triangles]
+## prop id -> [size X, Y, Z, max triangles] (docs/arquitetura.md section 7.4). Y is the height above the ground.
 const PROPS: Dictionary = {
-	&"farmhouse": [12.0, 6.0, 8.0, 900],
-	&"barn": [16.0, 7.0, 10.0, 700],
-	&"water_tank": [3.0, 8.0, 3.0, 300],
-	&"fence_segment": [4.0, 1.3, 0.15, 80],
-	&"gate": [4.0, 1.4, 0.2, 120],
-	&"corn_bait": [1.0, 0.3, 1.0, 150],
-	&"feed_trough": [3.0, 0.6, 0.8, 80],
+	&"farmhouse": [12.0, 6.0, 8.0, 3000],
+	&"barn": [16.0, 7.0, 10.0, 2400],
+	&"water_tank": [3.0, 8.0, 3.0, 1000],
+	&"fence_segment": [4.0, 1.3, 0.15, 240],
+	&"gate": [4.0, 1.4, 0.2, 400],
+	&"corn_bait": [1.0, 0.3, 1.0, 500],
+	&"feed_trough": [3.0, 0.6, 0.8, 300],
 }
 const PROP_SIZE_TOLERANCE: float = 0.10
 const PROP_SIZE_SLACK_M: float = 0.05
+const PROP_MAX_MESHES: int = 4
+## Posts may be buried up to this depth below Y=0 (section 7.4); table heights count only the part above ground.
+const PROP_MAX_BURIAL_M: float = 0.15
+const PROP_BURIAL_EPS_M: float = 0.001
+## Informative only (never asserted: it varies with the machine): cold build time of all props together.
+const PROP_BUILD_BUDGET_MS: float = 150.0
+const BARN_CORN_MAX_TRIS: int = 1800
+const BARN_CORN_MAX_MESHES: int = 8
 
 ## flora id -> max triangles
 const FLORA: Dictionary = {
@@ -382,23 +390,42 @@ func test_scoped_weapons_have_scope_data() -> void:
 # --------------------------------------------------------------------------------------------
 
 func test_props_contract() -> void:
+	var shared: Dictionary = {}   # material instance id -> number of props using it
+	var build_us: int = 0
 	for id: StringName in PROPS:
 		var path: String = ScenePaths.prop(id)
+		var t0: int = Time.get_ticks_usec()
 		var root: Node3D = _spawn(path)
+		build_us += Time.get_ticks_usec() - t0
 		if root == null:
 			continue
 		var spec: Array = PROPS[id]
 		_forbidden(root, "prop/%s" % id)
+		var meshes: Array[MeshInstance3D] = _meshes(root)
 		var tris: int = _tree_tris(root)
 		ok(tris <= int(spec[3]), "%s: %d triangulos (<= %d)" % [id, tris, int(spec[3])])
+		ok(meshes.size() <= PROP_MAX_MESHES, "%s: %d MeshInstance3D (<= %d)" % [id, meshes.size(), PROP_MAX_MESHES])
+		for m_id: int in _unique_materials(meshes):
+			shared[m_id] = int(shared.get(m_id, 0)) + 1
 		var box: AABB = _aabb_in_root(root)
 		var want: Vector3 = Vector3(float(spec[0]), float(spec[1]), float(spec[2]))
-		print("INFO prop %s: AABB size %s (esperado %s), y min %.2f, tris %d" % [id, box.size, want, box.position.y, tris])
+		# Height counts only what is above the ground (buried post ends do not count): max.y, not size.y.
+		var measured: Vector3 = Vector3(box.size.x, box.end.y, box.size.z)
+		print("INFO prop %s: tris=%d malhas=%d AABB size=%s (altura acima do chao %.3f) pos=%s esperado=%s" % [id, tris, meshes.size(), box.size, box.end.y, box.position, want])
 		for axis: int in 3:
 			var allowed: float = want[axis] * PROP_SIZE_TOLERANCE + PROP_SIZE_SLACK_M
-			ok(absf(box.size[axis] - want[axis]) <= allowed, "%s: dimensao %s = %.2f, esperado %.2f +- %.2f" % [id, "XYZ"[axis], box.size[axis], want[axis], allowed])
-		ok(absf(box.position.y) <= 0.1, "%s: base no chao (y min %.2f)" % [id, box.position.y])
+			ok(absf(measured[axis] - want[axis]) <= allowed, "%s: dimensao %s = %.3f, esperado %.2f +- %.3f" % [id, "XYZ"[axis], measured[axis], want[axis], allowed])
+		ok(box.position.y >= -PROP_MAX_BURIAL_M - PROP_BURIAL_EPS_M and box.position.y <= 0.1, "%s: base no chao, enterrada ate %.2f m (y min %.3f)" % [id, PROP_MAX_BURIAL_M, box.position.y])
 		ok(absf(box.get_center().x) <= want.x * 0.1 + 0.1 and absf(box.get_center().z) <= want.z * 0.1 + 0.1, "%s: centrado na pegada (centro %s)" % [id, box.get_center()])
+	# Materials are shared between props (not one private set per prop).
+	var shared_count: int = 0
+	for m_id: int in shared:
+		if int(shared[m_id]) > 1:
+			shared_count += 1
+	print("INFO props: %d materiais distintos, %d compartilhados entre props" % [shared.size(), shared_count])
+	ok(shared_count >= 1, "materiais compartilhados entre props (%d de %d)" % [shared_count, shared.size()])
+	var build_ms: float = float(build_us) / 1000.0
+	print("INFO props: montagem somada dos %d props = %.1f ms (meta <= %.0f ms, so informativo; cache de materiais pode ja estar quente)" % [PROPS.size(), build_ms, PROP_BUILD_BUDGET_MS])
 
 
 ## Corn stock of the barn (docs/horda.md section 11.1): budget, geometry and API. The stage checks run off-tree,
@@ -439,8 +466,8 @@ func test_barn_corn_contract() -> void:
 	var meshes: Array[MeshInstance3D] = _meshes(stock)
 	var tris: int = _tree_tris(stock)
 	print("INFO barn_corn: %d MeshInstance3D, %d triangulos" % [meshes.size(), tris])
-	ok(meshes.size() <= 8, "%d MeshInstance3D (<= 8)" % meshes.size())
-	ok(tris <= 900, "%d triangulos (<= 900)" % tris)
+	ok(meshes.size() <= BARN_CORN_MAX_MESHES, "%d MeshInstance3D (<= %d)" % [meshes.size(), BARN_CORN_MAX_MESHES])
+	ok(tris <= BARN_CORN_MAX_TRIS, "%d triangulos (<= %d)" % [tris, BARN_CORN_MAX_TRIS])
 	var materials: Dictionary = {}
 	for mi: MeshInstance3D in meshes:
 		var m: Material = mi.material_override

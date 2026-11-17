@@ -2,6 +2,14 @@ extends Node3D
 ## Procedural farm props. One script, one merged MeshInstance3D per prop (vertex colors, shared material).
 ## Each <prop_id>.tscn only sets `prop_id`. Origin on the ground at the footprint center, front = -Z.
 
+const FarmhouseHD := preload("res://assets/models/props/farmhouse_hd.gd")
+const BarnHD := preload("res://assets/models/props/barn_hd.gd")
+const WaterTankHD := preload("res://assets/models/props/water_tank_hd.gd")
+const FenceHD := preload("res://assets/models/props/fence_hd.gd")
+const GateHD := preload("res://assets/models/props/gate_hd.gd")
+const CornBaitHD := preload("res://assets/models/props/corn_bait_hd.gd")
+const FeedTroughHD := preload("res://assets/models/props/feed_trough_hd.gd")
+
 const WHITE: Color = Color(0.93, 0.90, 0.83)
 const WHITE_SHADE: Color = Color(0.80, 0.76, 0.68)
 const TILE: Color = Color(0.66, 0.29, 0.17)
@@ -35,15 +43,25 @@ func _ready() -> void:
 
 
 static func _build(id: StringName) -> ArrayMesh:
+	if id == &"farmhouse":
+		return FarmhouseHD.get_model()["mesh"]
+	if id == &"barn":
+		return BarnHD.get_model()["mesh"]
+	if id == &"water_tank":
+		return WaterTankHD.get_model()["mesh"]
+	if id == &"fence_segment":
+		return FenceHD.get_model()["mesh"]
+	if id == &"gate":
+		return GateHD.get_model()["mesh"]
+	if id == &"corn_bait":
+		return CornBaitHD.get_model()["mesh"]
+	if id == &"feed_trough":
+		return FeedTroughHD.get_model()["mesh"]
 	var k: MeshKit = MeshKit.new()
 	match id:
 		&"farmhouse": _farmhouse(k)
 		&"barn": _barn(k)
 		&"water_tank": _water_tank(k)
-		&"fence_segment": _fence(k)
-		&"gate": _gate(k)
-		&"corn_bait": _corn_bait(k)
-		&"feed_trough": _trough(k)
 	return k.build()
 
 
@@ -86,38 +104,3 @@ static func _water_tank(k: MeshKit) -> void:
 	_bx(k, 0, 4.95, 0, 2.9, 0.18, 2.9, WOOD_DARK)                    # platform
 	k.frustum(Vector3(0, 5.1, 0), 1.45, 1.45, 2.3, 8, TANK, MeshKit.shade(TANK, 1.12), false, false)
 	k.frustum(Vector3(0, 7.4, 0), 1.5, 0.0, 0.6, 8, ZINC_DARK, ZINC, true, false)
-
-
-static func _fence(k: MeshKit) -> void:
-	for x: float in [-1.9, 1.9]:
-		_bx(k, x, 0, 0, 0.14, 1.3, 0.14, WOOD)
-	for y: float in [0.35, 0.65, 0.95, 1.22]:
-		_bx(k, 0, y, 0, 3.8, 0.025, 0.025, WIRE)
-
-
-static func _gate(k: MeshKit) -> void:
-	for x: float in [-1.95, 1.95]:
-		_bx(k, x, 0, 0, 0.2, 1.4, 0.2, WOOD_DARK)
-	for y: float in [0.25, 0.6, 0.95, 1.3]:
-		_bx(k, 0, y, 0, 3.7, 0.12, 0.06, WOOD)
-	k.set_xf(Vector3(0, 0.78, 0), Vector3(0, 0, 17.0))
-	k.box(Vector3.ZERO, Vector3(3.85, 0.1, 0.06), WOOD)
-	k.reset_xf()
-
-
-static func _corn_bait(k: MeshKit) -> void:
-	# Mound sits on the ground (y >= 0), about 0.3 m tall: flattened ellipsoid with the lower half moved up
-	# by building a short frustum body plus a cap.
-	k.frustum(Vector3(0, 0.0, 0), 0.5, 0.3, 0.16, 7, Color(0.80, 0.62, 0.15), CORN, true, false)
-	k.frustum(Vector3(0, 0.16, 0), 0.3, 0.0, 0.14, 7, CORN, Color(0.96, 0.82, 0.3), false, false)
-	for a: float in [0.0, 1.6, 3.2, 4.8]:
-		var p: Vector3 = Vector3(cos(a) * 0.36, 0.1, sin(a) * 0.36)
-		k.set_xf(p, Vector3(0, rad_to_deg(-a), 40.0))
-		k.box(Vector3.ZERO, Vector3(0.2, 0.06, 0.06), Color(0.96, 0.82, 0.3))
-		k.reset_xf()
-
-
-static func _trough(k: MeshKit) -> void:
-	k.prism(Vector3(0, 0.25, 0), Vector2(2.8, 0.6), Vector2(3.0, 0.8), 0.35, WOOD_DARK, CORN)
-	for x: float in [-1.2, 1.2]:
-		_bx(k, x, 0, 0, 0.15, 0.25, 0.7, WOOD)

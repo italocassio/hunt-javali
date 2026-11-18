@@ -42,9 +42,16 @@ const BARN_CORN_MAX_MESHES: int = 8
 
 ## flora id -> max triangles
 const FLORA: Dictionary = {
-	&"grass_tuft": 8, &"shrub": 60, &"cerrado_tree": 200, &"ipe": 250, &"buriti": 250, &"termite_mound": 60,
+	&"grass_tuft": 8, &"shrub": 150, &"cerrado_tree": 600, &"ipe": 750, &"buriti": 600, &"termite_mound": 200,
 	&"soy_patch": 24, &"soy_eaten": 16, &"corn_patch": 36, &"corn_eaten": 20,
 }
+## Contract 7.5: lowest allowed Y of a flora mesh (the base may sink this far below the origin).
+const FLORA_BASE_SINK_M: float = 0.15
+const FLORA_TREE_IDS: Array[StringName] = [&"cerrado_tree", &"ipe", &"buriti"]
+## Contract 7.5: trees of the whole map <= 1.5 x the 0.6.0 sum (46 408 tris) = 69 612, rounded to 70 000.
+const FLORA_TREE_TRIS_MAX: int = 70000
+const FLORA_BUILD_INFO_MS: float = 200.0
+const FLORA_MAP_ID: StringName = &"mato_grosso"
 
 const SFX_IDS: Array[StringName] = [
 	&"shot_22", &"shot_12", &"shot_308", &"shot_3006", &"shot_338", &"dry_fire", &"reload_start", &"reload_end",
@@ -607,20 +614,32 @@ func test_flora_library() -> void:
 		return
 	for line: String in FileAccess.get_file_as_string(ScenePaths.FLORA_LIBRARY).split("\n"):
 		ok(not line.strip_edges().begins_with("class_name"), "flora_library nao pode ter class_name")
+	var tris_by_id: Dictionary = {}
+	var t_start: int = Time.get_ticks_usec()
 	for id: StringName in FLORA:
+		var t_id: int = Time.get_ticks_usec()
 		var mesh: Mesh = lib.call(&"build_mesh", id) as Mesh
+		var ms_id: float = float(Time.get_ticks_usec() - t_id) / 1000.0
 		ok(mesh != null, "build_mesh(%s) != null" % id)
 		if mesh == null:
 			continue
+		print("INFO flora %-14s tris=%4d (<= %4d)  y_min=%.3f  y_max=%.2f  build=%.1f ms" % [id, _tris(mesh), int(FLORA[id]),
+			mesh.get_aabb().position.y, mesh.get_aabb().end.y, ms_id])
 		ok(mesh.get_surface_count() >= 1, "%s: tem superficie" % id)
 		for s: int in mesh.get_surface_count():
 			ok(mesh.surface_get_material(s) != null, "%s: superficie %d com material" % [id, s])
 		var tris: int = _tris(mesh)
 		ok(tris <= int(FLORA[id]), "%s: %d triangulos (<= %d)" % [id, tris, int(FLORA[id])])
 		ok(tris > 0, "%s: nao vazio" % id)
+		tris_by_id[id] = tris
 		var box: AABB = mesh.get_aabb()
-		ok(box.position.y >= -0.05, "%s: base na origem (y min %.2f)" % [id, box.position.y])
+		# contract 7.5: the base may sink up to 0.15 m below y = 0 (termite mound, tree roots)
+		ok(box.position.y >= -FLORA_BASE_SINK_M, "%s: base na origem (y min %.3f, >= -%.2f)" % [id, box.position.y, FLORA_BASE_SINK_M])
 		ok(lib.call(&"build_mesh", id) == mesh, "%s: cache devolve a mesma malha" % id)
+	# INFO only: first-build time of the whole library (cache may already be warm if another test built meshes)
+	print("INFO flora: build_mesh de todos os ids em %.1f ms (limite informativo %.0f ms)" % [
+		float(Time.get_ticks_usec() - t_start) / 1000.0, FLORA_BUILD_INFO_MS])
+	_check_tree_budget(tris_by_id)
 	var heights: Dictionary = {&"grass_tuft": 0.4, &"shrub": 1.0, &"cerrado_tree": 4.5, &"ipe": 7.0, &"buriti": 12.0,
 		&"termite_mound": 1.2, &"soy_patch": 0.6, &"soy_eaten": 0.15, &"corn_patch": 2.0, &"corn_eaten": 0.5}
 	for id: StringName in heights:
@@ -630,6 +649,42 @@ func test_flora_library() -> void:
 			ok(absf(h - float(heights[id])) <= float(heights[id]) * 0.35 + 0.1, "%s: altura %.2f perto de %.2f" % [id, h, float(heights[id])])
 	ok(lib.call(&"build_mesh", &"id_inexistente") == null, "id desconhecido devolve null")
 	ok(lib.call(&"build_mesh", &"") == null, "id vazio devolve null")
+
+
+## Sum of tree triangles over the whole map. Counts the nominal instances of the map scene (base_flora plus
+## every FloraZone), without building the world: trees do not scale with flora_density, and placement
+## rejections (water, crops, props) can only remove instances, so this is an upper bound of what is drawn.
+func _check_tree_budget(tris_by_id: Dictionary) -> void:
+	var scene: PackedScene = need_scene(ScenePaths.map_scene(FLORA_MAP_ID))
+	if scene == null:
+		return
+	var map: Node = scene.instantiate()   # not added to the tree: no _ready, only the exported properties
+	if map == null:
+		fail("mapa %s nao instancia" % FLORA_MAP_ID)
+		return
+	var counts: Dictionary = {}
+	var base: Variant = map.get(&"base_flora")
+	if base is Dictionary:
+		for key: Variant in (base as Dictionary).keys():
+			counts[String(key)] = int(counts.get(String(key), 0)) + int((base as Dictionary)[key])
+	var zones: Node = map.get_node_or_null(^"FloraZones")
+	if zones != null:
+		for z: Node in zones.get_children():
+			var zc: Variant = z.get(&"counts")
+			if zc is Dictionary:
+				for key: Variant in (zc as Dictionary).keys():
+					counts[String(key)] = int(counts.get(String(key), 0)) + int((zc as Dictionary)[key])
+	map.free()
+	var total: int = 0
+	var parts: PackedStringArray = PackedStringArray()
+	for id: StringName in FLORA_TREE_IDS:
+		var n: int = int(counts.get(String(id), 0))
+		var t: int = int(tris_by_id.get(id, 0))
+		total += n * t
+		parts.append("%d %s x %d" % [n, id, t])
+	print("INFO flora: triangulos de arvores no mapa %s = %d (<= %d); %s" % [FLORA_MAP_ID, total, FLORA_TREE_TRIS_MAX, ", ".join(parts)])
+	ok(total > 0, "mapa %s tem arvores" % FLORA_MAP_ID)
+	ok(total <= FLORA_TREE_TRIS_MAX, "arvores do mapa: %d triangulos (<= %d)" % [total, FLORA_TREE_TRIS_MAX])
 
 
 # --------------------------------------------------------------------------------------------

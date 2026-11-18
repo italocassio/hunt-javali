@@ -864,6 +864,8 @@ aleatório e escala ±20%. Sem `cast_shadow` em grama, arbusto e lavoura (o B fo
 Grama e lavoura mantêm os triângulos: a melhora vem de shader (cor, vento, translucidez falsa, variação por
 instância). Tudo em `MultiMesh`, sem alpha blend; alpha scissor só com justificativa (overdraw no celular).
 `build_mesh` de todos os ids somado ≤ 200 ms.
+A base pode descer até 0,15 m abaixo de Y=0 (cupinzeiro, raízes) para não flutuar em declive. Árvores: a soma de
+triângulos de árvores do mapa inteiro fica ≤ 1,5 × a da 0.6.0 (≈ 70 k); o limite por id é teto, não meta.
 Shader de vento (vértice) permitido em grama, arbusto, lavoura e copas. Fallback (B): `CylinderMesh`/
 `BoxMesh`/`QuadMesh` coloridos nas dimensões da tabela.
 

@@ -3,6 +3,27 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.7.0 — 18/11/2026
+
+**Cenário e javalis em alto detalhe, 100% gerados por código.**
+
+O que mudou para o jogador:
+
+- Javalis refeitos: corpo em cunha com corcunda e crina de cerdas, cabeça longa, presas, pelagem áspera.
+  Leitão listrado, fêmea marrom-acinzentada, macho escuro e alfa quase preto, com mais detalhe de perto
+  e versões leves de longe.
+- Sede da fazenda, galpão, caixa d'água, cerca, porteira, ceva, cocho e estoque de milho refeitos:
+  reboco caiado, telha, madeira envelhecida, zinco com ferrugem.
+- Árvores novas: pequizeiro retorcido com casca de cortiça, ipê-amarelo florido e buriti com folhas em leque,
+  com vento e brilho no contraluz do fim de tarde. Moitas, cupinzeiros, capim, soja e milho também refeitos.
+- Chão com capim seco e verde, estrada de terra vermelha, sulcos na lavoura e açude que reflete o céu e o sol.
+- Desempenho igual ou melhor que a 0.6.1 (teste com celular emulado).
+
+Detalhes técnicos: orçamentos por LOD no contrato (§7.1, §7.4, §7.5, §7.6, §13.1); 1 material para todos os
+props; terreno com 3 leituras de textura no lugar de ruído procedural; javalis aquecidos na carga da caçada;
+o LOD do javali acompanha o zoom da luneta. Medição (Chrome emulando celular, preset low): quadro igual em
+x1 (~13–15 ms), igual ou melhor em CPU 4x; 140–147 draw calls, ~181 k triângulos.
+
 ## 0.6.1 — 16/11/2026
 
 **Caçada muito mais leve no celular.**

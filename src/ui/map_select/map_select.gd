@@ -5,7 +5,7 @@ const CARD_HEIGHT: float = 150.0
 
 
 func _ready() -> void:
-	var page: Dictionary = UiKit.build_page(self, "Escolha o mapa")
+	var page: Dictionary = UiKit.build_page(self, "Escolha o mapa", true, ScenePaths.PREPARATION_BACKGROUND, UiKit.VEIL_STRONG_ALPHA)
 	var body: VBoxContainer = page["body"]
 	var scroller: Array = UiKit.scroll_list(14)
 	body.add_child(scroller[0])

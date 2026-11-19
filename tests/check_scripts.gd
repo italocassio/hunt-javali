@@ -574,6 +574,9 @@ func _check_no_binaries() -> void:
 		# Explicit exception: the recorded sound effects (docs/arquitetura.md 7.8).
 		if path.get_extension() == "mp3" and RECORDED_AUDIO_DIRS.any(func(d: String) -> bool: return path.begins_with(d)):
 			continue
+		# Explicit exception: the painted menu backgrounds supplied by the game owner (docs/arquitetura.md 7.9).
+		if path in [ScenePaths.MENU_BACKGROUND, ScenePaths.PREPARATION_BACKGROUND]:
+			continue
 		_t.call("fail", "%s: arquivo binario/baixado proibido (tudo e procedural; SVG escrito a mao e permitido)" % path)
 	# physics / skeleton / lights are forbidden inside asset scenes: checked here textually,
 	# the unit test (assets contract) checks the instantiated trees.

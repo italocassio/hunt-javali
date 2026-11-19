@@ -12,6 +12,14 @@ const GOLD_COLOR: Color = Color(0.91, 0.725, 0.137)
 const DANGER_COLOR: Color = Color(0.851, 0.271, 0.169)
 const TEXT_COLOR: Color = Color(0.957, 0.937, 0.902)
 const MUTED_COLOR: Color = Color(0.78, 0.74, 0.68)
+const VEIL_COLOR: Color = Color(0.07, 0.04, 0.03)   # warm black
+const VEIL_LIGHT_ALPHA: float = 0.12
+const VEIL_MEDIUM_ALPHA: float = 0.4
+const VEIL_STRONG_ALPHA: float = 0.58
+const PAGE_GRADIENT_ALPHA: float = 0.55
+const PAGE_GRADIENT_TOP_EXTENT: float = 0.22
+const PAGE_GRADIENT_BOTTOM_EXTENT: float = 0.2
+const GRADIENT_TEX_SIZE: int = 64
 const PAGE_MARGIN_H: int = 40
 const PAGE_MARGIN_V: int = 24
 
@@ -119,16 +127,68 @@ static func icon(icon_id: StringName) -> Texture2D:
 
 # --- Page skeleton ---
 
-## Dark background, safe margins, header (title + optional wallet), body and footer.
-## Returns {"body": VBoxContainer, "header": HBoxContainer, "footer": HBoxContainer, "title": Label}.
-static func build_page(root: Control, title: String, show_wallet: bool = true) -> Dictionary:
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+## Painted background (cover-fit, one texture) plus a warm dark veil. Nodes: "Background" (TextureRect) and
+## "Veil" (ColorRect), both ignoring the mouse. Returns false, adding nothing, when the image is missing:
+## the caller then draws the flat background (see add_flat_background).
+static func add_background(root: Control, texture_path: String, veil_alpha: float) -> bool:
+	if texture_path == "" or not AssetLoader.exists(texture_path):
+		return false
+	var tex: Texture2D = AssetLoader.load_resource(texture_path) as Texture2D
+	if tex == null:
+		return false
+	var bg: TextureRect = TextureRect.new()
+	bg.name = "Background"
+	bg.texture = tex
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(bg)
+	var veil: ColorRect = ColorRect.new()
+	veil.name = "Veil"
+	veil.color = Color(VEIL_COLOR.r, VEIL_COLOR.g, VEIL_COLOR.b, veil_alpha)
+	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(veil)
+	return true
+
+
+## Dark gradient fading out from the top or bottom edge, `extent` = fraction of the screen height covered.
+## Used to give text over a painted background some contrast. Never blocks clicks.
+static func add_edge_gradient(root: Control, from_top: bool, extent: float, alpha: float) -> TextureRect:
+	var grad: Gradient = Gradient.new()
+	grad.set_color(0, Color(VEIL_COLOR.r, VEIL_COLOR.g, VEIL_COLOR.b, alpha if from_top else 0.0))
+	grad.set_color(1, Color(VEIL_COLOR.r, VEIL_COLOR.g, VEIL_COLOR.b, 0.0 if from_top else alpha))
+	var tex: GradientTexture2D = GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill_from = Vector2(0.0, 0.0)
+	tex.fill_to = Vector2(0.0, 1.0)
+	tex.width = GRADIENT_TEX_SIZE
+	tex.height = GRADIENT_TEX_SIZE
+	var r: TextureRect = TextureRect.new()
+	r.name = "EdgeGradientTop" if from_top else "EdgeGradientBottom"
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.anchor_left = 0.0
+	r.anchor_right = 1.0
+	r.anchor_top = 0.0 if from_top else 1.0 - extent
+	r.anchor_bottom = extent if from_top else 1.0
+	root.add_child(r)
+	return r
+
+
+## The plain dark background with a green band on top (used when there is no painted background).
+static func add_flat_background(root: Control, with_band: bool = true) -> void:
 	var bg: ColorRect = ColorRect.new()
 	bg.name = "Background"
 	bg.color = BG_COLOR
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(bg)
+	if not with_band:
+		return
 	var band: ColorRect = ColorRect.new()
 	band.name = "Band"
 	band.color = BG_BAND_COLOR
@@ -137,6 +197,18 @@ static func build_page(root: Control, title: String, show_wallet: bool = true) -
 	band.offset_bottom = 96
 	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(band)
+
+
+## Dark background (or painted one when `background_path` is given), safe margins, header (title + optional
+## wallet), body and footer.
+## Returns {"body": VBoxContainer, "header": HBoxContainer, "footer": HBoxContainer, "title": Label}.
+static func build_page(root: Control, title: String, show_wallet: bool = true, background_path: String = "", veil_alpha: float = VEIL_MEDIUM_ALPHA) -> Dictionary:
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	if background_path == "" or not add_background(root, background_path, veil_alpha):
+		add_flat_background(root)
+	else:
+		add_edge_gradient(root, true, PAGE_GRADIENT_TOP_EXTENT, PAGE_GRADIENT_ALPHA)
+		add_edge_gradient(root, false, PAGE_GRADIENT_BOTTOM_EXTENT, PAGE_GRADIENT_ALPHA)
 	var margin: MarginContainer = MarginContainer.new()
 	margin.name = "Margin"
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)

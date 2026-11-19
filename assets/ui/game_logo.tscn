@@ -1,0 +1,123 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Texture2D" path="res://assets/ui/logo_sun.svg" id="1_sun"]
+[ext_resource type="Texture2D" path="res://assets/ui/logo_boar.svg" id="2_boar"]
+[ext_resource type="FontVariation" path="res://assets/ui/fonts/display_font.tres" id="3_font"]
+[ext_resource type="Shader" path="res://assets/ui/logo_gradient.gdshader" id="4_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_grad"]
+shader = ExtResource("4_shader")
+shader_parameter/height = 110.0
+
+[sub_resource type="FontVariation" id="FontVariation_sub"]
+variation_embolden = 0.5
+variation_transform = Transform2D(1, 0, 0.15, 1, 0, 0)
+spacing_glyph = 5
+
+[node name="GameLogo" type="Control"]
+custom_minimum_size = Vector2(600, 300)
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+
+[node name="Center" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -150.0
+offset_right = 300.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Sun" type="TextureRect" parent="Center"]
+layout_mode = 0
+offset_left = 140.0
+offset_right = 400.0
+offset_bottom = 130.0
+mouse_filter = 2
+texture = ExtResource("1_sun")
+expand_mode = 1
+
+[node name="Boar" type="TextureRect" parent="Center"]
+layout_mode = 0
+offset_left = 336.0
+offset_top = 30.0
+offset_right = 600.0
+offset_bottom = 250.0
+mouse_filter = 2
+texture = ExtResource("2_boar")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Title1" type="Label" parent="Center"]
+layout_mode = 0
+offset_left = 10
+offset_top = 68
+offset_right = 420
+offset_bottom = 158
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.957, 0.937, 0.902, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.05, 0.02, 1)
+theme_override_constants/outline_size = 12
+theme_override_fonts/font = ExtResource("3_font")
+theme_override_font_sizes/font_size = 72
+text = "CAÇADA AO"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Title2" type="Label" parent="Center"]
+material = SubResource("ShaderMaterial_grad")
+layout_mode = 0
+offset_left = 40
+offset_top = 138
+offset_right = 440
+offset_bottom = 248
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.05, 0.02, 1)
+theme_override_constants/outline_size = 14
+theme_override_fonts/font = ExtResource("3_font")
+theme_override_font_sizes/font_size = 100
+text = "JAVALI"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LineLeft" type="ColorRect" parent="Center"]
+layout_mode = 0
+offset_left = 10
+offset_top = 272
+offset_right = 90
+offset_bottom = 274
+mouse_filter = 2
+color = Color(0.1, 0.05, 0.02, 1)
+
+[node name="Tagline" type="Label" parent="Center"]
+layout_mode = 0
+offset_left = 96
+offset_top = 260
+offset_right = 504
+offset_bottom = 286
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.957, 0.937, 0.902, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.05, 0.02, 0.9)
+theme_override_constants/outline_size = 5
+theme_override_fonts/font = SubResource("FontVariation_sub")
+theme_override_font_sizes/font_size = 15
+text = "CONTROLE DE FAUNA NO CERRADO"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LineRight" type="ColorRect" parent="Center"]
+layout_mode = 0
+offset_left = 510
+offset_top = 272
+offset_right = 590
+offset_bottom = 274
+mouse_filter = 2
+color = Color(0.1, 0.05, 0.02, 1)

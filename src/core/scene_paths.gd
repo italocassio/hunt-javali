@@ -29,6 +29,11 @@ const WATER_MATERIAL: String = "res://assets/materials/water.tres"
 const UI_THEME: String = "res://assets/ui/theme.tres"
 const SCOPE_SHADER: String = "res://assets/ui/scope_overlay.gdshader"
 const LOADING_BOAR: String = "res://assets/ui/loading_boar.tscn"   # LoadingOverlay progress widget (set_progress)
+# Menu backgrounds: painted art supplied by the game owner (the only raster art in the project).
+const MENU_BACKGROUND: String = "res://assets/ui/main_menu_cerrado.png"
+const PREPARATION_BACKGROUND: String = "res://assets/ui/preparation_cerrado.png"
+const DISPLAY_FONT: String = "res://assets/ui/fonts/display_font.tres"   # FontVariation for poster-style menu text
+const GAME_LOGO: String = "res://assets/ui/game_logo.tscn"               # main menu logo (Control, 600x300)
 
 
 static func map_scene(map_id: StringName) -> String:

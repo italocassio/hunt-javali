@@ -978,6 +978,23 @@ ids de arma e de passo já listados. Nenhum id novo.
   `map_triangulo_mineiro`; toque `btn_fire`, `btn_aim`, `btn_reload`, `btn_swap`, `btn_dog`, `btn_item`,
   `btn_crouch`, `btn_pause`, `joystick_base`, `joystick_knob`. Fallback: sem ícone (texto) / círculos
   desenhados com `draw_circle`.
+- **Fundos de menu** (0.7.3) `ScenePaths.MENU_BACKGROUND` = `res://assets/ui/main_menu_cerrado.png` (boot e
+  menu principal) e `ScenePaths.PREPARATION_BACKGROUND` = `res://assets/ui/preparation_cerrado.png` (seleção de
+  mapa e preparação). Pinturas 16:9 fornecidas pelo dono do jogo: única exceção à arte procedural. Importadas
+  como WebP com perda. A UI as mostra via `UiKit.build_page(..., background_path)` / `UiKit.add_background()`:
+  `TextureRect` em modo cobrir + véu escuro, `mouse_filter` ignorado. Fallback: o fundo chapado de sempre.
+- **Menu principal estilo pôster** (0.7.3). Do art-director, consumidos por `src/ui/main_menu/`:
+  - Fonte de destaque `res://assets/ui/fonts/display_font.tres` (`ScenePaths.DISPLAY_FONT`): `FontVariation` da
+    fonte padrão (negrito + itálico + condensado sintéticos). Nenhum arquivo de fonte externo.
+  - Variações de tema: `MenuPrimaryButton` e `MenuListButton` (Button, caixa inclinada via `StyleBoxFlat.skew`,
+    fonte de destaque, texto e ícone alinhados à esquerda), `MenuHeaderLabel` (Label, fonte de destaque âmbar),
+    `BadgeLabel` (Label pequeno em pílula âmbar, ex. "BETA"), `TopBarPanel` (PanelContainer em pílula escura),
+    `IconButton` (Button só de ícone, sem caixa no estado normal), `ProfileCardPanel` (PanelContainer).
+  - Ícones novos (`ScenePaths.icon`): `play`, `shop`, `heart`, `settings`, `exit`, `profile`, `trophy`, `target`,
+    `weight`, `coins`, `hunter_badge`.
+  - Logo `res://assets/ui/game_logo.tscn` (`ScenePaths.GAME_LOGO`): raiz `Control` "GameLogo" com
+    `custom_minimum_size` 600×300, `mouse_filter` ignorado, tudo dentro desse retângulo (texto real + SVG, sem
+    raster). Fallback: `TitleLabel` com o nome do jogo.
 - **Luneta** `res://assets/ui/scope_overlay.gdshader` (`shader_type canvas_item`), aplicado pelo A num
   `ColorRect` de tela cheia. Uniforms: `float reticle_kind` (0 = duplex fino, 1 = mil-dot), `float
   vignette_radius` (0–1, default 0.42), `vec4 reticle_color`. Fallback: o A desenha círculo preto com

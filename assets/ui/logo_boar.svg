@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="200" viewBox="20 0 240 200">
+<g stroke="#120A05" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+<path d="M156 36 L128 26 L98 4 Q92 16 88 24 Q60 16 26 18 Q58 30 80 42 Q50 48 22 62 Q50 66 78 72 Q50 86 26 102 Q56 100 84 102 Q66 118 56 136 Q80 130 96 128 Q86 148 84 168 Q102 156 116 150 Q114 172 120 192 Q134 176 146 168 L176 172 L170 100 Z" fill="#2A1A10"/>
+<path d="M156 36 Q170 40 180 54 L230 104 L234 146 Q228 158 212 162 Q200 172 186 174 Q170 180 152 184 L146 172 L130 180 L134 164 L116 166 L126 150 L108 146 L124 132 L106 122 L124 112 L110 96 L130 92 L120 76 L138 70 L132 52 Z" fill="#F1E3C6"/>
+</g>
+<path d="M44 22 Q86 30 118 42 M42 62 Q80 66 112 76 M44 102 Q80 100 108 106 M76 132 Q96 128 112 128" fill="none" stroke="#5A3A24" stroke-width="3" stroke-linecap="round"/>
+<path d="M232 136 L234 146 Q228 158 212 162 Q200 172 186 174 Q170 180 152 184 L148 174 Q176 162 196 152 Q216 144 232 136 Z" fill="#CDB68C"/>
+<path d="M110 96 Q134 98 152 108 Q130 106 124 112 Z M106 122 Q132 124 150 134 Q128 132 124 132 Z M108 146 Q130 146 148 156 Q130 154 126 150 Z M120 76 Q140 80 156 92 Q140 88 130 92 Z M134 164 Q148 164 160 172 L146 172 Z" fill="#2A1A10"/>
+<g stroke="#120A05" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+<path d="M132 56 Q118 30 108 4 Q148 18 170 46 Z" fill="#F1E3C6"/>
+<path d="M140 50 Q130 32 122 18 Q148 30 160 46 Z" fill="#2A1A10" stroke="none"/>
+<path d="M232 146 L210 150 Q196 152 180 140" fill="none" stroke-width="4.5"/>
+<path d="M204 166 C224 152 222 116 196 98 C206 120 204 144 186 164 Z" fill="#FFFFFF"/>
+<path d="M200 108 C210 122 208 144 196 160" fill="none" stroke="#D2C3A4" stroke-width="3"/>
+<ellipse cx="240" cy="125" rx="14" ry="23" transform="rotate(-14 240 125)" fill="#E2C49C"/>
+</g>
+<ellipse cx="236" cy="119" rx="3.2" ry="5.5" transform="rotate(-14 236 119)" fill="#120A05"/>
+<ellipse cx="244" cy="132" rx="3.2" ry="5.5" transform="rotate(-14 244 132)" fill="#120A05"/>
+<path d="M206 84 Q214 92 212 102 M216 92 Q224 100 222 110" fill="none" stroke="#120A05" stroke-width="3" stroke-linecap="round"/>
+<path d="M158 70 L168 58 L206 78 L202 90 L176 76 Z" fill="#120A05"/>
+<path d="M176 86 Q186 80 196 88 Q186 94 176 86 Z" fill="#FFC560" stroke="#120A05" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="188" cy="87" r="2.4" fill="#120A05"/>
+</svg>

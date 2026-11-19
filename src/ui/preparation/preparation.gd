@@ -15,7 +15,7 @@ func _ready() -> void:
 	var unlocked: int = Profile.get_unlocked_contract_count(_map_id)
 	_selected = clampi(Router.selected_contract_index, 0, maxi(0, unlocked - 1))
 
-	var page: Dictionary = UiKit.build_page(self, "Preparação: %s" % map.get("name", _map_id))
+	var page: Dictionary = UiKit.build_page(self, "Preparação: %s" % map.get("name", _map_id), true, ScenePaths.PREPARATION_BACKGROUND, UiKit.VEIL_MEDIUM_ALPHA)
 	var body: VBoxContainer = page["body"]
 	var columns: HBoxContainer = HBoxContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -27,7 +27,7 @@ func _ready() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.size_flags_stretch_ratio = 1.0
 	left.add_theme_constant_override("separation", 10)
-	columns.add_child(left)
+	columns.add_child(_wrap_in_card(left))
 	left.add_child(UiKit.label("Contratos", "HeaderLabel"))
 	var contract_scroll: Array = UiKit.scroll_list(8)
 	left.add_child(contract_scroll[0])
@@ -35,18 +35,18 @@ func _ready() -> void:
 		var b: Button = _build_contract_button(i)
 		contract_scroll[1].add_child(b)
 		_contract_buttons.append(b)
-	var detail_card: PanelContainer = UiKit.card()
+	# No nested card: the column already is one, and the contract list needs the height.
+	left.add_child(HSeparator.new())
 	_detail_box = VBoxContainer.new()
 	_detail_box.add_theme_constant_override("separation", 4)
-	detail_card.add_child(_detail_box)
-	left.add_child(detail_card)
+	left.add_child(_detail_box)
 
 	# Right: loadout
 	var right: VBoxContainer = VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_stretch_ratio = 1.0
 	right.add_theme_constant_override("separation", 10)
-	columns.add_child(right)
+	columns.add_child(_wrap_in_card(right))
 	right.add_child(UiKit.label("Equipamento da caçada", "HeaderLabel"))
 	var loadout_scroll: Array = UiKit.scroll_list(10)
 	right.add_child(loadout_scroll[0])
@@ -74,6 +74,17 @@ func _ready() -> void:
 
 	_select(_selected)
 	_start.grab_focus()
+
+
+## Translucent panel behind a column so it reads over the painted background. Equal width per column.
+func _wrap_in_card(content: Control) -> PanelContainer:
+	var panel: PanelContainer = UiKit.card()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.size_flags_stretch_ratio = 1.0
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(content)
+	return panel
 
 
 # --- Contracts ---

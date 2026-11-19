@@ -4,24 +4,28 @@ extends Control
 const TITLE: String = "Caçada ao Javali"
 const SUBTITLE: String = "Controle de fauna no cerrado"
 const PULSE_S: float = 0.9
+const TOP_GRADIENT_EXTENT: float = 0.5
+const BOTTOM_GRADIENT_EXTENT: float = 0.4
+const BOTTOM_GRADIENT_ALPHA: float = 0.8
+const FALLBACK_BAND_COLOR: Color = Color(0.64, 0.267, 0.165, 0.5)
 
 var _start: Button = null
 
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
-	var bg: ColorRect = ColorRect.new()
-	bg.color = UiKit.BG_COLOR
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
-	var band: ColorRect = ColorRect.new()
-	band.color = Color(0.64, 0.267, 0.165, 0.5)   # terra vermelha
-	band.anchor_top = 0.62
-	band.anchor_right = 1.0
-	band.anchor_bottom = 1.0
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(band)
+	if UiKit.add_background(self, ScenePaths.MENU_BACKGROUND, UiKit.VEIL_STRONG_ALPHA):
+		UiKit.add_edge_gradient(self, true, TOP_GRADIENT_EXTENT, UiKit.PAGE_GRADIENT_ALPHA)
+		UiKit.add_edge_gradient(self, false, BOTTOM_GRADIENT_EXTENT, BOTTOM_GRADIENT_ALPHA)
+	else:
+		UiKit.add_flat_background(self, false)
+		var band: ColorRect = ColorRect.new()
+		band.color = FALLBACK_BAND_COLOR   # red earth
+		band.anchor_top = 0.62
+		band.anchor_right = 1.0
+		band.anchor_bottom = 1.0
+		band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(band)
 
 	var titles: VBoxContainer = VBoxContainer.new()
 	titles.set_anchors_preset(Control.PRESET_CENTER_TOP)

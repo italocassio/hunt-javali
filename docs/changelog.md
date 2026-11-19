@@ -3,6 +3,22 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.7.3 — 19/11/2026
+
+**Menu novo, estilo pôster, com fundos pintados do cerrado.**
+
+- Menu principal refeito: logo "Caçada ao Javali" com sol e cabeça de javali, botões inclinados com ícones
+  (Jogar em destaque), barra de dinheiro/ouro com atalhos de perfil e configurações, e cartão de perfil do
+  caçador com as estatísticas reais.
+- Fundos pintados do cerrado na tela inicial, no menu, na escolha de mapa e na preparação da caçada.
+- Botões e painéis com a nova paleta: preto quente translúcido, bordas âmbar, ação principal em laranja.
+- Botão "Sair" no menu fora do navegador (desktop e Android).
+
+Detalhes técnicos: os dois fundos (`assets/ui/*_cerrado.png`) são a única arte raster do projeto, fornecida pelo
+dono do jogo, importados como WebP com perda (~690 KB no total, antes 5,4 MB). Logo, ícones e fonte de destaque
+(`FontVariation` da fonte padrão) continuam procedurais. `UiKit.add_background` / `build_page(..., background_path)`
+com fallback para o fundo chapado.
+
 ## 0.7.2 — 19/11/2026
 
 **Tela de carregamento nova: javali correndo e porcentagem.**

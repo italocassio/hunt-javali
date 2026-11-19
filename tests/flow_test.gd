@@ -356,7 +356,7 @@ func _step_friends_lobby() -> void:
 	if friends == null:
 		return
 	_t.call("ok", friends.visible and not friends.disabled, "FriendsButton visivel e habilitado sem ?mp=1")
-	_t.call("eq", friends.text, "Jogar com amigos (beta)", "texto do FriendsButton")
+	_t.call("eq", friends.text, "JOGAR COM AMIGOS", "texto do FriendsButton (o \"BETA\" e um selo filho do botao)")
 	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "pre-condicao: Net sem sala")
 	friends.pressed.emit()
 	if not await _wait_scene(ScenePaths.LOBBY):

@@ -48,6 +48,11 @@ static func prop(prop_id: StringName) -> String:
 	return "res://assets/models/props/%s.tscn" % prop_id
 
 
+## Weapon portrait for the shop and loadout (rendered from the HD model by tools/render_weapon_art.gd).
+static func weapon_art(weapon_id: StringName) -> String:
+	return "res://assets/ui/weapons/%s.png" % weapon_id
+
+
 static func environment(map_id: StringName) -> String:
 	return "res://assets/env/%s_env.tscn" % map_id
 

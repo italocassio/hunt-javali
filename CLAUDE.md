@@ -27,7 +27,8 @@ ou se morrer.
 
 ## Arte e áudio
 - 100% procedural: nenhum asset baixado, nenhum binário externo.
-  Única exceção: os fundos pintados dos menus em `assets/ui/*_cerrado.png`, fornecidos pelo dono do jogo.
+  Exceções: os fundos pintados dos menus em `assets/ui/*_cerrado.png`, fornecidos pelo dono do jogo, e os
+  retratos das armas em `assets/ui/weapons/*.png`, gerados por `tools/render_weapon_art.gd` a partir dos modelos procedurais.
   Não acrescente outras imagens raster sem ele pedir.
 - Visual low-poly estilizado, paleta do cerrado mato-grossense.
 

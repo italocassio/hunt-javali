@@ -23,7 +23,7 @@ var _hint: Label = null
 
 
 func _ready() -> void:
-	var page: Dictionary = UiKit.build_page(self, "Loja")
+	var page: Dictionary = UiKit.build_page(self, "Loja", true, ScenePaths.PREPARATION_BACKGROUND, UiKit.VEIL_STRONG_ALPHA)
 	var body: VBoxContainer = page["body"]
 
 	var tabs: HBoxContainer = HBoxContainer.new()
@@ -32,7 +32,7 @@ func _ready() -> void:
 
 	for i: int in TABS.size():
 		var tab: Dictionary = TABS[i]
-		var b: Button = UiKit.button(str(tab["title"]), "SecondaryButton")
+		var b: Button = UiKit.button(str(tab["title"]), "SecondaryButton", UiKit.MIN_TOUCH_PX, &"", true)
 		b.toggle_mode = true
 		b.custom_minimum_size.x = 220
 		b.name = "Tab_%s" % tab["key"]
@@ -58,18 +58,18 @@ func _ready() -> void:
 
 	var footer: HBoxContainer = page["footer"]
 	var in_room: bool = Net.is_in_room()
-	var back: Button = UiKit.button("Voltar à sala" if in_room else "Menu", "SecondaryButton")
+	var back: Button = UiKit.button("Voltar à sala" if in_room else "Menu", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"back" if in_room else &"home")
 	back.custom_minimum_size.x = 200
 	UiKit.mark(back, self, "BackButton")
 	footer.add_child(back)
 	back.pressed.connect(func() -> void: Router.goto(ScenePaths.LOBBY if in_room else ScenePaths.MAIN_MENU))
-	var donate: Button = UiKit.button("Ouro", "SecondaryButton")
+	var donate: Button = UiKit.button("Ouro", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"gold")
 	donate.custom_minimum_size.x = 200
 	UiKit.mark(donate, self, "DonateButton")
 	footer.add_child(donate)
 	donate.pressed.connect(func() -> void: Router.goto(ScenePaths.DONATE))
 	footer.add_child(UiKit.spacer())
-	var next: Button = UiKit.button("Próxima caçada", "PrimaryButton", 80)
+	var next: Button = UiKit.button("Próxima caçada", "PrimaryButton", 80, &"play")
 	next.custom_minimum_size.x = 340
 	UiKit.mark(next, self, "NextHuntButton")
 	footer.add_child(next)

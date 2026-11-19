@@ -7,7 +7,14 @@ const COUNT_UP_S: float = 0.9
 const KILL_ROW_HEIGHT: float = 44.0
 const VALUE_COLUMN_PX: float = 130.0
 const WEIGHT_COLUMN_PX: float = 110.0
-const TOTAL_FONT_PX: int = 44
+const TOTAL_FONT_PX: int = 52
+const ROW_ICON_PX: float = 28.0
+const NO_ICON: StringName = &"blank"   # keeps the caption aligned with the rows that have an icon
+const TOTAL_ICON_PX: float = 44.0
+const TITLE_FONT_PX: int = 52
+const TITLE_FONT_LONG_PX: int = 40
+const TITLE_LONG_CHARS: int = 26
+const VICTORY_TITLE_COLOR: Color = UiKit.GOLD_COLOR
 
 const TITLES: Dictionary = {
 	HuntResult.Outcome.VICTORY: "Vitória! Lavoura salva",
@@ -50,7 +57,8 @@ func _ready() -> void:
 		title = TITLES.get(_result.outcome, title)
 		if _result.is_horde():
 			title = HORDE_TITLES.get(_result.outcome, title)
-	var page: Dictionary = UiKit.build_page(self, title)
+	var page: Dictionary = UiKit.build_page(self, title, true, ScenePaths.MENU_BACKGROUND, UiKit.VEIL_STRONG_ALPHA)
+	_style_title(page["title"])
 	var body: VBoxContainer = page["body"]
 	if _result == null:
 		var empty: Label = UiKit.label("Nenhuma caçada para mostrar.", "HeaderLabel")
@@ -63,6 +71,17 @@ func _ready() -> void:
 	_build_footer(page["footer"])
 	if _result != null and _result.total_money > 0:
 		_count_up(_result.total_money)
+
+
+## Outcome colour (gold on victory, red on defeat) and a big size, only on this screen's title.
+func _style_title(title: Label) -> void:
+	title.add_theme_font_size_override("font_size", TITLE_FONT_LONG_PX if title.text.length() > TITLE_LONG_CHARS else TITLE_FONT_PX)
+	if _result == null:
+		return
+	if _result.is_victory():
+		title.add_theme_color_override("font_color", VICTORY_TITLE_COLOR)
+	elif _result.outcome != HuntResult.Outcome.ABANDONED:
+		title.add_theme_color_override("font_color", UiKit.DANGER_COLOR)
 
 
 # --- Body ---
@@ -210,7 +229,7 @@ func _build_payment_card() -> Control:
 	box.add_theme_constant_override("separation", 6)
 	card.add_child(box)
 	box.add_child(UiKit.label("Pagamento", "HeaderLabel"))
-	box.add_child(_value_row("Abates", UiKit.money_text(_result.money_from_kills)))
+	box.add_child(_value_row("Abates", UiKit.money_text(_result.money_from_kills), &"target"))
 	var contract: Dictionary = _contract()
 	var bonus_max: int = int(contract.get("bonus_money", 0))
 	var horde: bool = _is_horde()
@@ -219,13 +238,18 @@ func _build_payment_card() -> Control:
 	if horde:
 		bonus_max = int(Data.get_horde().get("victory_bonus_money", 0))
 	if _result.is_victory():
-		box.add_child(_value_row(bonus_caption, UiKit.money_text(_result.contract_bonus)))
+		box.add_child(_value_row(bonus_caption, UiKit.money_text(_result.contract_bonus), &"barn" if horde else &"crop"))
 		box.add_child(UiKit.muted("%s em %d%% de %s" % [stock_caption, int(roundf(_result.crop_health_pct)), UiKit.money_text(bonus_max)]))
 	else:
-		box.add_child(_value_row(bonus_caption, UiKit.money_text(0)))
+		box.add_child(_value_row(bonus_caption, UiKit.money_text(0), &"barn" if horde else &"crop"))
 		box.add_child(UiKit.muted("Só na vitória (até %s)" % UiKit.money_text(bonus_max)))
 	box.add_child(HSeparator.new())
 	var total_row: HBoxContainer = HBoxContainer.new()
+	total_row.add_theme_constant_override("separation", 12)
+	var total_icon: TextureRect = UiKit.icon_rect(&"coins", TOTAL_ICON_PX)
+	if total_icon != null:
+		total_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		total_row.add_child(total_icon)
 	var total_caption: Label = UiKit.label("Total recebido", "HeaderLabel")
 	total_caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	total_caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -246,18 +270,18 @@ func _build_stats_card() -> Control:
 	box.add_theme_constant_override("separation", 4)
 	card.add_child(box)
 	if _is_horde():
-		box.add_child(_value_row("Ondas vencidas", "%d de %d" % [_result.horde_waves_cleared, _result.horde_wave_count]))
-	box.add_child(_value_row("Celeiro preservado" if _is_horde() else "Lavoura preservada", "%d%%" % int(roundf(clampf(_result.crop_health_pct, 0.0, 100.0)))))
+		box.add_child(_value_row("Ondas vencidas", "%d de %d" % [_result.horde_waves_cleared, _result.horde_wave_count], &"trophy"))
+	box.add_child(_value_row("Celeiro preservado" if _is_horde() else "Lavoura preservada", "%d%%" % int(roundf(clampf(_result.crop_health_pct, 0.0, 100.0))), &"barn" if _is_horde() else &"crop"))
 	if _result.shots_fired > 0:
 		var pct: int = int(roundf(clampf(100.0 * float(_result.shots_hit) / float(_result.shots_fired), 0.0, 100.0)))
-		box.add_child(_value_row("Tiros certeiros", "%d%% (%d tiros)" % [pct, _result.shots_fired]))
-	box.add_child(_value_row("Tempo de caçada", _duration_text(_result.duration_s)))
+		box.add_child(_value_row("Tiros certeiros", "%d%% (%d tiros)" % [pct, _result.shots_fired], &"target"))
+	box.add_child(_value_row("Tempo de caçada", _duration_text(_result.duration_s), NO_ICON))
 	var heaviest: KillInfo = null
 	for kill: KillInfo in _result.kills:
 		if heaviest == null or kill.weight_kg > heaviest.weight_kg:
 			heaviest = kill
 	if heaviest != null:
-		box.add_child(_value_row("Maior abate", "%s, %s kg" % [UiKit.boar_name(heaviest.type_id), UiKit.decimal(heaviest.weight_kg, 1)]))
+		box.add_child(_value_row("Maior abate", "%s, %s kg" % [UiKit.boar_name(heaviest.type_id), UiKit.decimal(heaviest.weight_kg, 1)], &"weight"))
 	var progress: String = _progress_text()
 	if progress != "":
 		box.add_child(HSeparator.new())
@@ -268,9 +292,15 @@ func _build_stats_card() -> Control:
 	return card
 
 
-func _value_row(caption: String, value: String) -> HBoxContainer:
+func _value_row(caption: String, value: String, icon_id: StringName = &"") -> HBoxContainer:
 	var row: HBoxContainer = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
+	if icon_id != &"":
+		var icon: Control = Control.new() if icon_id == NO_ICON else UiKit.icon_rect(icon_id, ROW_ICON_PX)
+		if icon != null:
+			icon.custom_minimum_size = Vector2(ROW_ICON_PX, ROW_ICON_PX)
+			icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(icon)
 	var left: Label = UiKit.label(caption)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(left)
@@ -284,19 +314,19 @@ func _value_row(caption: String, value: String) -> HBoxContainer:
 
 func _build_footer(footer: HBoxContainer) -> void:
 	var victory: bool = _result != null and _result.is_victory()
-	var menu: Button = UiKit.button("Menu", "SecondaryButton")
+	var menu: Button = UiKit.button("Menu", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"home")
 	menu.custom_minimum_size.x = 200
 	UiKit.mark(menu, self, "MenuButton")
 	footer.add_child(menu)
 	menu.pressed.connect(_on_menu)
-	var retry: Button = UiKit.button("Caçar de novo" if victory else "Tentar de novo", "SecondaryButton")
+	var retry: Button = UiKit.button("Caçar de novo" if victory else "Tentar de novo", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"retry")
 	retry.custom_minimum_size.x = 240
 	UiKit.mark(retry, self, "RetryButton")
 	footer.add_child(retry)
 	retry.pressed.connect(_on_retry)
 	retry.visible = not _in_room() and not _is_horde()
 	footer.add_child(UiKit.spacer())
-	var cont: Button = UiKit.button("Voltar à sala" if _in_room() else "Continuar para a loja", "PrimaryButton", 80)
+	var cont: Button = UiKit.button("Voltar à sala" if _in_room() else "Continuar para a loja", "PrimaryButton", 80, &"back" if _in_room() else &"next")
 	cont.custom_minimum_size.x = 360
 	UiKit.mark(cont, self, "ContinueButton")
 	footer.add_child(cont)

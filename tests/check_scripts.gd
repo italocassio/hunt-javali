@@ -13,6 +13,7 @@ const SCAN_ROOTS: Array[String] = ["res://src", "res://assets", "res://tests"]
 const BINARY_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp", "bmp", "tga", "exr", "hdr", "wav", "ogg",
 	"mp3", "glb", "gltf", "fbx", "obj", "blend", "dae", "ttf", "otf", "woff", "woff2", "mp4", "webm"]
 const RECORDED_AUDIO_DIRS: Array[String] = ["res://assets/audio/sfx/", "res://assets/audio/music/"]
+const WEAPON_ART_DIR: String = "res://assets/ui/weapons"   # rendered weapon portraits (tools/render_weapon_art.gd)
 const PHYSICS_FORBIDDEN_IN_ASSETS: Array[String] = ["PhysicsBody3D", "Area3D", "CollisionShape3D",
 	"CollisionPolygon3D", "Skeleton3D", "AnimationPlayer", "OmniLight3D", "SpotLight3D"]
 
@@ -576,6 +577,9 @@ func _check_no_binaries() -> void:
 			continue
 		# Explicit exception: the painted menu backgrounds supplied by the game owner (docs/arquitetura.md 7.9).
 		if path in [ScenePaths.MENU_BACKGROUND, ScenePaths.PREPARATION_BACKGROUND]:
+			continue
+		# Explicit exception: weapon portraits rendered from the procedural HD models (docs/arquitetura.md 7.9).
+		if path.get_extension() == "png" and path.get_base_dir() == WEAPON_ART_DIR:
 			continue
 		_t.call("fail", "%s: arquivo binario/baixado proibido (tudo e procedural; SVG escrito a mao e permitido)" % path)
 	# physics / skeleton / lights are forbidden inside asset scenes: checked here textually,

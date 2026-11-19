@@ -983,6 +983,14 @@ ids de arma e de passo já listados. Nenhum id novo.
   mapa e preparação). Pinturas 16:9 fornecidas pelo dono do jogo: única exceção à arte procedural. Importadas
   como WebP com perda. A UI as mostra via `UiKit.build_page(..., background_path)` / `UiKit.add_background()`:
   `TextureRect` em modo cobrir + véu escuro, `mouse_filter` ignorado. Fallback: o fundo chapado de sempre.
+- **Retratos das armas** (0.7.4) `ScenePaths.weapon_art(weapon_id)` = `res://assets/ui/weapons/<weapon_id>.png`,
+  um por arma de `data/weapons.json`. Renderizados dos modelos HD procedurais (`assets/models/weapons/showcase/`)
+  pela ferramenta reproduzível `tools/render_weapon_art.gd` (dono: art-director); o PNG é saída dela, nunca
+  editado à mão. Pedido do dono do jogo: segunda exceção à regra de nenhum raster. Formato: 1024×512 RGBA, fundo
+  transparente, perfil direito (lado do ferrolho), coronha à esquerda e cano à direita, arma centrada ocupando ~92% da largura.
+  Importação: WebP com perda (`lossy_quality` 0.82) com mipmaps; quem exibe usa
+  `TEXTURE_FILTER_LINEAR_WITH_MIPMAPS` (o cano fino serrilha sem mipmap). Consumidos pelo cartão da loja
+  (`ItemCard`) e pela escolha de armas (`LoadoutPanel`). Fallback: o ícone SVG `ScenePaths.icon(weapon_id)`.
 - **Menu principal estilo pôster** (0.7.3). Do art-director, consumidos por `src/ui/main_menu/`:
   - Fonte de destaque `res://assets/ui/fonts/display_font.tres` (`ScenePaths.DISPLAY_FONT`): `FontVariation` da
     fonte padrão (negrito + itálico + condensado sintéticos). Nenhum arquivo de fonte externo.

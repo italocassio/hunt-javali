@@ -13,7 +13,7 @@ func _ready() -> void:
 	for map_id: StringName in Data.get_map_ids():
 		list.add_child(_build_map_button(map_id))
 
-	var back: Button = UiKit.button("Voltar", "SecondaryButton")
+	var back: Button = UiKit.button("Voltar", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"back")
 	back.custom_minimum_size.x = 220
 	UiKit.mark(back, self, "BackButton")
 	(page["footer"] as HBoxContainer).add_child(back)
@@ -24,7 +24,7 @@ func _build_map_button(map_id: StringName) -> Button:
 	var map: Dictionary = Data.get_map(map_id)
 	var available: bool = bool(map.get("available", false))
 	var count: int = Data.get_contract_count(map_id)
-	var b: Button = UiKit.button("", "SecondaryButton", CARD_HEIGHT)
+	var b: Button = UiKit.button("", "SecondaryButton", CARD_HEIGHT, &"", false)
 	b.name = "Map_%s" % map_id
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.disabled = not available

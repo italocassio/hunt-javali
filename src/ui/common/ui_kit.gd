@@ -22,6 +22,15 @@ const PAGE_GRADIENT_BOTTOM_EXTENT: float = 0.2
 const GRADIENT_TEX_SIZE: int = 64
 const PAGE_MARGIN_H: int = 40
 const PAGE_MARGIN_V: int = 24
+const ACCENT_COLOR: Color = Color(0.95, 0.66, 0.16)
+const RULE_HEIGHT: float = 3.0
+const RULE_START_ALPHA: float = 0.9
+const RULE_TEX_WIDTH: int = 256
+const HEADER_SEPARATION: int = 20
+const TITLE_RULE_SEPARATION: int = 4
+const WALLET_ICON_PX: float = 28.0
+const WALLET_SEPARATION: int = 12
+const UPPERCASE_BUTTONS: Array[String] = ["PrimaryButton", "SecondaryButton", "DangerButton"]
 
 const _TouchScroll: GDScript = preload("res://src/ui/common/touch_scroll_container.gd")
 
@@ -42,6 +51,8 @@ static func label(text: String, variation: String = "", wrap: bool = false) -> L
 	l.text = text
 	if variation != "":
 		l.theme_type_variation = variation
+	if variation == "TitleLabel" or variation == "HeaderLabel":
+		l.uppercase = true
 	if wrap:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -55,9 +66,15 @@ static func muted(text: String) -> Label:
 	return l
 
 
-static func button(text: String, variation: String = "SecondaryButton", min_height: float = MIN_TOUCH_PX) -> Button:
+## Action buttons (Primary/Secondary/Danger) show their text in capitals; pass `uppercase = false` for content
+## buttons (tabs, packages). Text changed later should go through action_text().
+static func button(text: String, variation: String = "SecondaryButton", min_height: float = MIN_TOUCH_PX, icon_id: StringName = &"", uppercase: bool = true) -> Button:
 	var b: Button = Button.new()
-	b.text = text
+	b.text = text.to_upper() if uppercase and UPPERCASE_BUTTONS.has(variation) else text
+	if icon_id != &"":
+		b.icon = icon(icon_id)
+		b.expand_icon = false
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.theme_type_variation = variation
 	b.custom_minimum_size = Vector2(0, maxf(min_height, MIN_TOUCH_PX))
 	b.focus_mode = Control.FOCUS_ALL
@@ -65,6 +82,11 @@ static func button(text: String, variation: String = "SecondaryButton", min_heig
 		b.add_theme_font_size_override("font_size", _FALLBACK_SIZES.get(variation, 22))
 	b.pressed.connect(_play_click)
 	return b
+
+
+## Text for an action button that changes after creation (same capitals as button()).
+static func action_text(text: String) -> String:
+	return text.to_upper()
 
 
 static func card() -> PanelContainer:
@@ -115,6 +137,29 @@ static func icon_rect(icon_id: StringName, size_px: float) -> TextureRect:
 	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return r
+
+
+## Side-profile weapon portrait (2:1) or null when the art is not there yet.
+static func weapon_art_rect(weapon_id: StringName, width_px: float) -> TextureRect:
+	var tex: Texture2D = weapon_art(weapon_id)
+	if tex == null:
+		return null
+	var r: TextureRect = TextureRect.new()
+	r.texture = tex
+	r.custom_minimum_size = Vector2(width_px, width_px * 0.5)
+	r.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+
+## Weapon portrait texture or null when missing.
+static func weapon_art(weapon_id: StringName) -> Texture2D:
+	var path: String = ScenePaths.weapon_art(weapon_id)
+	if not AssetLoader.exists(path):
+		return null
+	return AssetLoader.load_resource(path) as Texture2D
 
 
 ## Icon texture or null when the art is not there yet.
@@ -221,11 +266,18 @@ static func build_page(root: Control, title: String, show_wallet: bool = true, b
 	column.add_theme_constant_override("separation", 14)
 	margin.add_child(column)
 	var header: HBoxContainer = HBoxContainer.new()
-	header.add_theme_constant_override("separation", 20)
+	header.add_theme_constant_override("separation", HEADER_SEPARATION)
 	var title_label: Label = label(title, "TitleLabel")
-	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header.add_child(title_label)
+	title_label.clip_text = true   # a long title shrinks with an ellipsis instead of pushing the wallet off screen
+	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var title_box: VBoxContainer = VBoxContainer.new()
+	title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	title_box.add_theme_constant_override("separation", TITLE_RULE_SEPARATION)
+	title_box.add_child(title_label)
+	title_box.add_child(accent_rule())
+	header.add_child(title_box)
 	if show_wallet:
 		header.add_child(wallet_bar(root))
 	column.add_child(header)
@@ -239,31 +291,61 @@ static func build_page(root: Control, title: String, show_wallet: bool = true, b
 	return {"body": body, "header": header, "footer": footer, "title": title_label}
 
 
-## Money and gold readout. Labels are named %MoneyLabel and %GoldLabel in root's scope.
-static func wallet_bar(root: Control) -> Control:
-	var box: HBoxContainer = HBoxContainer.new()
-	box.add_theme_constant_override("separation", 24)
-	box.alignment = BoxContainer.ALIGNMENT_END
+## Thin amber line fading out to the right (poster-style title underline). Never blocks clicks.
+static func accent_rule() -> TextureRect:
+	var grad: Gradient = Gradient.new()
+	grad.set_color(0, Color(ACCENT_COLOR.r, ACCENT_COLOR.g, ACCENT_COLOR.b, RULE_START_ALPHA))
+	grad.set_color(1, Color(ACCENT_COLOR.r, ACCENT_COLOR.g, ACCENT_COLOR.b, 0.0))
+	var tex: GradientTexture2D = GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill_from = Vector2(0.0, 0.0)
+	tex.fill_to = Vector2(1.0, 0.0)
+	tex.width = RULE_TEX_WIDTH
+	tex.height = 1
+	var r: TextureRect = TextureRect.new()
+	r.name = "AccentRule"
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.custom_minimum_size = Vector2(0.0, RULE_HEIGHT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+
+## Money and gold readout as a "TopBarPanel" pill with icons. Labels are named %MoneyLabel and %GoldLabel in
+## root's scope. The HBoxContainer inside is in meta "row" so callers (main menu) can append buttons.
+static func wallet_bar(root: Control) -> PanelContainer:
+	var bar: PanelContainer = PanelContainer.new()
+	bar.theme_type_variation = "TopBarPanel"
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", WALLET_SEPARATION)
+	bar.add_child(row)
 	var money: Label = label("", "MoneyLabel")
 	var gold: Label = label("", "GoldLabel")
-	for l: Label in [money, gold]:
+	for pair: Array in [[&"money", money], [&"gold", gold]]:
+		var l: Label = pair[1]
+		var tex: TextureRect = icon_rect(pair[0], WALLET_ICON_PX)
+		if tex != null:
+			tex.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(tex)
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(l)
 	var refresh: Callable = func(m: int, g: int) -> void:
 		money.text = money_text(m)
 		gold.text = gold_text(g)
 	refresh.call(Profile.get_money(), Profile.get_gold())
 	GameEvents.wallet_changed.connect(refresh)
-	box.tree_exiting.connect(func() -> void:
+	bar.tree_exiting.connect(func() -> void:
 		if GameEvents.wallet_changed.is_connected(refresh):
 			GameEvents.wallet_changed.disconnect(refresh))
-	box.add_child(money)
-	box.add_child(gold)
-	box.set_meta("money_label", money)
-	box.set_meta("gold_label", gold)
-	# Named after the box is in the tree (owner needs an ancestor): see mark_later().
-	mark_later(money, root, "MoneyLabel")
-	mark_later(gold, root, "GoldLabel")
-	return box
+	bar.set_meta("row", row)
+	bar.set_meta("money_label", money)
+	bar.set_meta("gold_label", gold)
+	# Named after the bar is in the tree (owner needs an ancestor): see mark().
+	mark(money, root, "MoneyLabel")
+	mark(gold, root, "GoldLabel")
+	return bar
 
 
 # --- Scene-unique names ---

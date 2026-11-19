@@ -7,9 +7,12 @@ extends VBoxContainer
 
 signal changed()
 
+const WEAPON_ART_WIDTH: float = 180.0   # 2:1 portrait, 180x90
+
 var _root: Control = null
 var _slot_buttons: Array[Button] = []
 var _slot_stats: Array[Label] = []
+var _slot_art: Array[TextureRect] = []
 var _dog_option: OptionButton = null
 var _dog_hint: Label = null
 var _item_checks: Dictionary = {}   # StringName -> CheckButton
@@ -36,14 +39,31 @@ func _build_weapons() -> void:
 	weapons_card.add_child(wbox)
 	wbox.add_child(UiKit.label("Armas (toque para trocar)", "HeaderLabel"))
 	for slot: int in 2:
+		var slot_row: HBoxContainer = HBoxContainer.new()
+		slot_row.add_theme_constant_override("separation", 10)
+		wbox.add_child(slot_row)
+		var art: TextureRect = TextureRect.new()
+		art.custom_minimum_size = Vector2(WEAPON_ART_WIDTH, WEAPON_ART_WIDTH * 0.5)
+		art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		art.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		art.visible = false
+		slot_row.add_child(art)
+		_slot_art.append(art)
+		var slot_col: VBoxContainer = VBoxContainer.new()
+		slot_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slot_col.add_theme_constant_override("separation", 6)
+		slot_row.add_child(slot_col)
 		var b: Button = UiKit.button("", "SecondaryButton", 72)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		UiKit.mark(b, _root, "WeaponSlot%d" % slot)
-		wbox.add_child(b)
+		slot_col.add_child(b)
 		b.pressed.connect(_cycle_slot.bind(slot))
 		_slot_buttons.append(b)
 		var stats: Label = UiKit.muted("")
-		wbox.add_child(stats)
+		slot_col.add_child(stats)
 		_slot_stats.append(stats)
 	_weapons_locked_label = UiKit.muted("")
 	_weapons_locked_label.visible = false
@@ -107,6 +127,8 @@ func _build_items() -> void:
 		var check: CheckButton = CheckButton.new()
 		check.custom_minimum_size = Vector2(0, UiKit.MIN_TOUCH_PX)
 		check.button_pressed = Profile.get_loadout_items().has(id)
+		check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # long names must wrap, not widen the column
+		check.clip_text = true
 		if not UiKit.has_global_theme():
 			check.add_theme_font_size_override("font_size", 22)
 		UiKit.mark(check, _root, "Item_%s" % id)
@@ -130,6 +152,9 @@ func refresh() -> void:
 		var id: StringName = loadout[slot]
 		_slot_buttons[slot].text = "Arma %d:  %s" % [slot + 1, UiKit.item_name(id) if id != &"" else "(vazio)"]
 		_slot_stats[slot].text = ItemCard.stats_text(id) if id != &"" else ("Slot opcional: leve uma segunda arma." if slot == 1 else "")
+		var tex: Texture2D = UiKit.weapon_art(id) if id != &"" else null
+		_slot_art[slot].texture = tex
+		_slot_art[slot].visible = tex != null
 	var owned_count: int = 0
 	for id: StringName in Data.get_weapon_ids():
 		if Profile.owns(id):

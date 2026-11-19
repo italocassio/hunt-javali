@@ -64,7 +64,7 @@ func _ready() -> void:
 	_max_players = int(net_cfg.get("max_players", _DEFAULT_MAX_PLAYERS))
 	var name_chars: int = int(net_cfg.get("name_max_chars", _DEFAULT_NAME_CHARS))
 
-	var page: Dictionary = UiKit.build_page(self, "Jogar com amigos (beta)")
+	var page: Dictionary = UiKit.build_page(self, "Jogar com amigos (beta)", true, ScenePaths.PREPARATION_BACKGROUND, UiKit.VEIL_STRONG_ALPHA)
 	var body: VBoxContainer = page["body"]
 	var footer: HBoxContainer = page["footer"]
 
@@ -82,7 +82,7 @@ func _ready() -> void:
 
 	_entry_footer = HBoxContainer.new()
 	footer.add_child(_entry_footer)
-	var back: Button = UiKit.button("Voltar", "SecondaryButton")
+	var back: Button = UiKit.button("Voltar", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"back")
 	back.custom_minimum_size.x = 200
 	UiKit.mark(back, self, "BackButton")
 	_entry_footer.add_child(back)
@@ -202,7 +202,7 @@ func _build_room() -> HBoxContainer:
 	UiKit.mark(_room_code, self, "RoomCodeLabel")
 	code_row.add_child(_room_code)
 	code_row.add_child(UiKit.spacer())
-	_copy = UiKit.button("Copiar link", "SecondaryButton")
+	_copy = UiKit.button("Copiar link", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"copy")
 	_copy.custom_minimum_size.x = 240
 	UiKit.mark(_copy, self, "CopyLinkButton")
 	code_row.add_child(_copy)
@@ -304,7 +304,7 @@ func _build_room() -> HBoxContainer:
 
 
 func _build_mode_button(text: String, mode: StringName, node_name: String) -> Button:
-	var b: Button = UiKit.button(text, "SecondaryButton", _MODE_BUTTON_MIN_PX)
+	var b: Button = UiKit.button(text, "SecondaryButton", _MODE_BUTTON_MIN_PX, &"", false)
 	b.toggle_mode = true
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	UiKit.mark(b, self, node_name)
@@ -323,18 +323,18 @@ func _build_room_footer(footer: HBoxContainer) -> void:
 	UiKit.mark(leave, self, "LeaveButton")
 	_room_footer.add_child(leave)
 	leave.pressed.connect(_on_leave)
-	var shop: Button = UiKit.button("Loja", "SecondaryButton")
+	var shop: Button = UiKit.button("Loja", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"shop")
 	shop.custom_minimum_size.x = 200
 	UiKit.mark(shop, self, "ShopButton")
 	_room_footer.add_child(shop)
 	shop.pressed.connect(func() -> void: Router.goto(ScenePaths.SHOP))
 	_room_footer.add_child(UiKit.spacer())
-	_ready_button = UiKit.button("Pronto", "PrimaryButton", 72)
+	_ready_button = UiKit.button("Pronto", "PrimaryButton", 72, &"next")
 	_ready_button.custom_minimum_size.x = 340
 	UiKit.mark(_ready_button, self, "ReadyButton")
 	_room_footer.add_child(_ready_button)
 	_ready_button.pressed.connect(_on_ready)
-	_start = UiKit.button("Iniciar caçada", "PrimaryButton", 72)
+	_start = UiKit.button("Iniciar caçada", "PrimaryButton", 72, &"play")
 	_start.custom_minimum_size.x = 340
 	UiKit.mark(_start, self, "StartButton")
 	_room_footer.add_child(_start)
@@ -410,13 +410,13 @@ func _refresh_roster() -> void:
 
 	var is_host: bool = Net.is_host()
 	_start.visible = is_host
-	_start.text = "Iniciar horda" if horde else "Iniciar caçada"
+	_start.text = UiKit.action_text("Iniciar horda" if horde else "Iniciar caçada")
 	_loadout_panel.set_weapons_locked(HORDE_WEAPONS_TEXT if horde else "")
 	_start.disabled = waiting > 0
 	_ready_button.visible = not is_host
 	var me: NetPeerInfo = Net.get_peer(local_slot)
 	var me_ready: bool = me != null and me.ready
-	_ready_button.text = "Cancelar pronto" if me_ready else "Pronto"
+	_ready_button.text = UiKit.action_text("Cancelar pronto" if me_ready else "Pronto")
 	if is_host:
 		if roster.size() <= 1:
 			_hint.text = "Compartilhe o link ou o código com seus amigos."

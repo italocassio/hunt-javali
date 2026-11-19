@@ -4,6 +4,9 @@ extends PanelContainer
 ## The action button is named Buy_<id>. State text is refreshed with refresh().
 
 const ICON_SIZE: float = 96.0
+const WEAPON_ART_WIDTH: float = 240.0   # 2:1 portrait, 240x120
+const PRICE_FONT_PX: int = 32
+const BUY_ICON: StringName = &"cart_add"
 
 var item_id: StringName = &""
 var buy_button: Button = null
@@ -29,7 +32,11 @@ func setup(id: StringName, on_buy: Callable) -> void:
 	row.add_theme_constant_override("separation", 18)
 	add_child(row)
 
-	var icon: TextureRect = UiKit.icon_rect(id, ICON_SIZE)
+	var icon: TextureRect = null
+	if Data.get_item_category(id) == &"weapon":
+		icon = UiKit.weapon_art_rect(id, WEAPON_ART_WIDTH)
+	if icon == null:
+		icon = UiKit.icon_rect(id, ICON_SIZE)
 	if icon != null:
 		row.add_child(icon)
 	else:
@@ -63,8 +70,9 @@ func setup(id: StringName, on_buy: Callable) -> void:
 	row.add_child(side)
 	_price_label = UiKit.label("", "GoldLabel" if def.get("currency", "money") == "gold" else "MoneyLabel")
 	_price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_price_label.add_theme_font_size_override("font_size", PRICE_FONT_PX)
 	side.add_child(_price_label)
-	buy_button = UiKit.button("Comprar", "PrimaryButton", 72)
+	buy_button = UiKit.button("Comprar", "PrimaryButton", 72, BUY_ICON)
 	buy_button.name = "Buy_%s" % id
 	buy_button.pressed.connect(on_buy.bind(id))
 	side.add_child(buy_button)
@@ -86,26 +94,26 @@ func refresh() -> void:
 	_status_label.text = ""
 	match state:
 		&"ok":
-			buy_button.text = "Comprar"
+			buy_button.text = UiKit.action_text("Comprar")
 			buy_button.disabled = false
 			if consumable:
 				_status_label.text = "Você tem: %d" % count
 		&"already_owned":
-			buy_button.text = "Você possui"
+			buy_button.text = UiKit.action_text("Você possui")
 			buy_button.disabled = true
 		&"max_reached":
-			buy_button.text = "Estoque cheio"
+			buy_button.text = UiKit.action_text("Estoque cheio")
 			buy_button.disabled = true
 			_status_label.text = "Você tem: %d (máximo)" % count
 		&"insufficient_funds":
-			buy_button.text = "Saldo insuficiente"
+			buy_button.text = UiKit.action_text("Saldo insuficiente")
 			buy_button.disabled = true
 			var missing: int = price - (Profile.get_gold() if currency == Ids.GOLD else Profile.get_money())
 			_status_label.text = "Faltam %s" % UiKit.price_text(missing, currency)
 			if consumable and count > 0:
 				_status_label.text += "  |  Tem: %d" % count
 		_:
-			buy_button.text = "Indisponível"
+			buy_button.text = UiKit.action_text("Indisponível")
 			buy_button.disabled = true
 
 

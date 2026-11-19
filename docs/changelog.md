@@ -3,6 +3,20 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.7.4 — 19/11/2026
+
+**Todos os menus no estilo cinematográfico, e retratos das armas.**
+
+- Loja, escolha de mapa, preparação, sala de amigos, resultado, doação e configurações com fundo pintado do
+  cerrado, título grande com filete âmbar, carteira em pílula e botões inclinados com ícones.
+- Resultado com título dourado na vitória e vermelho na derrota, total em destaque e estatísticas com ícones.
+- Retratos das cinco armas na loja e na escolha de armas da preparação.
+- Configurações: as linhas de liga/desliga usam o mesmo cartão das outras.
+
+Detalhes técnicos: retratos em `assets/ui/weapons/<id>.png` (1024×512, fundo transparente), renderizados dos
+modelos HD procedurais por `tools/render_weapon_art.gd`, importados como WebP com perda e mipmaps (~300 KB no
+total); fallback para o ícone SVG. Tema global refeito (botões, cartões, controles base) e ícones novos de rodapé.
+
 ## 0.7.3 — 19/11/2026
 
 **Menu novo, estilo pôster, com fundos pintados do cerrado.**

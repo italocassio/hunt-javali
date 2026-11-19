@@ -55,18 +55,18 @@ func _ready() -> void:
 	loadout_panel.setup(self)
 
 	var footer: HBoxContainer = page["footer"]
-	var back: Button = UiKit.button("Voltar", "SecondaryButton")
+	var back: Button = UiKit.button("Voltar", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"back")
 	back.custom_minimum_size.x = 200
 	UiKit.mark(back, self, "BackButton")
 	footer.add_child(back)
 	back.pressed.connect(func() -> void: Router.goto(ScenePaths.MAP_SELECT))
-	var shop: Button = UiKit.button("Loja", "SecondaryButton")
+	var shop: Button = UiKit.button("Loja", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"shop")
 	shop.custom_minimum_size.x = 200
 	UiKit.mark(shop, self, "ShopButton")
 	footer.add_child(shop)
 	shop.pressed.connect(func() -> void: Router.goto(ScenePaths.SHOP))
 	footer.add_child(UiKit.spacer())
-	_start = UiKit.button("Iniciar caçada", "PrimaryButton", 80)
+	_start = UiKit.button("Iniciar caçada", "PrimaryButton", 80, &"play")
 	_start.custom_minimum_size.x = 340
 	UiKit.mark(_start, self, "StartHuntButton")
 	footer.add_child(_start)
@@ -92,7 +92,7 @@ func _wrap_in_card(content: Control) -> PanelContainer:
 func _build_contract_button(index: int) -> Button:
 	var c: Dictionary = Data.get_contract(_map_id, index)
 	var unlocked: bool = Profile.is_contract_unlocked(_map_id, index)
-	var b: Button = UiKit.button("", "SecondaryButton", 76)
+	var b: Button = UiKit.button("", "SecondaryButton", 76, &"", false)
 	b.name = "Contract_%d" % index
 	b.toggle_mode = true
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT

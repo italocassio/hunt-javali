@@ -24,7 +24,7 @@ var _redeem_status: Label = null
 func _ready() -> void:
 	_service = DonationService.new()
 	_service.redeem_finished.connect(_on_redeem_finished)
-	var page: Dictionary = UiKit.build_page(self, "Apoie o jogo")
+	var page: Dictionary = UiKit.build_page(self, "Apoie o jogo", true, ScenePaths.MENU_BACKGROUND, UiKit.VEIL_STRONG_ALPHA)
 	var body: VBoxContainer = page["body"]
 
 	var scroller: Array = UiKit.scroll_list(12)
@@ -41,7 +41,7 @@ func _ready() -> void:
 	content.add_child(grid)
 	for pkg: Dictionary in _service.get_packages():
 		var id: StringName = StringName(str(pkg.get("id", "")))
-		var b: Button = UiKit.button("%s: R$ %s  =  %s" % [pkg.get("name", id), UiKit.decimal(float(pkg.get("price_brl", 0.0)), 2), UiKit.gold_text(int(pkg.get("gold", 0)))], "SecondaryButton", 72)
+		var b: Button = UiKit.button("%s: R$ %s  =  %s" % [pkg.get("name", id), UiKit.decimal(float(pkg.get("price_brl", 0.0)), 2), UiKit.gold_text(int(pkg.get("gold", 0)))], "SecondaryButton", 72, &"", false)
 		b.toggle_mode = true
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.name = "Package_%s" % id
@@ -66,7 +66,7 @@ func _ready() -> void:
 	_pix_text.custom_minimum_size = Vector2(0, UiKit.MIN_TOUCH_PX)
 	UiKit.mark(_pix_text, self, "PixCodeText")
 	pix_row.add_child(_pix_text)
-	_copy = UiKit.button("Copiar", "SecondaryButton")
+	_copy = UiKit.button("Copiar", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"copy")
 	_copy.custom_minimum_size.x = 200
 	_copy.disabled = true
 	UiKit.mark(_copy, self, "CopyButton")
@@ -99,7 +99,7 @@ func _ready() -> void:
 		content.add_child(UiKit.muted(MSG_NOT_SECURE))
 
 	var footer: HBoxContainer = page["footer"]
-	var back: Button = UiKit.button("Voltar", "SecondaryButton")
+	var back: Button = UiKit.button("Voltar", "SecondaryButton", UiKit.MIN_TOUCH_PX, &"back")
 	back.custom_minimum_size.x = 200
 	UiKit.mark(back, self, "BackButton")
 	footer.add_child(back)
@@ -121,17 +121,17 @@ func _select(id: StringName) -> void:
 	else:
 		_pix_text.text = ""
 	_copy.disabled = _pix_text.text == ""
-	_copy.text = "Copiar"
+	_copy.text = UiKit.action_text("Copiar")
 
 
 func _on_copy() -> void:
 	if _pix_text.text == "":
 		return
 	DisplayServer.clipboard_set(_pix_text.text)
-	_copy.text = "Copiado!"
+	_copy.text = UiKit.action_text("Copiado!")
 	get_tree().create_timer(COPIED_FEEDBACK_S).timeout.connect(func() -> void:
 		if is_instance_valid(_copy):
-			_copy.text = "Copiar")
+			_copy.text = UiKit.action_text("Copiar"))
 
 
 func _on_redeem() -> void:

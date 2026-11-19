@@ -7,6 +7,7 @@ signal closed
 const SLIDER_STEP: float = 0.05
 const SLIDER_MIN_HEIGHT: float = 48.0
 const VALUE_LABEL_PX: float = 90.0
+const CAPTION_PX: float = 300.0
 const BACKDROP_COLOR: Color = Color(0.07, 0.06, 0.05, 0.94)
 
 const SLIDERS: Array[Dictionary] = [
@@ -74,7 +75,7 @@ func _slider_row(def: Dictionary) -> Control:
 	row.add_theme_constant_override("separation", 16)
 	card.add_child(row)
 	var caption: Label = UiKit.label(str(def["title"]))
-	caption.custom_minimum_size.x = 300
+	caption.custom_minimum_size.x = CAPTION_PX
 	row.add_child(caption)
 	var slider: HSlider = HSlider.new()
 	slider.min_value = float(def["min"])
@@ -102,10 +103,12 @@ func _option_row(key: String, title: String, options: Array[Dictionary], note: S
 	row.add_theme_constant_override("separation", 16)
 	card.add_child(row)
 	var caption: VBoxContainer = VBoxContainer.new()
-	caption.custom_minimum_size.x = 300
+	caption.custom_minimum_size.x = CAPTION_PX
 	caption.add_child(UiKit.label(title))
 	if note != "":
-		caption.add_child(UiKit.muted(note))
+		var note_label: Label = UiKit.muted(note)
+		note_label.custom_minimum_size.x = CAPTION_PX   # an autowrap label with no width wraps per letter
+		caption.add_child(note_label)
 	row.add_child(caption)
 	var option: OptionButton = OptionButton.new()
 	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -132,8 +135,15 @@ func _check_row(key: String, title: String) -> Control:
 	check.name = "Check_%s" % key
 	if not UiKit.has_global_theme():
 		check.add_theme_font_size_override("font_size", 22)
+	# Same card as the slider and option rows. Without these overrides the CheckButton falls back to the
+	# theme's Button boxes, drawing a second (brown) panel inside the card.
+	var empty: StyleBoxEmpty = StyleBoxEmpty.new()
+	for style: String in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
+		check.add_theme_stylebox_override(style, empty)
 	check.toggled.connect(func(on: bool) -> void: Profile.set_setting(key, on))
-	return check
+	var card: PanelContainer = UiKit.card()
+	card.add_child(check)
+	return card
 
 
 func _format_value(value: float, kind: String) -> String:

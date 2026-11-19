@@ -19,8 +19,6 @@ const BOTTOM_GRADIENT_EXTENT: float = 0.12
 const LOGO_CENTER_X: float = 0.61
 const LOGO_TOP: float = 88.0
 const FALLBACK_LOGO_WIDTH: float = 600.0
-const TOP_BAR_SEPARATION: int = 12
-const TOP_BAR_ICON_PX: float = 28.0
 const ICON_BUTTON_PX: float = 64.0
 const SEPARATOR_HEIGHT: float = 36.0
 const PROFILE_CENTER_X: float = 0.545
@@ -154,32 +152,15 @@ func _add_badge(button: Button, text: String) -> void:
 
 
 func _add_top_bar() -> void:
-	var bar: PanelContainer = PanelContainer.new()
+	var bar: PanelContainer = UiKit.wallet_bar(self)
 	bar.name = "TopBar"
-	bar.theme_type_variation = "TopBarPanel"
 	bar.anchor_left = 1.0
 	bar.anchor_right = 1.0
 	bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	bar.offset_right = -SCREEN_MARGIN
 	bar.offset_top = TOP_MARGIN
 	add_child(bar)
-	var row: HBoxContainer = HBoxContainer.new()
-	row.add_theme_constant_override("separation", TOP_BAR_SEPARATION)
-	bar.add_child(row)
-
-	var money: Label = UiKit.label("", "MoneyLabel")
-	var gold: Label = UiKit.label("", "GoldLabel")
-	_add_wallet_entry(row, &"money", money, "MoneyLabel")
-	_add_wallet_entry(row, &"gold", gold, "GoldLabel")
-	var refresh: Callable = func(m: int, g: int) -> void:
-		money.text = UiKit.money_text(m)
-		gold.text = UiKit.gold_text(g)
-	refresh.call(Profile.get_money(), Profile.get_gold())
-	GameEvents.wallet_changed.connect(refresh)
-	bar.tree_exiting.connect(func() -> void:
-		if GameEvents.wallet_changed.is_connected(refresh):
-			GameEvents.wallet_changed.disconnect(refresh))
-
+	var row: HBoxContainer = bar.get_meta("row")
 	var sep: VSeparator = VSeparator.new()
 	sep.custom_minimum_size.y = SEPARATOR_HEIGHT
 	sep.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -188,16 +169,6 @@ func _add_top_bar() -> void:
 	profile_button.pressed.connect(func() -> void: _profile_card.visible = not _profile_card.visible)
 	var settings_button: Button = _icon_button("settings", "SettingsIconButton", "Configurações", row)
 	settings_button.pressed.connect(func() -> void: Router.goto(ScenePaths.SETTINGS))
-
-
-func _add_wallet_entry(row: HBoxContainer, icon_id: StringName, label: Label, node_name: String) -> void:
-	var icon: TextureRect = UiKit.icon_rect(icon_id, TOP_BAR_ICON_PX)
-	if icon != null:
-		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(icon)
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	UiKit.mark(label, self, node_name)
-	row.add_child(label)
 
 
 func _icon_button(icon_id: StringName, node_name: String, tooltip: String, parent: Control) -> Button:

@@ -3,6 +3,18 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.7.1 — 19/11/2026
+
+**Javalis com olhos.**
+
+- Os olhos dos javalis estavam enterrados na cabeça e não apareciam. Agora têm brilho e pálpebra mais clara,
+  visíveis de perto e na luneta; de média distância o olho vem pintado.
+
+Detalhes técnicos: `head_x_at` invertia errado a seção da cabeça; o contrato §7.1 registra que o LOD do javali
+acompanha o zoom. Medição de carga 0.6.1 × 0.7.0 (`tests/web/load_ab.py`): a caçada da 0.7.0 demora mais na
+primeira abertura sobretudo por compilação de shaders novos (~80%) e montagem procedural (~20%); com o cache de
+shader do navegador, a diferença cai para ~1,5 s em CPU 4x.
+
 ## 0.7.0 — 18/11/2026
 
 **Cenário e javalis em alto detalhe, 100% gerados por código.**

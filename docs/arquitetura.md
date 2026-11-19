@@ -1042,7 +1042,31 @@ Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_
    `crop_health_changed(100.0)`, marca `is_world_ready() = true`, emite `world_ready` e
    `GameEvents.hunt_started(request)`. Esconde o `LoadingOverlay`.
 
-Orçamento: a soma das etapas ≤ 3 s em celular intermediário; nenhuma etapa > 700 ms.
+**Pré-aquecimento de shaders (0.7.2).** Entre o aquecimento de malhas do javali (5b) e o passo 6, ainda com o
+overlay visível, o controlador faz o navegador compilar os shaders aos poucos, para que nenhum quadro trave
+tudo de uma vez e para que o overlay só suma com a cena pronta:
+- revela o mundo por partes, uma por quadro (terreno, água, props, flora, lavoura), com a câmera do jogador ativa;
+- mostra diante da câmera, um por quadro, um visual de cada tipo de javali e o cão (os materiais que aparecem
+  depois do início), e então os libera;
+- gira a câmera em `loading.warmup_yaw_steps` direções (um quadro cada) e volta à orientação do spawn;
+- espera `loading.settle_frames` quadros seguidos abaixo de `loading.settle_frame_ms`, com teto de
+  `loading.warmup_max_s`.
+Depois do aquecimento, os loops de ambiente (`Sfx.play_loop`) começam um por quadro, ainda atrás do overlay (criar o stream custa ~100 ms no navegador). O jogador fica com `set_input_enabled(false)` durante toda a montagem e é liberado em `_announce_start` (offline) ou por `hunt_go` (rede). Implementação: `src/hunt/shader_warmup.gd` (`ShaderWarmup`) e `src/hunt/loading_progress.gd` (`LoadingProgress`); flag de linha de comando `--no-warmup` só para medição A/B.
+Só então segue para o passo 6 (o spawner começa e o relógio da caçada corre depois do overlay sumir). Na rede,
+o cliente faz o mesmo antes de avisar que carregou.
+
+**Progresso.** O `LoadingOverlay` contém, abaixo do texto, o widget `res://assets/ui/loading_boar.tscn`
+(art-director): raiz `Control` com script `LoadingBoar` e `func set_progress(value: float) -> void` (0–1).
+Desenha só em 2D (`_draw`, sem 3D nem shader novo): um javali em silhueta correndo em loop, uma trilha de
+progresso e a porcentagem inteira ("42%"). Anima sozinho em `_process`, sem depender do controlador.
+O controlador calcula o progresso por pesos de etapa (`loading.step_weights` em `data/game.json`: chave =
+nome da etapa do `_lap`, valor = peso relativo; o pré-aquecimento reparte o seu peso pelos sub-passos), nunca
+regride e chega a 1 imediatamente antes de esconder o overlay. Fallback: sem o widget, o `Label` mostra
+"Preparando a caçada… 42%".
+
+Orçamento: nenhuma etapa de CPU > 700 ms em celular intermediário (estimado como desktop × 5); o quadro do
+overlay deve se atualizar ao menos a cada 1,5 s durante a montagem em CPU (as compilações de shader podem
+travar um quadro por mais tempo, e por isso são repartidas).
 
 `Player.setup(request, world)` (A): lê armas (`request.weapon_ids`), itens (`request.item_ids`,
 `request.item_counts`), aplica passivos (colete, munição extra, térmica), cria o `Hud`, ativa a câmera,
@@ -1768,7 +1792,7 @@ O desenvolvedor gera códigos com `RedeemCode.generate` (ex.: uma cena de ferram
   "hunter_interp_delay_ms": 150,
   "max_frame_bytes": 1100,
   "reliable_window": 64,
-  "load_timeout_s": 25.0,
+  "load_timeout_s": 45.0,
   "host_stall_warn_s": 2.5,
   "host_timeout_s": 20.0,
   "peer_absent_s": 3.0,
@@ -2428,6 +2452,7 @@ const TERRAIN_MATERIAL: String = "res://assets/materials/terrain.tres"
 const WATER_MATERIAL: String = "res://assets/materials/water.tres"
 const UI_THEME: String = "res://assets/ui/theme.tres"
 const SCOPE_SHADER: String = "res://assets/ui/scope_overlay.gdshader"
+const LOADING_BOAR: String = "res://assets/ui/loading_boar.tscn"
 
 
 static func map_scene(map_id: StringName) -> String:

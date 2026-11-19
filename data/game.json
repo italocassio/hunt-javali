@@ -40,6 +40,14 @@
     "wander_before_crop_min_s": 5.0,
     "wander_before_crop_max_s": 15.0
   },
+  "loading": {
+    "step_weights": {"heightmap": 1, "terrain": 5, "props_water": 8, "flora": 3, "crop": 1, "environment": 1,
+                     "player": 12, "dog": 2, "boar_warmup": 4, "shader_warmup": 60, "start": 3},
+    "warmup_yaw_steps": 4,
+    "settle_frames": 3,
+    "settle_frame_ms": 120,
+    "warmup_max_s": 30.0
+  },
   "economy": {
     "start_money": 500,
     "start_gold": 0,

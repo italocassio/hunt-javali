@@ -28,6 +28,7 @@ const TERRAIN_MATERIAL: String = "res://assets/materials/terrain.tres"
 const WATER_MATERIAL: String = "res://assets/materials/water.tres"
 const UI_THEME: String = "res://assets/ui/theme.tres"
 const SCOPE_SHADER: String = "res://assets/ui/scope_overlay.gdshader"
+const LOADING_BOAR: String = "res://assets/ui/loading_boar.tscn"   # LoadingOverlay progress widget (set_progress)
 
 
 static func map_scene(map_id: StringName) -> String:

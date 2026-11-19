@@ -6,6 +6,7 @@ extends HuntWorld
 const LOADING_TEXT: String = "Preparando a caçada…"
 const ARG_FALLBACK_PLAYER: String = "--fallback-player"
 const ARG_TIMING: String = "--hunt-timing"
+const ARG_NO_WARMUP: String = "--no-warmup"   # A/B measurements: skips the shader warm-up (world appears at once)
 const DOG_SIDE_OFFSET_M: float = 1.5
 const DEFAULT_END_DELAY_S: float = 2.5
 const AMBIENCE_LOOPS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop"]
@@ -93,6 +94,9 @@ var _prev_scaling: float = 1.0
 var _prev_max_dpr: float = 0.0
 var _dpr_cap_applied: bool = false
 var _timing: bool = false
+var _warmup_on: bool = true
+var _progress: LoadingProgress = LoadingProgress.new()
+var _warmup: ShaderWarmup = ShaderWarmup.new()
 
 # Network (docs/multiplayer.md section 6.1). _net_role == Net.Role.OFFLINE is the solo path.
 var _net_role: int = 0
@@ -154,11 +158,16 @@ func _ready() -> void:
 			spawner.free()
 			spawner = null
 	_timing = OS.get_cmdline_user_args().has(ARG_TIMING)
+	_warmup_on = not OS.get_cmdline_user_args().has(ARG_NO_WARMUP)
 	_prev_scaling = get_viewport().scaling_3d_scale
 	var label: Label = _loading.get_node_or_null(^"Label") as Label
 	if label != null:
 		label.text = LOADING_TEXT
 	_loading.visible = true
+	_progress.setup(_loading, label, LOADING_TEXT, Data.get_game().get("loading", {}).get("step_weights", {}))
+	if _timing:
+		_progress.changed.connect(_on_progress_changed)
+	_warmup.setup(self)
 	_assemble()
 
 
@@ -295,6 +304,9 @@ func _assemble() -> void:
 		crop.set_store_mode(true)   # the crop health is the barn's corn stock (section 5.4)
 	retreat_zones = _map.get_retreat_zones()
 	t = _lap("crop", t)
+	# From here the world stays hidden until the shader warm-up shows it part by part (section 8.1).
+	if _warmup_on:
+		_warmup.hide_world(_map, crop, [_stock_visual] if _stock_visual != null else [])
 	if not await _next_frame():
 		return
 
@@ -334,6 +346,7 @@ func _assemble() -> void:
 		_player.global_position = spawn_pos
 		_player.set_input_enabled(false)   # released by hunt_go
 	_player.setup(_request, self)
+	_player.set_input_enabled(false)   # closed while the overlay is up; released by _announce_start
 	_player.slot = _local_slot   # Player.setup reads Net; the test hook may have chosen another slot
 	_hunters_list.append(_player)
 	if _net_role != Net.Role.OFFLINE:
@@ -346,21 +359,45 @@ func _assemble() -> void:
 	if _net_role != Net.Role.CLIENT and not _dog_breeds().is_empty():
 		t = Time.get_ticks_msec()
 		_create_dogs()
+		if _warmup_on:
+			_warmup.hide_group(ShaderWarmup.GROUP_DOGS, _dog_list)
 		t = _lap("dog", t)
 		if not await _next_frame():
 			return
+	else:
+		_progress.skip("dog")
 
 	# 5b. Boar visual warm-up: build the cached meshes now, not when the first boar spawns (all roles: puppets too)
 	t = Time.get_ticks_msec()
-	_warm_boar_visuals()
+	if not await _warm_boar_visuals():
+		return
 	t = _lap("boar_warmup", t)
 	if not await _next_frame():
 		return
+
+	# 5c. Shader warm-up behind the overlay (section 8.1): the world appears part by part, then the actors.
+	t = Time.get_ticks_msec()
+	if _warmup_on and not await _warmup.run(_player, _warm_breeds(), _player_has_thermal(), _on_warmup_progress):
+		return
+	t = _lap("shader_warmup", t)
+	if _timing:
+		print("HUNT_TIMING warmup_detail frames=%d %s" % [_warmup.get_frames_used(), " ".join(_warmup.get_timing())])
+	if not await _next_frame():
+		return
+
+	# 5d. Ambience loops, one per frame (building the stream costs ~100 ms each in the browser: not in the start frame).
+	t = Time.get_ticks_msec()
+	for id: StringName in AMBIENCE_LOOPS:
+		Sfx.play_loop(id, AMBIENCE_DB)
+		if not await _next_frame():
+			return
+	t = _lap("ambience", t)
 
 	# 6. Boars and start
 	if _net_role == Net.Role.CLIENT:
 		_finish_assembly_client()
 		return
+	t = Time.get_ticks_msec()
 	spawner.setup(self, _boars_root, contract, _map.get_spawn_zones())
 	spawner.boar_died.connect(_on_boar_died)
 	spawner.group_entered.connect(_on_group_entered)
@@ -377,14 +414,14 @@ func _assemble() -> void:
 		_host_sync.name = "HuntHostSync"
 		add_child(_host_sync)
 		_host_sync.setup(self, spawner)
+	if _timing:
+		print("HUNT_TIMING start_spawner_ms=%d" % (Time.get_ticks_msec() - t))
 	GameEvents.player_died.connect(_on_player_died)
 	GameEvents.hunt_abandon_requested.connect(_on_abandon_requested)
 	GameEvents.item_used.connect(_on_item_used)
 	GameEvents.shot_fired.connect(_on_shot_fired)
 	GameEvents.boar_hit.connect(_on_boar_hit)
 	_result.boars_total = spawner.get_total()
-	for id: StringName in AMBIENCE_LOOPS:
-		Sfx.play_loop(id, AMBIENCE_DB)
 	GameEvents.boar_counts_changed.emit(0, spawner.get_total())
 	GameEvents.crop_health_changed.emit(100.0)
 	_ready_flag = true
@@ -419,8 +456,6 @@ func _finish_assembly_client() -> void:
 	GameEvents.item_used.connect(_on_item_used)
 	GameEvents.shot_fired.connect(_on_shot_fired)
 	GameEvents.boar_hit.connect(_on_boar_hit)
-	for id: StringName in AMBIENCE_LOOPS:
-		Sfx.play_loop(id, AMBIENCE_DB)
 	GameEvents.boar_counts_changed.emit(0, 0)
 	GameEvents.crop_health_changed.emit(100.0)
 	_ready_flag = true
@@ -428,6 +463,9 @@ func _finish_assembly_client() -> void:
 
 
 func _announce_start() -> void:
+	_progress.finish()
+	if _player != null and is_instance_valid(_player) and not _over:
+		_player.set_input_enabled(true)
 	GameEvents.hunt_started.emit(_request)
 	_loading.visible = false
 	if _timing:
@@ -486,6 +524,7 @@ func _create_remote_hunters() -> void:
 ## Network start: the overlay stays up until Net.hunt_go. Net.hunt_go is connected before bind_world so a
 ## synchronous emission is not lost.
 func _enter_wait() -> void:
+	_progress.finish()   # everything is loaded here; what is left is waiting for the others
 	var label: Label = _loading.get_node_or_null(^"Label") as Label
 	if label != null:
 		label.text = WAITING_TEXT
@@ -531,8 +570,11 @@ func _begin_net_hunt() -> void:
 
 ## Instantiates the boar visual once per boar type and weight (min, middle, max of the type's range from
 ## data) so the static mesh caches are filled before the first spawn. Instances are freed outside the tree.
-func _warm_boar_visuals() -> void:
-	for type_id: StringName in Data.get_boar_type_ids():
+## One type per frame (the overlay keeps redrawing); false if the hunt left the tree meanwhile.
+func _warm_boar_visuals() -> bool:
+	var type_ids: Array[StringName] = Data.get_boar_type_ids()
+	for i: int in type_ids.size():
+		var type_id: StringName = type_ids[i]
 		var def: Dictionary = Data.get_boar_type(type_id)
 		var w_min: float = float(def.get("weight_min_kg", 0.0))
 		var w_max: float = maxf(float(def.get("weight_max_kg", w_min)), w_min)
@@ -542,9 +584,36 @@ func _warm_boar_visuals() -> void:
 			if visual == null:
 				if node != null:
 					node.free()
-				return   # asset missing: the fallback needs no warm-up
+				return true   # asset missing: the fallback needs no warm-up
 			visual.setup(type_id, kg)
 			visual.free()
+		_progress.set_fraction("boar_warmup", float(i + 1) / float(type_ids.size()))
+		if i < type_ids.size() - 1 and not await _next_frame():
+			return false
+	return true
+
+
+## Dog breeds shown by the warm-up (every distinct breed of the hunt, puppets included).
+func _warm_breeds() -> Array[StringName]:
+	var out: Array[StringName] = []
+	var breeds: Dictionary = _dog_breeds()
+	for slot: Variant in breeds:
+		var breed: StringName = breeds[slot] as StringName
+		if not out.has(breed):
+			out.append(breed)
+	return out
+
+
+func _player_has_thermal() -> bool:
+	return _player != null and _player.has_method(&"has_thermal") and bool(_player.call(&"has_thermal"))
+
+
+func _on_warmup_progress(fraction: float) -> void:
+	_progress.set_fraction("shader_warmup", fraction)
+
+
+func _on_progress_changed(value: float) -> void:
+	print("HUNT_PROGRESS %d t_ms=%d" % [roundi(value * 100.0), Time.get_ticks_msec() - _t0_ms])
 
 
 func _next_frame() -> bool:
@@ -556,6 +625,7 @@ func _lap(label: String, since: int) -> int:
 	var now: int = Time.get_ticks_msec()
 	if _timing:
 		print("HUNT_TIMING %s_ms=%d" % [label, now - since])
+	_progress.complete(label)
 	return now
 
 

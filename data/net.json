@@ -17,7 +17,7 @@
   "hunter_interp_delay_ms": 150,
   "max_frame_bytes": 1100,
   "reliable_window": 64,
-  "load_timeout_s": 25.0,
+  "load_timeout_s": 45.0,
   "host_stall_warn_s": 2.5,
   "host_timeout_s": 20.0,
   "peer_absent_s": 3.0,

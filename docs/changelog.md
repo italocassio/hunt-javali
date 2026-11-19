@@ -3,6 +3,23 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.7.2 — 19/11/2026
+
+**Tela de carregamento nova: javali correndo e porcentagem.**
+
+- Um javali galopa sobre a barra de progresso e a porcentagem mostra quanto falta.
+- A tela de carregamento só some com a cena pronta: acabou o congelamento de vários segundos logo
+  depois que a caçada aparecia. O navegador prepara terreno, água, construções, árvores, javalis e cão
+  aos poucos, atrás da tela de carregamento.
+- O jogador só se move e atira depois que a tela some.
+- Caçada em grupo: o anfitrião espera até 45 s (antes 25 s) por um celular que ainda está carregando.
+
+Detalhes técnicos: `ShaderWarmup` revela o mundo por partes, mostra cada tipo de javali e cão diante da câmera e
+gira a câmera antes de liberar o overlay; `LoadingProgress` usa `loading.step_weights` de `data/game.json`;
+`prop_builder.gd` carrega os props HD sob demanda (−35 ms). Medição (Chrome emulando celular, CPU 4x, cache frio):
+nenhum quadro > 150 ms depois do overlay sumir (antes, trava de ~6 s); maior quadro preso no overlay ~10 s
+(antes ~33 s). O tempo total da primeira carga não mudou: é compilação de shader, que agora acontece atrás da tela.
+
 ## 0.7.1 — 19/11/2026
 
 **Javalis com olhos.**

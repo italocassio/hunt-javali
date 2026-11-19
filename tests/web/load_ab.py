@@ -32,7 +32,7 @@ import cdp  # noqa: E402
 import phone  # noqa: E402
 
 THROTTLE = 4
-ARGS_JSON = '"args":["--","--hunt-timing"]'
+ARGS_JSON = '"args":["--","--hunt-timing"' + ''.join(',"%s"' % x for x in os.environ.get("EXTRA_ARGS", "").split()) + ']'
 INIT_JS = r"""
 (() => {
   window.__ft = []; window.__marks = {};
@@ -229,7 +229,7 @@ def session(tag, build, throttle):
                 if first_ts is None:
                     first_ts = ts
         res["timing"] = {k: v for k, v in timing.items() if k != "frame_mark_ms"}
-        res["timing_events"] = [[round(ts - t_start * 1000), txt] for ts, txt in evs if "HUNT_TIMING" in txt]
+        res["timing_events"] = [[round(ts - t_start * 1000), txt] for ts, txt in evs if "HUNT_TIMING" in txt or "HUNT_PROGRESS" in txt]
         res["tap_to_overlay_gone_ms"] = round(total_ts - t_start * 1000)
         res["tap_to_first_lap_ms"] = round(first_ts - t_start * 1000)
         res["overlay_gone_epoch"] = total_ts

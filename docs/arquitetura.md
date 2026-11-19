@@ -748,6 +748,9 @@ foi usado.
   - perto (≤ 25 m): ≤ 3 000 triângulos, ≤ 7 `MeshInstance3D` visíveis (corpo, cabeça, 4 pernas, rabo);
   - médio (25–60 m): ≤ 900 triângulos, ≤ 7 `MeshInstance3D` visíveis;
   - longe (> 60 m): ≤ 300 triângulos, ≤ 2 `MeshInstance3D` visíveis, sem pernas animadas;
+  - as distâncias de LOD acompanham o zoom da câmera: multiplicadas por
+    `k = max(tan(base_fov/2) / tan(fov_atual/2), 1)` (`base_fov` = `player.base_fov_deg`), para o javali
+    visto na luneta manter o detalhe do tamanho em que aparece na tela; recalculadas só quando `k` muda > 3%;
   - ≤ 1 material por tipo (4 no total, compartilhados); `cast_shadow` ligado só no corpo;
   - montagem a frio ≤ 40 ms por tipo (desktop), ≈ 0 em cache (javalis nascem no meio da caçada).
 - Variação por tipo (em `setup`): leitão mais claro com listras tênues, fêmea marrom-acinzentada, macho

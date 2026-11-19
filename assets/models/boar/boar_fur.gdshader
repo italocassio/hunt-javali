@@ -9,6 +9,7 @@ render_mode cull_back, diffuse_lambert_wrap, specular_schlick_ggx;
 // stays comparable with the rest of the map.
 //   UV  x = around (integer tiles, seamless)  y = along the part; the hair runs along UV.y
 //   UV2 x = feature (0 fur, 1 mane, 2 skin, 3 hoof, 4 tusk, 5 eye) + coarseness / 2   y = around share (stripes)
+//          eye: coarseness 0 = wet globe, > 0.25 = bare eyelid
 //   TANGENT = around direction
 
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
@@ -29,6 +30,8 @@ void fragment() {
 	float hoof = step(2.5, feat) * step(feat, 3.5);
 	float tusk = step(3.5, feat) * step(feat, 4.5);
 	float eye = step(4.5, feat);
+	float lid = eye * step(0.25, coarse);
+	float globe = eye - lid;
 
 	vec3 base = COLOR.rgb;
 	float ao = COLOR.a;
@@ -61,11 +64,18 @@ void fragment() {
 	// hoof: vertical keratin striation; tusk: growth bands
 	base *= 1.0 + hoof * (strand - 0.5) * 0.6 + tusk * (clump - 0.5) * 0.25;
 
+	// eye: fine-grained eyelid skin; a sky catchlight fixed in view space (upper front) keeps the dark globe readable
+	// in the shade and against the sun
+	base *= 1.0 + lid * (strand - 0.5) * 0.3;
+	float glint = globe * smoothstep(0.84, 0.94, dot(NORMAL, normalize(vec3(-0.3, 0.5, 0.8))));
+	base = mix(base, vec3(0.80, 0.84, 0.88), glint * 0.85);
+
 	NORMAL = normalize(NORMAL + TANGENT * h * bump_amount * hair);
 
 	ALBEDO = base * mix(1.0, ao, 0.5);
-	ROUGHNESS = fur * (0.88 - mane * 0.05) + skin * 0.38 + hoof * 0.5 + tusk * 0.32 + eye * 0.08;
-	SPECULAR = fur * 0.14 + skin * 0.5 + hoof * 0.45 + tusk * 0.5 + eye * 0.9;
+	ROUGHNESS = fur * (0.88 - mane * 0.05) + skin * 0.38 + hoof * 0.5 + tusk * 0.32 + globe * 0.08 + lid * 0.55;
+	SPECULAR = fur * 0.14 + skin * 0.5 + hoof * 0.45 + tusk * 0.5 + globe * 0.9 + lid * 0.3;
+	EMISSION = vec3(0.30, 0.32, 0.34) * glint;
 	RIM = fur * 0.25;
 	RIM_TINT = 0.6;
 	AO = ao;

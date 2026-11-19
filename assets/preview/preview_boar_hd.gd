@@ -284,6 +284,28 @@ func _run(shots: PackedStringArray) -> void:
 					boars.append([_boar(&"boar", 100.0, Vector3(lat[i], 0.0, -dists[i]), 90.0 if i != 1 else 270.0), "idle"])
 				var target: Vector3 = (boars[2][0] as Node3D).position + Vector3(0, 0.45, 0) if shot == "lod_scope" else Vector3(0.0, 0.9, -20.0)
 				_look(cam, target, eye, GAME_FOV if shot == "lod" else GAME_FOV / 6.0)
+			"eyes_close", "eyes_close_back", "eyes_close_mid":
+				# the four types with their heads in a row, ~2 m from the camera, game sun and sky (back: against the sun;
+				# mid: the 25-60 m meshes forced, to inspect the painted eye)
+				cam = _game_light_flat()
+				var back: bool = shot == "eyes_close_back"
+				var yaw_c: float = -45.0 if back else 135.0
+				for i in 4:
+					var t: StringName = TYPES[i]
+					var s: float = BoarVisualBase.scale_for_weight(TYPE_KG[t])
+					var head: Vector3 = Vector3((float(i) - 1.5) * (-0.62 if back else 0.62), 0.0, 0.0)
+					var off: Vector3 = Basis(Vector3.UP, deg_to_rad(yaw_c)) * (Model.HEAD_REST * s)
+					boars.append([_boar(t, TYPE_KG[t], Vector3(head.x - off.x, 0.0, head.z - off.z), yaw_c),
+						"lod_mid" if shot == "eyes_close_mid" else "idle"])
+				_look(cam, Vector3(0.0, 0.5, 0.0), Vector3(0.0, 0.85, -2.0 if back else 2.0), 40.0)
+			"eyes_10", "eyes_20", "eyes_40", "eyes_20_scope":
+				# the four types in profile at game distance, game FOV (scope: 4x), seen from standing eye height
+				cam = _game_light_flat()
+				var d: float = float(shot.get_slice("_", 1))
+				for i in 4:
+					var t2: StringName = TYPES[i]
+					boars.append([_boar(t2, TYPE_KG[t2], Vector3((float(i) - 1.5) * 1.7, 0.0, -d), 90.0), "idle"])
+				_look(cam, Vector3(0.0, 0.45, -d), Vector3(0.0, 1.7, 0.0), GAME_FOV / 4.0 if shot.ends_with("scope") else GAME_FOV)
 			"custom":
 				cam = _studio() if _scene == "studio" else _map_scene()
 				var at: Vector3 = Vector3.ZERO if _scene == "studio" else _ground(Vector3(-10.0, 0.0, 20.0))
@@ -307,7 +329,34 @@ func _run(shots: PackedStringArray) -> void:
 		var path: String = _out_dir.path_join("%s.png" % shot)
 		var err: Error = image.save_png(path)
 		print("preview_boar_hd: %s %s" % ["saved" if err == OK else "FAILED", path])
+		if shot in ["eyes_10", "eyes_20", "eyes_40"]:
+			_save_crop(image, cam, boars, _out_dir.path_join("%s_crop.png" % shot))
 	get_tree().quit(0)
+
+
+## Pixel-exact enlargement (nearest) of the screen box around the boars: what the player really gets at that distance.
+func _save_crop(image: Image, cam: Camera3D, boars: Array, path: String) -> void:
+	# unproject works in the stretched viewport size (1280x720 base), the image is the window size
+	var k_px: Vector2 = Vector2(image.get_size()) / get_viewport().get_visible_rect().size
+	var r: Rect2 = Rect2()
+	for i in boars.size():
+		var b: Node3D = boars[i][0]
+		for off: Vector3 in [Vector3(0, 0, 0), Vector3(0, 1.0, 0), Vector3(-0.9, 0.5, 0), Vector3(0.9, 0.5, 0)]:
+			var sp: Vector2 = cam.unproject_position(b.global_position + off) * k_px
+			r = Rect2(sp, Vector2.ZERO) if i == 0 and off == Vector3.ZERO else r.expand(sp)
+	var sz: Vector2i = image.get_size()
+	var w: int = clampi(int(r.size.x * 1.15), 16, sz.x)
+	var h: int = clampi(int(w * 9.0 / 16.0), 9, sz.y)
+	@warning_ignore("integer_division")
+	var cx: int = clampi(int(r.get_center().x) - w / 2, 0, sz.x - w)
+	@warning_ignore("integer_division")
+	var cy: int = clampi(int(r.get_center().y) - h / 2, 0, sz.y - h)
+	var crop: Image = image.get_region(Rect2i(cx, cy, w, h))
+	@warning_ignore("integer_division")
+	var k: int = maxi(sz.x / w, 1)
+	crop.resize(w * k, h * k, Image.INTERPOLATE_NEAREST)
+	var err: Error = crop.save_png(path)
+	print("preview_boar_hd: %s %s (%dx%d px enlarged %dx)" % ["saved" if err == OK else "FAILED", path, w, h, k])
 
 
 func _start_pose(b: BoarVisualBase, pose: String) -> void:
@@ -331,6 +380,12 @@ func _keep_pose(b: BoarVisualBase, pose: String) -> void:
 		"trot": b.set_locomotion(3.2)
 		"gallop": b.set_locomotion(9.0)
 		"wounded": b.set_locomotion(1.2)
+		"lod_mid":
+			# after the boar's own range update: mid meshes at every distance, near and far hidden
+			for mi: MeshInstance3D in b.find_children("*", "MeshInstance3D", true, false):
+				mi.visible = mi.name.ends_with("Mid")
+				mi.visibility_range_begin = 0.0
+				mi.visibility_range_end = 0.0
 		"alert":
 			if b.get(&"_alert_t") == 0.0 or float(b.get(&"_alert_t")) < 0.45:
 				b.play_alert()

@@ -29,7 +29,7 @@ const TAIL_ROOT: Vector3 = Vector3(0.0, 0.565, 0.685)
 ## Ring resolution per LOD.
 const RES: Array[Dictionary] = [
 	{"trunk_m": 20, "trunk_r": 26, "mane_n": 20, "mane_m": 8, "head_m": 18, "head_r": 16, "disc_r": 2, "ear_m": 6, "ear_r": 4,
-		"eye_m": 6, "tusk_m": 5, "tusk_steps": 1, "leg_m": 8, "leg_steps": 1, "hoof_r": 3, "tail_m": 6, "tail_steps": 1},
+		"eye_m": 8, "tusk_m": 5, "tusk_steps": 1, "leg_m": 8, "leg_steps": 1, "hoof_r": 3, "tail_m": 6, "tail_steps": 1},
 	{"trunk_m": 12, "trunk_r": 12, "mane_n": 8, "mane_m": 6, "head_m": 10, "head_r": 8, "disc_r": 1, "ear_m": 4, "ear_r": 3,
 		"eye_m": 0, "tusk_m": 3, "tusk_steps": 0, "leg_m": 5, "leg_steps": 0, "hoof_r": 2, "tail_m": 3, "tail_steps": 0},
 	{"trunk_m": 8, "trunk_r": 7, "head_m": 6, "head_r": 5, "leg_m": 4, "ear_m": 3},
@@ -71,7 +71,14 @@ const HEAD_HW: Array = [[-0.182, 0.050], [-0.165, 0.056], [-0.13, 0.064], [-0.08
 const HEAD_WIDEST: Array = [[-0.182, 0.5], [-0.05, 0.56], [0.10, 0.58], [0.33, 0.55]]
 const EYE_S: float = 0.06
 const EYE_Y: float = 0.074
-const EYE_R: float = 0.0125
+const EYE_R: float = 0.016
+## Wet, almost black eye globe (the shader adds the sky catchlight).
+const EYE_DARK: Color = Color(0.03, 0.02, 0.015)
+## Eye rings (near LOD), in EYE_R units: [height along the eye axis, horizontal radius, vertical radius].
+## Lid: outer ring laid on the head surface, raised rim (lighter skin), dark inner margin; globe: tucked under the margin, domed out of it.
+const EYE_LID: Array = [[0.0, 1.85, 1.5], [0.4, 1.32, 1.02], [0.46, 1.04, 0.74]]
+const EYE_GLOBE: Array = [[0.3, 1.0, 0.7], [0.62, 0.82, 0.57], [0.84, 0.46, 0.32]]
+const EYE_POLE: float = 0.92
 const EAR_S: float = 0.165
 const EAR_X: float = 0.062
 
@@ -108,23 +115,23 @@ static func palette(type_id: StringName) -> Dictionary:
 		Ids.PIGLET:
 			return {"back": Color(0.50, 0.34, 0.20), "belly": Color(0.70, 0.56, 0.40), "dorsal": Color(0.30, 0.20, 0.12),
 				"leg": Color(0.30, 0.21, 0.14), "muzzle": Color(0.32, 0.23, 0.17), "cheek": Color(0.66, 0.54, 0.40),
-				"disc": Color(0.50, 0.36, 0.32), "tip": Color(0.85, 0.72, 0.52), "tip_amount": 0.35,
+				"disc": Color(0.50, 0.36, 0.32), "lid": Color(0.30, 0.19, 0.13), "tip": Color(0.85, 0.72, 0.52), "tip_amount": 0.35,
 				"stripe": Color(0.85, 0.72, 0.52), "stripe_amount": 0.45, "mane": 0.045, "tusk": 0.0, "tusk_w": 0.0,
 				"snout": 0.72, "round": 1.12}
 		Ids.SOW:
 			return {"back": Color(0.34, 0.29, 0.24), "belly": Color(0.44, 0.38, 0.31), "dorsal": Color(0.22, 0.18, 0.15),
 				"leg": Color(0.15, 0.12, 0.10), "muzzle": Color(0.20, 0.16, 0.14), "cheek": Color(0.55, 0.50, 0.43),
-				"disc": Color(0.40, 0.30, 0.28), "tip": Color(0.66, 0.60, 0.52), "tip_amount": 0.45,
+				"disc": Color(0.40, 0.30, 0.28), "lid": Color(0.42, 0.33, 0.28), "tip": Color(0.66, 0.60, 0.52), "tip_amount": 0.45,
 				"stripe": Color.BLACK, "stripe_amount": 0.0, "mane": 0.075, "tusk": 0.45, "tusk_w": 0.75}
 		Ids.ALPHA:
 			return {"back": Color(0.075, 0.065, 0.058), "belly": Color(0.12, 0.10, 0.09), "dorsal": Color(0.04, 0.035, 0.032),
 				"leg": Color(0.04, 0.035, 0.032), "muzzle": Color(0.06, 0.05, 0.045), "cheek": Color(0.30, 0.27, 0.24),
-				"disc": Color(0.22, 0.17, 0.16), "tip": Color(0.45, 0.41, 0.37), "tip_amount": 0.5,
+				"disc": Color(0.22, 0.17, 0.16), "lid": Color(0.30, 0.24, 0.21), "tip": Color(0.45, 0.41, 0.37), "tip_amount": 0.5,
 				"stripe": Color.BLACK, "stripe_amount": 0.0, "mane": 0.11, "mane_long": true, "tusk": 1.35, "tusk_w": 1.3}
 		_:
 			return {"back": Color(0.20, 0.15, 0.115), "belly": Color(0.28, 0.22, 0.17), "dorsal": Color(0.10, 0.08, 0.065),
 				"leg": Color(0.08, 0.065, 0.055), "muzzle": Color(0.12, 0.095, 0.08), "cheek": Color(0.42, 0.37, 0.31),
-				"disc": Color(0.30, 0.22, 0.21), "tip": Color(0.55, 0.48, 0.40), "tip_amount": 0.5,
+				"disc": Color(0.30, 0.22, 0.21), "lid": Color(0.36, 0.27, 0.21), "tip": Color(0.55, 0.48, 0.40), "tip_amount": 0.5,
 				"stripe": Color.BLACK, "stripe_amount": 0.0, "mane": 0.125, "tusk": 0.95, "tusk_w": 1.0}
 
 
@@ -282,7 +289,8 @@ static func head_x_at(s: float, y: float) -> float:
 	var e: float = 2.2 if y >= ym else 2.6
 	var h: float = (top - ym) if y >= ym else (ym - bot)
 	var q: float = clampf(absf(y - ym) / maxf(h, 1e-4), 0.0, 1.0)
-	return hw * pow(maxf(1.0 - pow(q, e * 0.5), 0.0), 2.0 / e)
+	# inverse of BMesh.super_ring: |x / hw|^e + |(y - ym) / h|^e = 1
+	return hw * pow(maxf(1.0 - pow(q, e), 0.0), 1.0 / e)
 
 
 ## Head upper surface height at (s, x).
@@ -428,6 +436,16 @@ static func _head(k: BMesh, pal: Dictionary, res: Dictionary, bucket: int) -> vo
 	var muzzle: Color = pal["muzzle"]
 	var cheek: Color = pal["cheek"]
 	var eye_c: Vector3 = Vector3(head_x_at(EYE_S, EYE_Y), EYE_Y, EYE_S)
+	var lid: Color = pal["lid"]
+	var eye_m: int = res.get("eye_m", 0)
+	# mid LOD (no eye geometry): the head vertex nearest the eye is painted as the eye, the ring around it as the lid
+	var eye_v: float = -1.0
+	if eye_m == 0:
+		eye_v = INF
+		for ring: PackedVector3Array in rings:
+			for q in ring:
+				if q.x > 0.0:
+					eye_v = minf(eye_v, q.distance_to(eye_c))
 	var paint: Callable = func(p: Vector3, n: Vector3, _a: float, _t: float) -> Color:
 		var c: Color = _mix(belly, back, smoothstep(-0.6, 0.4, n.y))
 		c = _mix(c, dorsal, smoothstep(0.75, 0.97, n.y) * 0.6)
@@ -440,9 +458,10 @@ static func _head(k: BMesh, pal: Dictionary, res: Dictionary, bucket: int) -> vo
 		var lip_y: float = lerpf(-0.075, -0.112, smoothstep(-0.17, 0.04, p.z))
 		var lip: float = (1.0 - smoothstep(0.004, 0.012, absf(p.y - lip_y))) * (1.0 - smoothstep(0.0, 0.04, p.z)) * smoothstep(0.2, 0.6, absf(n.x))
 		c = _mix(c, Color(0.03, 0.025, 0.02), lip * 0.8)
-		# dark ring around the eye
-		var ex: Vector3 = Vector3(absf(p.x), p.y, p.z)
-		c = _mix(c, dorsal, (1.0 - smoothstep(0.012, 0.03, ex.distance_to(eye_c))) * 0.85)
+		if eye_v >= 0.0:
+			var ed: float = Vector3(absf(p.x), p.y, p.z).distance_to(eye_c) - eye_v
+			c = _mix(c, lid, 1.0 - smoothstep(0.05, 0.09, ed))
+			c = _mix(c, EYE_DARK, (1.0 - smoothstep(0.002, 0.004, ed)) * 0.8)
 		var v: float = 0.92 + 0.16 * _hash(p)
 		var ao: float = lerpf(0.5, 1.0, smoothstep(-0.95, 0.1, n.y)) * (1.0 - lip * 0.35)
 		return Color(c.r * v, c.g * v, c.b * v, ao)
@@ -494,18 +513,35 @@ static func _head(k: BMesh, pal: Dictionary, res: Dictionary, bucket: int) -> vo
 			var c: Color = _mix(ear_out, ear_in, inner)
 			return Color(c.r, c.g, c.b, lerpf(0.6, 1.0, t) * (1.0 - inner * 0.3))
 		k.grid(BMesh.tube_rings(path, rx, ry, side, ear_m), ear_paint, BMesh.FEAT_FUR + 0.4, false, true, Vector3.ZERO, axis * 0.006, true)
-	# eyes
-	var eye_m: int = res.get("eye_m", 0)
+	# eyes: bare lid rim (lighter, warmer than the coat) around a domed wet globe; feature 5.4 = lid, 5.0 = globe
 	if eye_m > 0:
-		var eye_paint: Callable = func(_p: Vector3, _n: Vector3, _a: float, _t: float) -> Color:
-			return Color(0.035, 0.022, 0.016, 1.0)
+		var lid_out: Color = _mix(_mix(belly, back, 0.6), lid, 0.35)
+		var lid_margin: Color = _mix(EYE_DARK, lid, 0.25)
+		var lid_paint: Callable = func(_p: Vector3, _n: Vector3, _a: float, t: float) -> Color:
+			var c: Color = _mix(_mix(lid_out, lid, smoothstep(0.0, 0.45, t)), lid_margin, smoothstep(0.6, 1.0, t))
+			return Color(c.r, c.g, c.b, lerpf(0.9, 0.7, t))
+		var globe_paint: Callable = func(_p: Vector3, _n: Vector3, _a: float, t: float) -> Color:
+			return Color(EYE_DARK.r, EYE_DARK.g, EYE_DARK.b, lerpf(0.7, 1.0, t))
 		for sx: float in [-1.0, 1.0]:
-			var c: Vector3 = Vector3((eye_c.x - EYE_R * 0.45) * sx, EYE_Y, EYE_S)
+			var c: Vector3 = Vector3(eye_c.x * sx, EYE_Y, EYE_S)
 			var out: Vector3 = Vector3(sx, 0.25, -0.35).normalized()
-			var path: PackedVector3Array = PackedVector3Array([c - out * EYE_R * 0.75, c, c + out * EYE_R * 0.75])
-			var r0: float = EYE_R * 0.66
-			k.grid(BMesh.tube_rings(path, PackedFloat32Array([r0, EYE_R, r0]), PackedFloat32Array([r0 * 0.8, EYE_R * 0.8, r0 * 0.8]),
-				Vector3(0, 0, 1), eye_m), eye_paint, BMesh.FEAT_EYE, true, true, -out * EYE_R * 0.25, out * EYE_R * 0.3)
+			var fwd: Vector3 = (Vector3.FORWARD - out * out.dot(Vector3.FORWARD)).normalized()
+			var up: Vector3 = fwd.cross(out).normalized() * sx
+			var lid_rings: Array = []
+			for j in EYE_LID.size():
+				var ring: PackedVector3Array = _eye_ring(c, out, fwd, up, EYE_LID[j], eye_m)
+				if j == 0:
+					# lay the outer ring on the head surface (slightly under it: no seam)
+					for i in eye_m:
+						var e: Vector3 = ring[i]
+						ring[i] = Vector3(sx * (head_x_at(e.z, e.y) - 0.0015), e.y, e.z)
+				lid_rings.append(ring)
+			k.grid(lid_rings, lid_paint, BMesh.FEAT_EYE + 0.4)
+			var globe_rings: Array = []
+			for q2: Array in EYE_GLOBE:
+				globe_rings.append(_eye_ring(c, out, fwd, up, q2, eye_m))
+			k.grid(globe_rings, globe_paint, BMesh.FEAT_EYE, false, true, Vector3.ZERO,
+				out * EYE_R * (EYE_POLE - float((EYE_GLOBE[EYE_GLOBE.size() - 1] as Array)[0])))
 	# tusks: lower canines curling up and out of the lip
 	var tl: float = float(pal["tusk"]) * (1.0 + 0.12 * bucket)
 	if tl > 0.0:
@@ -531,6 +567,17 @@ static func _head(k: BMesh, pal: Dictionary, res: Dictionary, bucket: int) -> vo
 				rr.push_back(lerpf(0.0105, 0.002, u * u) * tw)
 			k.grid(BMesh.tube_rings(path, rr, rr, Vector3(0, 0, 1), res["tusk_m"]), tusk_paint, BMesh.FEAT_TUSK + 0.1,
 				false, true, Vector3.ZERO, (path[npts - 1] - path[npts - 2]).normalized() * 0.003)
+
+
+## One elliptic eye ring around centre `c`: q = [height along `out`, radius along `fwd`, radius along `up`] in EYE_R.
+static func _eye_ring(c: Vector3, out: Vector3, fwd: Vector3, up: Vector3, q: Array, m: int) -> PackedVector3Array:
+	var ring: PackedVector3Array = PackedVector3Array()
+	ring.resize(m)
+	var o: Vector3 = c + out * (float(q[0]) * EYE_R)
+	for i in m:
+		var a: float = TAU * float(i) / float(m)
+		ring[i] = o + fwd * (cos(a) * float(q[1]) * EYE_R) + up * (sin(a) * float(q[2]) * EYE_R)
+	return ring
 
 
 ## `hip_y`: pivot height (the sole lands on the ground); `mid_pick`: control points kept when the LOD has no smoothing.

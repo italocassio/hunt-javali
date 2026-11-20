@@ -257,6 +257,11 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "HintBanner", "path": "res://src/hud/hint_banner.gd", "base": "PanelContainer", "pkg": "A",
 		"methods": ["show_hint(text: String) -> void", "hide_hint() -> void", "is_showing() -> bool",
 			"get_text() -> String"]},
+	# docs/arquitetura.md sections 6.8 and 8.4 (1.3, HF3): the dog card of the HUD (a view, the Hud feeds it).
+	{"name": "DogCard", "path": "res://src/hud/dog_card.gd", "base": "HBoxContainer", "pkg": "A",
+		"methods": ["set_breed(dog_id: StringName) -> void", "set_state(state: StringName) -> void",
+			"set_health_pct(pct: float) -> void", "set_touch(touch: bool) -> void", "get_state_text() -> String",
+			"get_action_text() -> String", "get_breed_text() -> String"]},
 	{"name": "Hud", "path": "res://src/hud/hud.gd", "base": "CanvasLayer", "pkg": "A",
 		"methods": ["bind(player: PlayerBase, world: HuntWorld) -> void"]},
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
@@ -276,7 +281,9 @@ const CLASSES: Array[Dictionary] = [
 			"methods": ["get_mode() -> StringName", "get_objective_position() -> Vector3", "get_horde_wave() -> int",
 				"get_horde_wave_count() -> int", "get_horde_phase() -> StringName", "get_horde_countdown_s() -> float",
 				"get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int", "get_horde_waves_cleared() -> int",
-				"debug_horde_start_next_wave() -> void", "get_horde_eat_point(boar_id: int) -> Vector2"]},
+				"debug_horde_start_next_wave() -> void", "get_horde_eat_point(boar_id: int) -> Vector2",
+					# docs/arquitetura.md section 8.4 (1.3, HF3)
+					"get_dog_target_position() -> Vector3"]},
 	# docs/horda.md section 5.2: internal to package B.
 	{"name": "HordeDirector", "path": "res://src/hunt/horde_director.gd", "base": "Node", "pkg": "B",
 		"signals": ["wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)",
@@ -352,7 +359,9 @@ const CLASSES: Array[Dictionary] = [
 		"props": ["owner_slot"],
 		"methods": ["setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector3, p_owner_slot: int = 0) -> void",
 			"command() -> void", "net_state_byte() -> int", "get_yaw() -> float", "is_local_owner() -> bool",
-			"get_xz() -> Vector2", "get_health_pct() -> float", "leave() -> void"]},
+			"get_xz() -> Vector2", "get_health_pct() -> float", "leave() -> void",
+				# docs/arquitetura.md section 8.4 (1.3, HF3): the boar the dog is after; INF = none
+				"get_target_position() -> Vector3"]},
 	# docs/multiplayer.md 6.5 (F7): the client replica of a host dog. Visual only.
 	{"name": "DogPuppet", "path": "res://src/dogs/dog_puppet.gd", "base": "Node3D", "pkg": "B",
 		"props": ["owner_slot", "breed_id", "state", "health_pct"],
@@ -518,7 +527,9 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"get_mode() -> StringName", "is_horde() -> bool", "get_objective_position() -> Vector3",
 			"get_horde_wave() -> int", "get_horde_wave_count() -> int", "get_horde_phase() -> StringName",
 			"get_horde_countdown_s() -> float", "get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int",
-			"get_horde_waves_cleared() -> int", "debug_horde_start_next_wave() -> void"]},
+			"get_horde_waves_cleared() -> int", "debug_horde_start_next_wave() -> void",
+			# docs/arquitetura.md section 8.4 (1.3, HF3): INF = no dog target (the default)
+			"get_dog_target_position() -> Vector3"]},
 	{"name": "CornStockVisualBase", "path": "res://src/core/corn_stock_visual_base.gd", "base": "Node3D",
 		"methods": ["stage_for(pct: float) -> int", "setup(ring_radius_m: float) -> void", "set_stock_pct(pct: float) -> void",
 			"set_under_attack(on: bool) -> void", "create_fallback() -> CornStockVisualBase"],

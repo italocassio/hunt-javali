@@ -1,12 +1,17 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.4** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
+Versão do contrato: **1.5** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
 HUD/onboarding, fases 1 e 2: teclas fixas por item, barra de itens, botões de item no toque, dicas das primeiras
 caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14; fase 4, jogo 0.8.2: ação `help`, objetivos e
 legenda de teclas, nomes nos botões de toque; §4, §6.8, §8.4, §9.1, §14; 1.4 = fase 5, jogo 0.8.3: bússola com
 graus e colaterais, marcadores comuns à bússola e ao minimapa, minimapa com imagem do mapa gerada na CPU, Preparação
 sem teclas de atalho; §2, §6.8, §6.9, §6.10, §8.1, §8.4, §9.1, §11, §12, §13.1, §14, Apêndice A; 1.4 (implementado
-em 0.8.3): divergências aceitas pelo coordenador registradas em §6.8, §6.10, §8.4, §11, §12, §13.1 e §14) · Godot **4.7.2** ·
+em 0.8.3): divergências aceitas pelo coordenador registradas em §6.8, §6.10, §8.4, §11, §12, §13.1 e §14; 1.5 = fase 6,
+jogo 0.8.4: painel da arma com retrato, munição grande e fileira de armas 1–5 (`WeaponPanel`), vida em barra larga
+embaixo no centro (`HealthStrip`), barra de itens sobe 26 px, FPS sozinho no canto superior esquerdo, painel da arma
+na coluna da esquerda no toque; §2, §4, §6.8, §7.9, §8.4, §12, §13.1, §14; 1.5 (implementado para 0.8.4):
+divergências aceitas pelo coordenador registradas em §6.8, §8.4, §12 e §14, e as folgas do toque refeitas no canvas
+virtual (4:3 = 1280×960, não 960×720)) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
@@ -156,6 +161,8 @@ hunt-javali/
 │   │   ├── objectives_panel.gd   class ObjectivesPanel (objetivos das primeiras caçadas, §8.4)
 │   │   ├── controls_legend.gd    class ControlsLegend (legenda de teclas das primeiras caçadas, §8.4)
 │   │   ├── map_markers.gd        class MapMarkers (formas e cores comuns à bússola e ao minimapa, §8.4, 1.4)
+│   │   ├── weapon_panel.gd       class WeaponPanel (arma ativa, munição, fileira de armas, §8.4, 1.5)
+│   │   ├── health_strip.gd       class HealthStrip (barra de vida larga embaixo, §8.4, 1.5)
 │   │   ├── debug/                (sandboxes do HUD; hud_hints_test.tscn|.gd, §14)
 │   │   └── touch/
 │   ├── hunt/                     game-developer Pacote B
@@ -346,6 +353,11 @@ Apertar a tecla de um item que não veio na caçada mostra "Você não trouxe es
 **Ajuda (jogo 0.8.2).** `help` (H) abre e recolhe a legenda de teclas das primeiras caçadas (`ControlsLegend`,
 §8.4). Quem trata a tecla é o `Hud` (`_unhandled_input`, ignora eco, só com a legenda visível); fora das primeiras
 caçadas, no toque, com `?hints=0` ou com a árvore pausada, H não faz nada. Nenhuma outra tecla mudou.
+
+**Fileira de armas (1.5, jogo 0.8.4).** Nenhuma ação nova. O `WeaponPanel` (§8.4) mostra, em cada arma carregada de
+índice `i` (0 = primeira), o rótulo `InputSetup.get_key_label(StringName("weapon_%d" % (i + 1)))` ("1"…"5"), só no
+teclado/mouse. É só vista: quem troca de arma continua sendo o `Player` (`weapon_1`…`weapon_5`, `weapon_swap`); a
+fileira não é tocável no toque (o botão Trocar já existe).
 
 **Mouse injetado.** Com `emulate_mouse_from_touch=true`, todo toque gera um clique de mouse falso
 (`event.device == InputEvent.DEVICE_ID_EMULATION`); se o botão esquerdo estivesse no InputMap, tocar para
@@ -601,7 +613,7 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 
 | class_name | Arquivo | Extends | API pública relevante para outros |
 |---|---|---|---|
-| `Player` | `src/player/player.gd` (cena `src/player/player.tscn`) | PlayerBase | toda a API de `PlayerBase` |
+| `Player` | `src/player/player.gd` (cena `src/player/player.tscn`) | PlayerBase | toda a API de `PlayerBase`; 1.5: `get_weapon_ids() -> Array[StringName]` (cópia, na ordem dos slots: o índice `i` é a ação `weapon_{i+1}` e o valor de `get_weapon_slot()`; não muda durante a caçada), `debug_set_health(hp: float) -> void` (só sandbox/tests: `_health = clampf(hp, 1.0, get_max_health())`, sem sinal, sem dano, nunca mata) |
 | `Weapon` | `src/weapons/weapon.gd` | Node | interna ao A |
 | `WeaponHolder` | `src/weapons/weapon_holder.gd` | Node3D | interna |
 | `Hitscan` | `src/weapons/hitscan.gd` | RefCounted (static) | `static func cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array[RID]) -> Dictionary` |
@@ -616,6 +628,8 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `Compass` | `src/hud/compass.gd` | Control | faixa da bússola (§8.4; 1.4: graus, colaterais, rumo no centro). `update_state(origin: Vector3, yaw_rad: float, marks: Array[Dictionary]) -> void` (assinatura de antes; `marks` = `{pos: Vector3, kind: StringName}`, `kind` de `MapMarkers`; `&"ally"` também tem `color: Color` e `down: bool`); `var objective: Vector3`, `var objective_icon: Texture2D` (horda, como antes); `static func bearing_of(dx: float, dz: float) -> float` (como antes); 1.4: `static func heading_deg_of(yaw_rad: float) -> int` (= `posmod(roundi(rad_to_deg(-yaw_rad)), 360)`), `static func label_for(deg: int) -> String` (múltiplo de 45 → "N", "NE", "L", "SE", "S", "SO", "O", "NO"; outro múltiplo de 15 → o número, ex. "105"; demais → ""), `get_heading_deg() -> int`, `get_heading_text() -> String` (ex. "135°") |
 | `Minimap` | `src/hud/minimap.gd` | Control | minimapa 180×180, centrado no caçador, norte para cima (§8.4). Membros de antes (`map_rect`, `crop_rects`, `dog_position`, `dog_target`, `marked`, `revealed`, `baits`, `objective`, `objective_icon`, `allies`, `ally_colors`, `ally_yaws`, `ally_down`, `center_color`, `update_player`, `is_in_view`); 1.4: `var map_texture: Texture2D = null` (imagem do mapa inteiro; `null` = fundo liso de antes), `get_map_src_rect() -> Rect2` (fatia da textura em texels) e `get_map_dst_rect() -> Rect2` (onde ela é desenhada, px do controle), recalculadas em `update_player` e quando `map_texture`/`map_rect` mudam; `Rect2()` sem textura ou fora do mapa |
 | `MapMarkers` | `src/hud/map_markers.gd` | RefCounted (static) | 1.4: única fonte das formas e cores dos marcadores da bússola e do minimapa (tabela em §8.4). Constantes `KIND_*` (StringName), `COLOR_*`, `OUTLINE_PX`, `DRAW_ORDER: Array[StringName]`; `static func draw(ci: CanvasItem, kind: StringName, at: Vector2, color: Color, half_px: float) -> void` (desenha a forma do tipo, com contorno preto, centrada em `at`; `half_px` = meia-largura / raio); `static func color_of(kind: StringName) -> Color` (implementado em 0.8.3: a cor do tipo pela tabela de §8.4; `&"ally"` não tem cor própria, a cor é a do slot); anel `dog_target`: `RING_WIDTH_FRAC = 0.25` (largura = 0,25 × `half_px`) e `RING_OUTLINE_LESS_PX = 0.5` (contorno = largura − 0,5). `&"ally"` não passa por aqui (losango na bússola, seta no minimapa, como antes) |
+| `WeaponPanel` | `src/hud/weapon_panel.gd` | VBoxContainer | 1.5, jogo 0.8.4: painel da arma (§8.4, "Painel da arma e barra de vida"); só vista, quem o alimenta é o `Hud`, que o põe dentro de um `HudPanel` (`Hud/Root/WeaponFrame`). `set_weapons(weapon_ids: Array[StringName]) -> void` (uma vez, no `bind`: cria `Row/Chip_<n>` para cada id, `n` = índice + 1, e carrega os retratos; chamar de novo refaz tudo; lista vazia = painel sem arma, sem fileira; lista não vazia ativa o índice 0 sozinha, como `set_active(0)`, implementado em 0.8.4), `set_active(index: int) -> void` (retrato e nome da arma `index`, chip realçado; fora da faixa = nada), `set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void` (só reescreve texto quando algum valor muda), `set_reload(active: bool, progress: float) -> void` (`progress` 0–1), `set_touch(touch: bool) -> void` (esconde/mostra as teclas dos chips); para tests: `get_weapon_ids() -> Array[StringName]` (cópia), `get_active_index() -> int` (-1 sem arma), `get_name_text() -> String`, `get_mag_text() -> String`, `get_reserve_text() -> String`, `is_ammo_low() -> bool`, `get_chip_key_text(index: int) -> String` (`""` no toque, fora da faixa ou sem tecla), `get_portrait_path() -> String` (caminho da textura do retrato ativo: o PNG, o SVG de fallback ou `""`), `is_row_visible() -> bool`. Filhos: `Name` (Label), `Main/Portrait` (TextureRect), `Main/Ammo/Mag`, `Main/Ammo/Reserve` (Labels), `ReloadBar` (ProgressBar), `Row` (HBoxContainer) com `Chip_<n>`, cada um com `Portrait` e `Key` |
+| `HealthStrip` | `src/hud/health_strip.gd` | Control | 1.5, jogo 0.8.4: barra de vida larga (§8.4); só vista. `const HEIGHT_PX: float = 28.0`; `set_health(hp: float, max_hp: float) -> void` (barra = `hp / maxf(max_hp, 1) × 100`, cor pela fração, número `ceili(hp)`; texto só reescrito quando o inteiro muda), `set_vest(on: bool) -> void`, `set_touch(touch: bool) -> void` (largura 400 → 300 px); para tests: `get_value_text() -> String`, `get_fill_pct() -> float` (0–100), `get_fill_color() -> Color`, `has_vest() -> bool`. Filhos: `Vest` (HBoxContainer com `Icon` e `Text`), `Bar` (ProgressBar, variação `HealthBar`), `Value` (Label). Comportamento (0.8.4): recém-criada mostra "1", barra cheia e verde (`_init` chama `set_health(1.0, 1.0)`) até o primeiro `set_health`; o `Hud.bind` a atualiza antes do primeiro quadro, então o jogador nunca vê esse "1" |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
 | `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `set_action_labels(on: bool) -> void` / `has_action_labels() -> bool` (jogo 0.8.2: com `true`, Tiro, Mira, Recarga, Troca e Agachar mostram o nome abaixo do círculo, como os botões de item e o do cão já mostram; o botão Pausa nunca; padrão `false`, quem liga é o `Hud`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
@@ -1061,7 +1075,8 @@ ids de arma e de passo já listados. Nenhum id novo.
   transparente, perfil direito (lado do ferrolho), coronha à esquerda e cano à direita, arma centrada ocupando ~92% da largura.
   Importação: WebP com perda (`lossy_quality` 0.82) com mipmaps; quem exibe usa
   `TEXTURE_FILTER_LINEAR_WITH_MIPMAPS` (o cano fino serrilha sem mipmap). Consumidos pelo cartão da loja
-  (`ItemCard`) e pela escolha de armas (`LoadoutPanel`). Fallback: o ícone SVG `ScenePaths.icon(weapon_id)`.
+  (`ItemCard`), pela escolha de armas (`LoadoutPanel`) e, desde 1.5, pelo painel da arma do HUD (`WeaponPanel`, §8.4;
+  orçamento em §13.1). Fallback: o ícone SVG `ScenePaths.icon(weapon_id)`. Nenhum asset novo na Fase 6.
 - **Menu principal estilo pôster** (0.7.3). Do art-director, consumidos por `src/ui/main_menu/`:
   - Fonte de destaque `res://assets/ui/fonts/display_font.tres` (`ScenePaths.DISPLAY_FONT`): `FontVariation` da
     fonte padrão (negrito + itálico + condensado sintéticos). Nenhum arquivo de fonte externo.
@@ -1221,13 +1236,14 @@ Queda de dano: `d ≤ falloff_start_m` → 1; `d ≥ falloff_end_m` → `min_dam
   `get_boars_total`, `has_dog`) para não depender da ordem dos sinais.
 
 Layout do HUD (referência 1280×720, âncoras; respeita margem de 24 px nas laterais):
-topo-esquerda vida + ícone do colete + botão pausa (toque); topo-centro bússola (480×54 px desde 1.4: graus a cada
+topo-esquerda contador de FPS (1.5; antes vida + colete, que desceram) + botão pausa (toque); topo-centro bússola (480×54 px desde 1.4: graus a cada
 15°, cardeais e colaterais, rumo em graus no centro, marcadores da tabela abaixo) com barra "Lavoura 87%" abaixo e
 aviso "Javalis na lavoura!" piscando; topo-direita minimapa 180×180 (1.4: sobre a imagem do mapa) e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
-R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita munição "5 | 30" e nome da arma (a linha de item
-"Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro a barra de itens (só
-desktop, abaixo); faixa de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); cartão do cão
-abaixo do minimapa (abaixo).
+R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita o painel da arma (1.5: retrato, nome, munição grande
+"5 | 30", barra de recarga e fileira de armas; no toque ele vai para a coluna da esquerda; a linha de item
+"Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro, de baixo para cima, a barra de
+vida larga (1.5, nos dois modos) e a barra de itens (só desktop) — ver "Painel da arma e barra de vida" abaixo; faixa
+de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); cartão do cão abaixo do minimapa (abaixo).
 Toque (CanvasLayer 11, visível só em modo toque): joystick fixo à esquerda, arrastar fora dos botões para olhar
 (por índice de toque), botões desenhados pelo `TouchControls` que apertam a ação: Tiro, Mira, Recarregar,
 Trocar, Agachar, Pausa (posições de hoje, `TouchControls.BUTTONS`), o botão do cão e um botão por item
@@ -1250,10 +1266,11 @@ Sem nenhum espaço, a barra fica invisível. Estados de um espaço (iguais no de
 | piscando | `flash(id, true)` até `flash(id, false)` | borda âmbar alternando a 2 Hz (constante própria `FLASH_HZ = 2.0`, mesmo valor de `Hud.BLINK_HZ`; não referencie `Hud` de dentro da `Quickbar`) |
 
 **Barra de itens (desktop)** — `Quickbar` (`Hud/Root/Quickbar`), visível só com `InputSetup.is_touch_mode() ==
-false`. O `Hud` a ancora no centro-baixo, 24 px acima da borda (`MARGIN_PX`). Cada espaço `Slot_<id>` é um
+false`. O `Hud` a ancora no centro-baixo, 24 px acima da borda (`MARGIN_PX`) até 0.8.3; **desde 1.5** 50 px acima
+da borda, logo acima da barra de vida (`QUICKBAR_BOTTOM_PX`, ver "Painel da arma e barra de vida"). Cada espaço `Slot_<id>` é um
 `HudPanel` de 64×64 px, ícone 32 px no centro, quantidade 14 px, letra da tecla (`InputSetup.get_key_label(ação)`, 14 px) numa
 etiqueta escura no canto superior esquerdo, separação 8 px. No máximo 4 espaços (`loadout.item_slots` = 3 itens
-+ cão) = 280 px; a 1280×720 fica em x 500–780, y 632–696, sem tocar a mensagem de abate (0,72–0,84 da altura) nem o painel de munição. Constantes de
++ cão) = 280 px; a 1280×720 fica em x 500–780, y 632–696 até 0.8.3 e **y 606–670 desde 1.5**, sem tocar a mensagem de abate (0,72–0,84 da altura, termina em y 604,8) nem o painel da arma. Constantes de
 desenho no próprio script (não são balanceamento). Desenho com `draw_*` em `_draw`; `queue_redraw` só quando
 um sinal muda o estado e a cada frame apenas enquanto há espaço em uso ou piscando.
 
@@ -1262,8 +1279,9 @@ modo "hold" (apertam a ação `use_<id>` do item; `use_binoculars` alterna no pr
 horizontal na altura do antigo botão Item: centro do i-ésimo item (i = índice em `get_usable_ids()`, 0 = o mais
 perto do polegar) em `(largura − (380 + 96·i), altura − 250)`. No máximo 3 itens (`loadout.item_slots`), então
 x vai de `largura − 572` a `largura − 380`: com 96 px de passo, os raios de toque (38 + 8) não se sobrepõem; a
-1280×720 o mais à esquerda fica em x = 708, a 960×720 (iPad 4:3) em x = 388, fora da área ativa do joystick
-(acaba em x ≈ 314 naquela altura); não invadem Tiro, Mira, Recarregar, Trocar e Agachar (o mais próximo,
+1280×720 o mais à esquerda fica em x = 708 (correção 1.5: uma janela 960×720, iPad 4:3, tem canvas virtual
+1280×960, ver "Posições" em "Painel da arma e barra de vida", então também x = 708; a largura virtual nunca fica abaixo
+de 1280), fora da área ativa do joystick (acaba em x ≈ 314 naquela altura); não invadem Tiro, Mira, Recarregar, Trocar e Agachar (o mais próximo,
 Agachar, fica 44 px abaixo). O botão do cão fica onde já estava (centro `(largura − 235, altura − 350)`, 76 px)
 e só existe enquanto houver cão (`set_dog_present`). Cada botão de item e o do cão mostram o nome curto
 (`short_name` do item, "Cão" para o cão; 16 px) logo abaixo do círculo, e os consumíveis mostram "x2" no canto
@@ -1368,8 +1386,8 @@ nos botões de toque. Só vistas: o `Hud` as cria em `_ready`, decide quando apa
   (`player_died`), no espectador (`spectate_changed(slot >= 0)`) e no fim da caçada (`hunt_ended`). Na **horda** só a
   legenda aparece (os objetivos falam de lavoura e de total de javalis, que a horda não tem; o painel de ondas já
   dá o objetivo). No toque a legenda não existe e os objetivos e os nomes dos botões aparecem.
-- **Objetivos** (`Hud/Root/Objectives`, coluna à esquerda: `margin_top` 132 px, abaixo da vida e da faixa da lavoura
-  da bússola, e `margin_left` 24 px no teclado / 128 px no toque, à direita do slider de zoom; dentro de um `HudPanel`,
+- **Objetivos** (`Hud/Root/Objectives`, coluna à esquerda: `margin_top` 132 px, abaixo da faixa da lavoura
+  da bússola (desde 1.5 a vida saiu daí; o FPS fica acima, ver "Painel da arma e barra de vida"), e `margin_left` 24 px no teclado / 128 px no toque, à direita do slider de zoom; dentro de um `HudPanel`,
   fonte 17 px). Uma linha por objetivo, com marca redonda desenhada (anel = pendente, bolinha verde = mantendo,
   disco verde com visto = feito, disco vermelho com cruz = falhando) e texto:
 
@@ -1554,6 +1572,150 @@ valores depois de `update_player(origem, 0.0)`): origem (0, 0, 0) →
   "135°", SE sob o entalhe).
 O mapa real é conferido pelo `src/world/debug/minimap_selftest.tscn` (B, headless, grava PNG) e por screenshot de
 `src/hunt/hunt.tscn` (§14, HF5).
+
+**Painel da arma e barra de vida (Fase 6, contrato 1.5, jogo 0.8.4)** — só HUD do Pacote A. Nada novo em
+`GameEvents`, na rede, em `data/`, em `src/core/` ou no `TouchControls`. Duas vistas novas, `WeaponPanel` e
+`HealthStrip` (§6.8), que não leem nada sozinhas: o `Hud` as alimenta com o que já lê do `Player` todo quadro.
+
+*Ligações no `Hud`* (privados novos: `_weapon_panel: WeaponPanel`, `_weapon_frame: PanelContainer`,
+`_health: HealthStrip`, `_last_weapon_slot: int = -1`):
+- `_ready`: `_build_top_left()` passa a conter só o `_fps_counter`; `_build_bottom_right()` é substituído por
+  `_build_weapon_panel()` (cria `_weapon_panel`, embrulha em `_panel(_weapon_panel, 8)` com nome `WeaponFrame`, filho
+  direto de `_root`) e `_build_health()` (cria `_health`, nome `HealthStrip`, filho direto de `_root`).
+- `bind`: `_weapon_panel.set_weapons(_player.get_weapon_ids())`, depois `_weapon_panel.set_active(_player.get_weapon_slot())`
+  e `_last_weapon_slot = _player.get_weapon_slot()`; `_health.set_vest(items != null and items.damage_reduction > 0.0)`
+  (a regra de hoje do `_vest_label`).
+- `_update_weapon()` (todo quadro, como hoje): se `_player.get_weapon_slot() != _last_weapon_slot`, atualiza o cache e
+  chama `set_active`; depois `set_ammo(w.ammo_in_mag, w.ammo_reserve, _player.has_infinite_reserve(),
+  int(w.def.get("mag_size", 1)))` e `set_reload(w.is_reloading(), w.get_reload_progress())`. A regra de munição baixa
+  e o texto da horda passam para o `WeaponPanel`.
+- `_update_health()` (todo quadro, como hoje): `_health.set_health(_player.get_health(), _player.get_max_health())`.
+- `_apply_touch_layout(is_touch)`: `_health.set_touch(is_touch)`, `_weapon_panel.set_touch(is_touch)` e
+  `_place_weapon_frame(is_touch)` (âncoras abaixo).
+- Saem do `Hud`: `_bottomright_margin`, `_health_bar`, `_health_label`, `_vest_label`, `_weapon_label`, `_ammo_label`,
+  `_reload_bar`, `_last_ammo_text`, `TOUCH_BOTTOM_RIGHT_MARGIN_PX` e `HORDE_AMMO_TEXT`. Constantes novas do `Hud`:
+  `HEALTH_BOTTOM_PX: float = 14.0`, `BOTTOM_STACK_GAP_PX: float = 8.0`, `QUICKBAR_BOTTOM_PX: float = HEALTH_BOTTOM_PX +
+  HealthStrip.HEIGHT_PX + BOTTOM_STACK_GAP_PX` (= 50) e `TOUCH_WEAPON_BOTTOM_PX: float = 320.0`. `OBJECTIVES_TOP_PX`
+  (132) e `TOUCH_OBJECTIVES_LEFT_PX` (128) ficam com o mesmo valor (muda só o comentário: abaixo da faixa da lavoura).
+- **Visibilidade (regras de hoje, nada novo):** espectador (`spectate_changed(slot >= 0)`) esconde o `WeaponFrame` e a
+  mira, como escondia `_bottomright_margin`; `NO_SLOT` os traz de volta. A barra de vida fica sempre visível, como a
+  vida de hoje (no espectador e caído mostra a vida do caçador local). Queda sem espectador e fim da caçada não
+  escondem nada. Horda: reserva "| ∞". A `Quickbar` continua se escondendo sozinha no espectador e no toque.
+
+*`WeaponPanel`* (constantes de desenho no próprio script, como a `Quickbar`; não são balanceamento):
+
+| Constante | Valor | Uso |
+|---|---|---|
+| `CONTENT_W_PX` | `224.0` | largura fixa do conteúdo (`custom_minimum_size.x`); o quadro `WeaponFrame` fica com 248 px de largura (margem do stylebox `HudPanel` do tema: 12 px nos lados, 8 px em cima e embaixo; o `margin_px` 8 de `_panel` só vale no fallback sem tema) e altura = conteúdo + 16 |
+| `SEPARATION_PX` | `4` | entre as linhas do `VBoxContainer` e entre retrato e munição |
+| `NAME_FONT_PX` | `15` | `Name`: `HudLabel`, `COLOR_TEXT`, alinhado à direita, uma linha, `OVERRUN_TRIM_ELLIPSIS` na largura do conteúdo |
+| `PORTRAIT_SIZE_PX` | `Vector2(96, 48)` | `Main/Portrait` (2:1, como os retratos) |
+| `MAG_FONT_PX` | `36` | `Main/Ammo/Mag`: pente, `HudBigLabel`; `COLOR_DANGER` com munição baixa, senão `COLOR_TEXT` |
+| `RESERVE_FONT_PX` | `22` | `Main/Ammo/Reserve`: `RESERVE_FORMAT = "| %d"` ou `INFINITE_RESERVE_TEXT = "| ∞"`; sempre `COLOR_TEXT` |
+| `LOW_AMMO_FRAC` | `0.25` | baixa = `in_mag <= 0` ou `float(in_mag) <= float(mag_size) * LOW_AMMO_FRAC` (a regra de hoje, `in_mag * 4 <= mag_size`) |
+| `RELOAD_BAR_H_PX` | `6.0` | `ReloadBar`: largura do conteúdo, variação `CropBar`, `modulate` `COLOR_AMBER`; visível só recarregando, valor `progress × 100` |
+| `CHIP_SIZE_PX` | `Vector2(40, 28)` | cada `Row/Chip_<n>` |
+| `CHIP_ART_SIZE_PX` | `Vector2(36, 18)` | `Chip_<n>/Portrait`, em (2, 8) dentro do chip |
+| `CHIP_GAP_PX` | `6` | separação da `Row`; 5 chips = 224 px, cabe exato |
+| `CHIP_KEY_FONT_PX` | `12` | `Chip_<n>/Key` em (2, 0), fundo `COLOR_KEY_BG` como a letra da `Quickbar`; invisível no toque |
+| `CHIP_BORDER_PX` | `2.0` | borda do chip ativo em `COLOR_AMBER` |
+| `INACTIVE_ALPHA` | `0.5` | `modulate.a` dos chips não ativos (o ativo fica em 1,0) |
+| cores | `COLOR_TEXT` `#F4EFE6`, `COLOR_AMBER` `#F2C12E`, `COLOR_DANGER` `#D9452B`, `COLOR_CHIP_BG` `Color(0, 0, 0, 0.35)`, `COLOR_KEY_BG` `Color(0, 0, 0, 0.7)` | |
+
+- Ordem de cima para baixo: `Name`; `Main` (`HBoxContainer` alinhado à direita: `Portrait` e `Ammo`, este um
+  `HBoxContainer` com `Mag` e `Reserve` alinhados pela base); `ReloadBar`; `Row` (`HBoxContainer`, alinhamento `END`,
+  chips da esquerda para a direita na ordem 1…N). Altura aproximada do conteúdo: 75 px só com nome e linha principal,
+  107 px com a fileira, 117 px com fileira e recarga.
+- **Fileira:** visível só com 2 armas ou mais (com uma arma não há o que escolher). Um chip por arma carregada, nunca
+  por slot vazio: na caçada normal até 2 (`loadout.weapon_slots`), na horda 5. Fundo arredondado (raio 4)
+  `COLOR_CHIP_BG`, retrato pequeno, tecla `InputSetup.get_key_label(StringName("weapon_%d" % n))` no teclado/mouse
+  (§4); o ativo com borda âmbar e alfa 1,0, os outros com `INACTIVE_ALPHA`. Só informativa: `mouse_filter` ignorado em
+  tudo, nos dois modos.
+- **Retratos:** `set_weapons` carrega uma vez, para cada id, `ScenePaths.weapon_art(id)` se `AssetLoader.exists`; senão
+  `ScenePaths.icon(id)` se existir; senão nada (`AssetLoader.load_resource(...) as Texture2D`). Guarda as texturas num
+  `Array[Texture2D]` de mesmo índice; `set_active` só troca referências (nenhum carregamento durante o jogo). A mesma
+  textura serve ao retrato grande e ao chip. Todo `TextureRect` de retrato usa `TEXTURE_FILTER_LINEAR_WITH_MIPMAPS`,
+  `EXPAND_IGNORE_SIZE` e `STRETCH_KEEP_ASPECT_CENTERED` (§7.9). Sem textura nenhuma o retrato fica vazio e o nome
+  continua. Não usar `UiKit` (é de `src/ui/`, do game-systems; o HUD só depende de `ScenePaths`/`AssetLoader`).
+- **Nome:** `String(Data.get_weapon(id).get("name", String(id)))`, lido em `set_weapons`. Os 5 nomes de `weapons.json`
+  cabem em 224 px a 15 px salvo talvez "Rifle .30-06 semiautomático", que pode perder as últimas letras para a
+  reticência (aceito).
+- **Por quadro:** `set_ammo`/`set_active` só tocam `text`/cor quando o valor muda; `set_reload` muda `visible`/`value`.
+  Nenhuma alocação por quadro (as strings só nascem quando a munição muda).
+
+*`HealthStrip`* (constantes no script): `HEIGHT_PX = 28.0`, `WIDTH_PX = 400.0` (teclado), `TOUCH_WIDTH_PX = 300.0`,
+`PAD_X_PX = 10.0`, `GAP_PX = 8.0`, `BAR_HEIGHT_PX = 14.0`, `VALUE_FONT_PX = 20`, `VALUE_MIN_W_PX = 40.0`,
+`VEST_ICON_PX = 20.0`, `VEST_FONT_PX = 15`, `VEST_TEXT = "Colete"`, `WARN_FRAC = 0.5`, `DANGER_FRAC = 0.3`, cores
+`COLOR_GOOD` `#3FAF5A`, `COLOR_WARN` `#F2C12E`, `COLOR_DANGER` `#D9452B`, `COLOR_TEXT`, `COLOR_PANEL` (fallback do fundo).
+- `extends Control`, `custom_minimum_size = Vector2(WIDTH_PX ou TOUCH_WIDTH_PX, HEIGHT_PX)`, `mouse_filter` ignorado
+  em tudo. Fundo: o stylebox `HudPanel` do tema (fallback `StyleBoxFlat` `COLOR_PANEL`, raio 8) desenhado em `_draw`
+  no retângulo todo, como o `Quickbar.Slot`. Os filhos são posicionados pelo próprio script (sem `Container` que possa
+  crescer a altura): da esquerda para a direita, com `PAD_X_PX` nas pontas e `GAP_PX` entre eles, centrados na
+  vertical: `Vest` (só com colete: `Icon` `ScenePaths.icon(Ids.I_LEATHER_VEST)` de 20 px, sem ícone se faltar, e
+  `Text` "Colete" 15 px `COLOR_WARN`), `Bar` (ocupa o resto da largura, 14 px de altura, variação `HealthBar`, cor por
+  `modulate`) e `Value` (20 px, `COLOR_TEXT`, alinhado à direita, largura mínima 40 px). Reposiciona em `set_vest`,
+  `set_touch` e `NOTIFICATION_RESIZED`.
+- Cor da barra (a regra de hoje): fração `> WARN_FRAC` verde, `> DANGER_FRAC` âmbar, senão vermelha. Número
+  `str(ceili(hp))` (vida 0 = "0").
+- O aviso "Colete equipado" do painel antigo vira o par ícone + "Colete" dentro da faixa (mesma condição, mesma cor):
+  cabe nos 300 px do toque sem criar uma segunda linha.
+
+*Posições.* Coordenadas no **canvas virtual**, não em pixels da janela. O projeto usa base 1280×720, stretch
+`canvas_items` e aspect `expand` (§2): mais largo que 16:9, a altura virtual fica 720 e a largura cresce (janela
+1558×720 → canvas 1558×720); mais estreito, a largura virtual fica 1280 e a altura cresce (janela 960×720, iPad 4:3 →
+canvas 1280×960, escala 0,75). Em paisagem a largura virtual **nunca é menor que 1280** e a altura nunca menor que 720.
+Abaixo, `L` × `A` = tamanho do canvas virtual; os números absolutos são para 1280×720 salvo indicação (correção 1.5: a
+versão anterior desta tabela tratava 960×720 como canvas de 960 px de largura, o que não acontece; o layout é o mesmo).
+
+| Peça | Teclado/mouse | Toque |
+|---|---|---|
+| `HealthStrip` | âncoras x 0,5/0,5, y 1/1; `offset_left = offset_right = 0`, `grow_horizontal = BOTH`; `offset_bottom = −HEALTH_BOTTOM_PX` (−14), `offset_top = −(HEALTH_BOTTOM_PX + HEIGHT_PX)` (−42), `grow_vertical = BEGIN` → x `L/2 ± 200`, y `A − 42` … `A − 14` (1280×720: x 440–840, y 678–706) | as mesmas âncoras, 300 px → x `L/2 ± 150`, y `A − 42` … `A − 14` (1280×720: x 490–790, y 678–706; 4:3 = 1280×960: x 490–790, y 918–946; 1558×720: x 629–929, y 678–706) |
+| `Quickbar` | centro-baixo como antes, `offset_bottom = −QUICKBAR_BOTTOM_PX` (−50), `offset_top = −QUICKBAR_BOTTOM_PX − Quickbar.SLOT_SIZE_PX` (−114) → x 500–780, y 606–670 | invisível (como antes) |
+| `WeaponFrame` | âncoras 1/1/1/1; `offset_left = offset_right = −MARGIN_PX`, `offset_top = offset_bottom = −MARGIN_PX`; `grow_horizontal = grow_vertical = BEGIN` → x `L − 272` … `L − 24` (248 px), base em `A − 24`, topo ≥ ≈ `A − 157` (5 armas recarregando; 1280×720: x 1008–1256, y ≈ 563–696) | âncoras x 0/0, y 1/1; `offset_left = offset_right = TOUCH_OBJECTIVES_LEFT_PX` (128); `offset_top = offset_bottom = −TOUCH_WEAPON_BOTTOM_PX` (−320); `grow_horizontal = END`, `grow_vertical = BEGIN` → x 128–376, base em `A − 320`, topo ≥ ≈ `A − 453` (1280×720 e 1558×720: y ≈ 267–400; 4:3 = 1280×960: y ≈ 507–640) |
+| `TopLeft` (só o FPS) | (24, 24) | (100, 24), à direita do botão Pausa (`TOUCH_TOPLEFT_MARGIN_PX`) |
+| `Objectives` | (24, 132), sem mudança | (128, 132), sem mudança; com 4 linhas termina em y ≈ 256, acima do painel da arma em qualquer proporção |
+
+Folgas conferidas (toque; centros e raios de `TouchControls.BUTTONS`, que ficam presos aos cantos, e da fileira de
+itens, §8.4; o caso mais apertado na horizontal é `L = 1280`, que vale para 16:9 e para 4:3):
+- `HealthStrip` (x `L/2 ± 150`, y `A − 42` … `A − 14`): zona ativa do joystick (centro `(190, A − 160)`, raio
+  90 × 1,7 = 153) alcança no máximo x ≈ 287 nessa altura (a faixa começa em x ≥ 490); base visível do joystick termina
+  em `A − 70`; Agachar (centro `(L − 410, A − 130)`, r 38) começa em x ≥ 832 e termina em `A − 92`, o nome dele em
+  ≈ `A − 68`; Mira (centro `(L − 290, A − 105)`, r 50) fica a ≥ 160 px do canto `(L/2 + 150, A − 42)` e o nome dela
+  ocupa x ≈ `L − 308` … `L − 272` (≥ 972); Tiro (centro `(L − 125, A − 130)`, r 65) começa em x ≥ 1090 e termina em
+  `A − 65`. Com `L` maior a folga só cresce (os botões andam com a borda direita, a faixa fica no centro).
+- `WeaponFrame` no toque (x 128–376, y ≈ `A − 453` … `A − 320`): slider de zoom em x 32–116; zona ativa do joystick
+  começa em `A − 313` (x = 190), 7 px abaixo da base, e mais abaixo nas outras colunas; fileira de itens: o mais à
+  esquerda em x `L − 572` (≥ 708; raio de toque a partir de x 662) e em y ≥ `A − 296`, longe nas duas direções.
+  Faixas por fração da altura, a 1280×720 e 1558×720: dica (0,30–0,37 = y 216–266) e mensagem de contexto (y 180–238)
+  acima; mensagem do cão (0,58–0,66 = y 418–475) abaixo; faixa da lavoura e aviso "Javalis na lavoura!" terminam antes
+  de y 170. A 1280×960 (4:3): dica (y 288–355), contexto (y 240–317) e mensagem de fim (0,38–0,52 = y 365–499) acima
+  do topo (≥ 507); mensagem de abate (0,72–0,84 = y 691–806) abaixo; a mensagem do cão (y 557–634) fica na altura do
+  painel (resíduo abaixo). A coluna da esquerda foi escolhida porque, no toque, a faixa de baixo não tem 248 px livres
+  entre o joystick e Agachar/itens.
+- Teclado a 1280×720: legenda das primeiras caçadas termina em y 497 com cão, acima do `WeaponFrame` (≥ 563); a barra de
+  vida (x ≤ 840) e a `Quickbar` (x ≤ 780) não alcançam o painel (x ≥ 1008).
+
+Resíduos aceitos (documentados para não virarem bug):
+- Teclado 1280×720: uma mensagem de abate muito longa (> ≈ 750 px a 30 px, combinações "Tiro limpo! · Um tiro só!")
+  pode encostar no canto superior esquerdo do `WeaponFrame` (y 541–581 da mensagem contra o topo ≈ 563 do painel).
+- Toque 16:9 ou mais largo (`A = 720`; ex. 1280×720, 1558×720): a mensagem de fim de caçada (0,38–0,52 = y 274–374,
+  44 px, centrada) pode cobrir a parte direita do painel da arma nos 5 s antes do resultado quando o texto passa de
+  ≈ `2 × (L/2 − 376)` px (528 a 1280, 806 a 1558). Em 4:3 (`A = 960`) ela termina acima do painel.
+- Toque 4:3 (1280×960): a mensagem do cão (0,58–0,66 = y 557–634, 28 px, centrada) fica na altura do painel da arma
+  (y ≈ 507–640); só encosta nele (x ≤ 376) um texto com mais de ≈ 528 px (achado no fechamento da 1.5, sem tarefa).
+- Toque: a munição fica longe dos polegares (coluna da esquerda); troca consciente pelo espaço livre em 4:3.
+- FPS ligado em rede com várias ligações (várias linhas) pode encostar no topo dos objetivos (setting de
+  desenvolvedor + primeiras caçadas + rede).
+- Horda, 1280×720 (anterior à Fase 6, sem tarefa): a faixa "Defenda o celeiro! A horda chega em N s" (`WaveBanner`,
+  `HORDE_BANNER_TOP_FRAC = 0.18`, y ≈ 130–180) se sobrepõe ao painel do celeiro no topo.
+
+*Sandbox* (`src/player/debug/sandbox_world.gd`, argumentos novos depois de `--`; os de antes continuam: `--weapons=a,b`,
+`--horde`, `--items=…` com `leather_vest` para o colete, `--touch=on`, `--frames=600`). Aplicados depois do `setup`,
+nesta ordem (implementado em 0.8.4):
+- `--hp=<1-100>`: `player.debug_set_health(player.get_max_health() * N / 100.0)`.
+- `--slot=<1-5>`: `player.bot_select_weapon(n − 1)` (chip realçado e retrato da arma `n`).
+- `--mag=<n>`: `player.get_weapon().ammo_in_mag = n`, depois do `--slot`, então vale para a arma **na mão** (com
+  `--slot=2 --mag=1` é o pente da espingarda; sem `--slot`, o da arma inicial); para ver o pente baixo em vermelho.
 
 ### 8.5 Mundo exposto: estrutura obrigatória de uma cena de mapa
 Caminho: `ScenePaths.map_scene(map_id)` = `res://src/world/maps/<map_id>/<map_id>_map.tscn` (B).
@@ -2582,6 +2744,34 @@ Implementado em 0.8.3: o `minimap_selftest` tem 8 checks (`texture_size`, `orien
 `minimap_same_on_both`. `tests/unit/test_compass_minimap.gd` e `tests/unit/test_loadout_panel_keys.gd` são da HF5-QA
 (concluídos: 63 e 10 testes); o de `LoadoutPanel` confere também que `_dog_hint` não cita tecla.
 
+Cobertura da Fase 6 (contrato 1.5, jogo 0.8.4): `tests/lib/contract_sigs.gd` ganha `WeaponPanel` (os 5 métodos de
+entrada e os 8 de teste de §6.8), `HealthStrip` (`HEIGHT_PX`, `set_health`, `set_vest`, `set_touch` e os 4 de teste) e
+`Player.get_weapon_ids`/`debug_set_health`. `unit_tests` ganha `tests/unit/test_weapon_health_hud.gd`
+(concluído na HF6-QA: 45 testes; `tests/unit_tests.gd` não mudou, o runner descobre sozinho todo `tests/unit/test_*.gd`;
+o `contract_sigs` cobre os métodos das duas vistas e os dois do `Player`; a constante `HealthStrip.HEIGHT_PX` é
+conferida pelo teste unitário, não pelo `contract_sigs`, como registra o comentário dele):
+- `WeaponPanel` solto (sem `Hud`): `set_weapons([carbine_22, shotgun_12])` → chips `Chip_1`, `Chip_2`, fileira visível,
+  teclas "1" e "2" (iguais a `InputSetup.get_key_label(&"weapon_1"/&"weapon_2")`); com uma arma a fileira some; com as 5
+  há `Chip_1`…`Chip_5` e nenhum `Chip_6`; `set_active(1)` → `get_active_index() == 1`, nome "Espingarda calibre 12",
+  `get_portrait_path() == ScenePaths.weapon_art(&"shotgun_12")`; `set_active(9)` não muda nada; id sem PNG nem SVG
+  (lista com um id falso) → `get_portrait_path() == ""` sem erro fatal; `set_ammo(5, 30, false, 10)` → "5" e "| 30", não
+  baixa; `set_ammo(2, 30, false, 10)` → baixa (2 ≤ 2,5); `set_ammo(0, 0, false, 5)` → baixa; `set_ammo(3, 0, true, 5)` →
+  "| ∞"; `set_reload(true, 0.4)` → `ReloadBar` visível com valor 40, `set_reload(false, 0)` → invisível;
+  `set_touch(true)` → `get_chip_key_text(0) == ""`, `set_touch(false)` volta a "1".
+- `HealthStrip` solto: `set_health(100, 100)` → "100", 100%, verde; `(50, 100)` → âmbar (50 não é > 50); `(31, 100)` →
+  âmbar; `(30, 100)` → vermelha; `(0.4, 100)` → "1"; `(0, 100)` → "0"; `max_hp` 0 não divide por zero; `set_vest(true)`
+  → `has_vest()` e `Vest` visível; altura do controle == `HEIGHT_PX` com e sem colete; `set_touch(true)` → largura 300.
+- `Hud` com o `player_sandbox` (ou um `Player` de teste, como os testes de HUD de antes): depois do `bind`,
+  `_weapon_panel.get_weapon_ids() == player.get_weapon_ids()`; `bot_select_weapon(1)` → depois de um quadro
+  `get_active_index() == 1`; `debug_set_health(37)` → "37" na faixa; colete do loadout padrão → `has_vest()`;
+  `spectate_changed(1)` esconde `WeaponFrame` e mantém `HealthStrip`, `spectate_changed(-1)` mostra de novo; com
+  `InputSetup.set_touch_override("on")` o `WeaponFrame` fica com `offset_left == 128` e a faixa com 300 px, e com `"off"`
+  volta (restaurar o modo no fim); `QUICKBAR_BOTTOM_PX == 50` e a `Quickbar` com `offset_bottom == −50`.
+Os sandboxes do A que liam privados do `Hud` passam a ler os novos (HF6-A): `hud_horde_test` (`_weapon_panel`:
+`get_reserve_text() == "| ∞"` e `get_mag_text()` = pente na horda; "| <reserva>" no contrato), `hud_net_test` e
+`spectator_sandbox` (`_weapon_frame` no lugar de `_bottomright_margin`). `flow_test`, `playthrough` e o
+`mobile_probe.py` não mudam (o probe não lê o painel; roda na publicação porque o layout do toque mudou).
+
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
 `is_world_ready`/`world_ready`, `is_hunt_over`, `get_result`, `debug_kill_boar`, `debug_set_crop_health`,
@@ -2615,6 +2805,7 @@ resultado de renderização.
 | Memória | alvo ≤ 300 MB no total da aba |
 | Alocação | nada de `Array`/`Dictionary` novos por frame em laços de IA; HUD/minimapa a 10 Hz |
 | Minimapa (1.4) | imagem gerada 1× por caçada na CPU (`MinimapBaker`), RGB8 `image_px`² (256² = 192 KiB), sem `SubViewport`; etapa `minimap` ≤ 60 ms desktop nativo e ≤ 400 ms Web com CPU ×4 (medido em 0.8.3: 9,8 ms no desktop headless, `HUNT_TIMING minimap_ms=10`); desenho: 1 `draw_texture_rect_region` por redesenho (10 Hz), sem alocação |
+| Retratos de arma no HUD (1.5) | exceção à regra de ≤ 512²: os PNG 1024×512 de §7.9 (RGBA8 + mipmaps ≈ 2,7 MB de VRAM cada), só das armas carregadas, carregados uma vez no `Hud.bind` (dentro da montagem, antes de `hunt_started`): caçada normal ≤ 2 (≈ 5,3 MB), horda 5 (≈ 13,3 MB), dentro do alvo de 300 MB. Nenhum carregamento ao trocar de arma. Decodificar 5 WebP na Web soma tempo à etapa que monta o jogador: conferir com `load_ab.py --throttle=4` que nenhuma etapa passa de 700 ms (válvula se passar: o chip usa o SVG `ScenePaths.icon(id)` e só o retrato ativo carrega o PNG, com carga na troca) |
 | Aliados (cooperativo) | ≤ 3 `RemoteHunter`, ≤ 5000 tris e ≤ 10 `MeshInstance3D` cada, + 1 `Label3D`; draw calls: pior caso ≤ 230 com 3 aliados |
 | Rede (cooperativo) | download do cliente ≤ 5 kB/s; quadro de estado ≤ 1100 B (`net.max_frame_bytes`); nenhuma alocação por tick além de um `PackedByteArray` por quadro; raios de visão ≤ 130/s |
 
@@ -2939,6 +3130,72 @@ Critérios de aceite:
   minimapa mostra o mapa real alinhado com o mundo (andar até o açude: ele passa pelo centro do minimapa) e a bússola
   aponta os dois talhões; `load_ab.py --throttle=4` com `minimap_ms` ≤ 400 (senão `grid_stride = 2` nos dados e
   medir de novo); `mobile_probe.py` verde.
+
+### Frente HUD/gameplay — fase 6 (contrato 1.5, jogo 0.8.4; implementada e testada em 2026-11-20)
+Painel da arma com retrato, munição grande e fileira de armas; vida em barra larga embaixo no centro. Contrato em §4
+("Fileira de armas"), §6.8 (`WeaponPanel`, `HealthStrip`, `Player.get_weapon_ids`/`debug_set_health`), §7.9
+(retratos também no HUD), §8.4 ("Painel
+da arma e barra de vida"), §12 (cobertura da Fase 6) e §13.1 (retratos no HUD). Nada muda em `project.godot`,
+`export_presets.cfg`, `src/core/`, `src/net`, `GameEvents`, `data/`, `src/ui/`, no `TouchControls` nem no protocolo
+de rede. Nenhum asset novo (os 5 retratos e os SVG já existem): o art-director e o game-systems não têm tarefa. Todos
+em Sonnet. Toda tarefa termina com `check_scripts`, `unit_tests`, `flow_test` e `playthrough` sem mudança de resultado
+(exceto o que a própria tarefa atualiza nos testes).
+
+| Tarefa | Dono | Arquivos | Depende de |
+|---|---|---|---|
+| HF6-A — painel da arma, barra de vida, layout (concluída) | game-developer (A) | `src/hud/weapon_panel.gd`, `src/hud/health_strip.gd` (novos); `src/hud/hud.gd` (`_build_top_left` só com FPS, `_build_weapon_panel`, `_build_health`, `_build_quickbar` com `QUICKBAR_BOTTOM_PX`, `bind`, `_update_weapon`, `_update_health`, `_apply_touch_layout`/`_place_weapon_frame`, `_on_spectate_changed`; sai o que §8.4 lista); `src/player/player.gd` (só `get_weapon_ids` e `debug_set_health`); `src/player/debug/sandbox_world.gd` (`--hp=`, `--mag=`, `--slot=`); `src/hud/debug/hud_horde_test.gd`, `src/hud/debug/hud_net_test.gd`, `src/player/debug/spectator_sandbox.gd` (só trocar `_ammo_label`/`_bottomright_margin` pelos privados novos, mesmos checks) | — |
+| HF6-QA (concluída) | qa-tester | `tests/lib/contract_sigs.gd` (`WeaponPanel`, `HealthStrip`, `Player.get_weapon_ids`, `Player.debug_set_health`); `tests/unit/test_weapon_health_hud.gd` (novo, §12, 45 testes); `tests/unit_tests.gd` (não precisou mudar: o runner descobre `tests/unit/test_*.gd`) | HF6-A |
+
+Ordem: HF6-A → `--import` (classes novas) → HF6-QA → coordenação: screenshots de integração (abaixo), exporta a Web,
+mede com `load_ab.py --throttle=4`, roda `mobile_probe.py`, sobe `config/version` para 0.8.4 e publica.
+
+Divergências da entrega aceitas pelo coordenador (já refletidas nas seções citadas; valem como contrato):
+- **Sandbox (HF6-A, §8.4):** a ordem real é `--hp`, `--slot`, `--mag`; `--mag` vale para a arma na mão (depois do
+  `--slot`), não só para a inicial.
+- **`WeaponPanel` (HF6-A, §6.8, §8.4):** `set_weapons` com lista não vazia ativa o índice 0 sozinho. O `WeaponFrame`
+  tem 248 px de largura (x 1008–1256 a 1280×720 no teclado, x 128–376 no toque), por causa da margem 12/8 do stylebox
+  `HudPanel` do tema, não ≈ 240. Helper público `static func style_portrait(rect: TextureRect) -> void` (filtro,
+  `expand_mode` e `stretch_mode` comuns ao retrato grande e aos chips; uso interno, fora do `contract_sigs`).
+- **`HealthStrip` (HF6-A, §6.8):** recém-criada mostra "1" até o primeiro `set_health` (`_init` chama
+  `set_health(1.0, 1.0)`); comportamento, não bug, porque o `Hud.bind` atualiza antes do primeiro quadro.
+- **Geometria do toque (coordenação, §8.4):** com stretch `canvas_items` + aspect `expand`, uma janela 960×720 tem
+  canvas virtual 1280×960 (escala 0,75), não 960×720. As "Folgas conferidas" foram reescritas em coordenadas virtuais
+  relativas às âncoras (`L`, `A`), sem mudar o layout aprovado; só 1558×720 batia com a geometria antiga. A correção
+  vale também para a frase da fileira de itens em "Botões de item (toque)". Um resíduo novo apareceu na conta (mensagem
+  do cão na altura do painel em 4:3) e o da mensagem de fim mudou de proporção (agora 16:9 e mais largo).
+- **Testes (HF6-QA, §12):** 45 testes em `tests/unit/test_weapon_health_hud.gd`; `tests/unit_tests.gd` sem mudança;
+  `HealthStrip.HEIGHT_PX` conferido pelo teste unitário.
+- **Resíduo anterior à fase (sem tarefa, §8.4):** na horda a 1280×720, a faixa "Defenda o celeiro! A horda chega em
+  N s" (`HORDE_BANNER_TOP_FRAC`) se sobrepõe ao painel do celeiro no topo.
+
+Critérios de aceite:
+- **HF6-A:** `--import` e depois `check_scripts`, `unit_tests`, `flow_test`, `playthrough` e
+  `net_unit --only=hud_net,hud_hints,spectator` verdes, e `res://src/hud/debug/hud_horde_test.tscn` rodado direto
+  (`tools/godot.sh --headless --fixed-fps 60 --path . res://src/hud/debug/hud_horde_test.tscn`, não está no `net_unit`)
+  com `RESULT:` sem FAIL (os checks dos três sandboxes mudam só o nó lido).
+  Nenhuma ocorrência de `_bottomright_margin`, `_ammo_label`, `_health_bar`, `_vest_label`, `TOUCH_BOTTOM_RIGHT_MARGIN_PX`
+  ou `HORDE_AMMO_TEXT` em `src/`. Screenshots com janela, `--frames=600` (`tools/godot.sh --path . --windowed
+  --resolution 1280x720 -s res://tools/screenshot.gd -- --scene=res://src/player/debug/player_sandbox.tscn --out=<png>
+  --frames=600 <args>`):
+  1. Padrão (carabina + espingarda, colete, kit, ceva, binóculo) com `--dog`: embaixo à direita o retrato da carabina,
+     "Carabina .22", "10 | 50" em branco, fileira com "1" realçado e "2" apagado; embaixo no centro a faixa de vida de
+     400 px com ícone do colete, "Colete", barra verde e "100", e a `Quickbar` logo acima sem encostar; nada no topo à
+     esquerda além do FPS (se ligado).
+  2. `--slot=2 --mag=1 --hp=25`: retrato e nome da espingarda, chip "2" realçado, pente "1" em vermelho, barra vermelha
+     e "25".
+  3. `--horde --weapons=carbine_22,shotgun_12,rifle_308,rifle_3006,rifle_338 --slot=5`: cinco chips de "1" a "5" na
+     largura do painel, "5" realçado, retrato do .338, reserva "| ∞".
+  4. `--weapons=rifle_308 --items=medkit`: sem fileira (uma arma), sem colete (barra mais larga), retrato do .308.
+  5. Os itens 1 e 3 com `--touch=on` a 1558×720 e 960×720: painel da arma na coluna da esquerda (x ≈ 128–376 no
+     canvas virtual, base em `A − 320`: y 400 a 1558×720, y 640 na janela 960×720, cujo canvas é 1280×960) sem tocar slider, joystick, fileira de botões de item nem faixa da dica; chips sem número; faixa de vida de
+     300 px no centro-baixo sem tocar joystick, Agachar, Mira (e o nome dela com `--onboarding`) nem Tiro; FPS ao lado do
+     Pausa. Repetir o 960×720 com `--onboarding --dog --items=medkit,scout_drone`: objetivos acima do painel da arma.
+  6. Recarga: no sandbox com janela, atirar e apertar R: a barra âmbar aparece sob a munição e some no fim.
+- **HF6-QA:** §12 (cobertura da Fase 6); as 4 suítes e o `net_unit` verdes com tudo entregue.
+- **Coordenação (integração):** screenshot com janela de `src/hunt/hunt.tscn` a 1280×720 (`--frames=900`) com o
+  loadout real: painel da arma, faixa de vida e `Quickbar` como no item 1; `load_ab.py --throttle=4` sem etapa acima de
+  700 ms (comparar a etapa do jogador com a 0.8.3; se subir demais, aplicar a válvula de §13.1); `mobile_probe.py`
+  verde (o layout do toque mudou, embora o probe não leia o painel).
 
 ---
 

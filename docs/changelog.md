@@ -3,6 +3,23 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.8.4 — 20/11/2026
+
+**Painel da arma com retrato e barra de vida embaixo.**
+
+- No canto inferior direito, o painel da arma mostra o retrato e o nome da arma na mão e a munição em números
+  grandes (pente | reserva). Pente baixo fica vermelho; na horda a reserva aparece como ∞.
+- Com duas armas ou mais, uma fileira mostra todas com a tecla de cada uma (1 a 5) e realça a que está na mão.
+- A vida saiu do canto superior esquerdo e virou uma barra larga embaixo, no centro, com o número e o colete
+  quando equipado. A barra muda para âmbar e depois vermelho conforme a vida cai. A barra de itens subiu e fica
+  logo acima dela.
+- No celular, o painel da arma fica na coluna da esquerda, acima do joystick, e a fileira não mostra números.
+- No espectador, o painel da arma some; a vida continua visível.
+
+Detalhes técnicos: contrato 1.5 em `docs/arquitetura.md` §2, §4, §6.8, §7.9, §8.4, §12, §13.1 e §14 (HF6);
+classes novas `WeaponPanel` e `HealthStrip` (`src/hud/`); `Player.get_weapon_ids()`; flags `--hp=`, `--slot=` e
+`--mag=` no sandbox.
+
 ## 0.8.3 — 20/11/2026
 
 **Bússola com graus e marcadores; minimapa com o mapa de verdade.**

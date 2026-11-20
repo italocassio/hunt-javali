@@ -207,7 +207,7 @@ func _test_spectate_hud() -> void:
 	var banner: Label = hud.get("_spectate_banner") as Label
 	var hint: Label = hud.get("_spectate_hint") as Label
 	var down: Label = hud.get("_down_banner") as Label
-	var weapon_panel: Control = hud.get("_bottomright_margin") as Control
+	var weapon_panel: Control = hud.get("_weapon_frame") as Control
 	var minimap: Minimap = hud.get("_minimap") as Minimap
 	var world: StubWorld = StubWorld.new()
 	add_child(world)

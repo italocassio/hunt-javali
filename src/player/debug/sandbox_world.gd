@@ -8,6 +8,8 @@ extends HuntWorld
 ## Map markers (docs §8.4): --minimap_tex (test image as the minimap texture), --marked (target 0 is a marked boar),
 ## --bait (a bait at (-30, -40)), --reveal (the drone reveals every alive target), --heading=<deg> (compass heading),
 ## --crop_alert (forces the "Javalis na lavoura!" alert and a context message at the same time)
+## Weapon panel and health bar (docs §8.4): --hp=<1-100> (health in percent), --slot=<1-5> (weapon in hand),
+## --mag=<n> (rounds in the magazine of the weapon in hand, to see the low-ammo colour)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
@@ -256,6 +258,12 @@ func _spawn_player() -> void:
 	player.setup(req, self)
 	if _args.get("touch", "") != "":
 		InputSetup.set_touch_override(String(_args["touch"]))
+	if _args.has("hp"):
+		player.debug_set_health(player.get_max_health() * float(_args["hp"]) / 100.0)
+	if _args.has("slot"):
+		player.bot_select_weapon(int(_args["slot"]) - 1)
+	if _args.has("mag"):
+		player.get_weapon().ammo_in_mag = int(_args["mag"])   # after --slot: the weapon in hand
 	if _args.has("aim"):
 		player.bot_set_enabled(true)
 		player.bot_set_aim(true)

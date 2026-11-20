@@ -223,7 +223,9 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "Player", "path": "res://src/player/player.gd", "base": "PlayerBase", "pkg": "A",
 		"methods": ["get_spectator() -> SpectatorCamera", "is_spectating() -> bool",
 				# docs/horda.md section 7
-				"get_weapon_count() -> int", "has_infinite_reserve() -> bool"]},
+				"get_weapon_count() -> int", "has_infinite_reserve() -> bool",
+				# docs/arquitetura.md section 6.8 (1.5, HF6)
+				"get_weapon_ids() -> Array[StringName]", "debug_set_health(hp: float) -> void"]},
 	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
 	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
 		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
@@ -262,6 +264,19 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["set_breed(dog_id: StringName) -> void", "set_state(state: StringName) -> void",
 			"set_health_pct(pct: float) -> void", "set_touch(touch: bool) -> void", "get_state_text() -> String",
 			"get_action_text() -> String", "get_breed_text() -> String"]},
+	# docs/arquitetura.md sections 6.8 and 8.4 (1.5, HF6): the weapon panel and the wide health bar of the HUD (views, the
+	# Hud feeds them). HealthStrip.HEIGHT_PX (const) is checked by tests/unit/test_weapon_health_hud.gd.
+	{"name": "WeaponPanel", "path": "res://src/hud/weapon_panel.gd", "base": "VBoxContainer", "pkg": "A",
+		"methods": ["set_weapons(weapon_ids: Array[StringName]) -> void", "set_active(index: int) -> void",
+			"set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void",
+			"set_reload(active: bool, progress: float) -> void", "set_touch(touch: bool) -> void",
+			"get_weapon_ids() -> Array[StringName]", "get_active_index() -> int", "get_name_text() -> String",
+			"get_mag_text() -> String", "get_reserve_text() -> String", "is_ammo_low() -> bool",
+			"get_chip_key_text(index: int) -> String", "get_portrait_path() -> String", "is_row_visible() -> bool"]},
+	{"name": "HealthStrip", "path": "res://src/hud/health_strip.gd", "base": "Control", "pkg": "A",
+		"methods": ["set_health(hp: float, max_hp: float) -> void", "set_vest(on: bool) -> void",
+			"set_touch(touch: bool) -> void", "get_value_text() -> String", "get_fill_pct() -> float",
+			"get_fill_color() -> Color", "has_vest() -> bool"]},
 	# docs/arquitetura.md sections 6.8 and 8.4 (1.3, HF4): objectives and key legend of the first hunts (views, the Hud feeds them).
 	{"name": "ObjectivesPanel", "path": "res://src/hud/objectives_panel.gd", "base": "VBoxContainer", "pkg": "A",
 		"methods": ["set_dog_present(present: bool) -> void", "set_drone_present(present: bool) -> void",

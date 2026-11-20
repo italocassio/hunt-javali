@@ -364,6 +364,19 @@ func get_weapon_count() -> int:
 	return _weapons.size()
 
 
+## Ids of the carried weapons in slot order: index i is the action weapon_{i+1} and the value of get_weapon_slot().
+func get_weapon_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for weapon: Weapon in _weapons:
+		ids.append(weapon.weapon_id)
+	return ids
+
+
+## Sandbox and tests only: sets the health without a signal, without damage and never to zero.
+func debug_set_health(hp: float) -> void:
+	_health = clampf(hp, 1.0, get_max_health())
+
+
 func has_infinite_reserve() -> bool:
 	return _request != null and _request.is_horde()
 

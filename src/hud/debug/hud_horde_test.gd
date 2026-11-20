@@ -91,7 +91,7 @@ func _test_horde_hud() -> void:
 	var crop_label: Label = hud.get("_crop_label") as Label
 	var crop_alert: Label = hud.get("_crop_alert") as Label
 	var count_label: Label = hud.get("_count_label") as Label
-	var ammo_label: Label = hud.get("_ammo_label") as Label
+	var weapon_panel: WeaponPanel = hud.get("_weapon_panel") as WeaponPanel
 	var minimap: Minimap = hud.get("_minimap") as Minimap
 	var compass: Compass = hud.get("_compass") as Compass
 	await _wait(POLL_WAIT_S)
@@ -113,8 +113,9 @@ func _test_horde_hud() -> void:
 	_check("horde_alert_off", not crop_alert.visible)
 
 	# Ammo counter and the map markers.
-	_check("horde_ammo_infinite", ammo_label.text.ends_with("| ∞") and ammo_label.text.begins_with("%d " % world.player.get_ammo_in_mag()),
-		ammo_label.text)
+	_check("horde_ammo_infinite", weapon_panel.get_reserve_text() == "| ∞"
+		and weapon_panel.get_mag_text() == str(world.player.get_ammo_in_mag()),
+		"%s %s" % [weapon_panel.get_mag_text(), weapon_panel.get_reserve_text()])
 	_check("horde_minimap_no_crops", minimap.crop_rects.is_empty())
 	_check("horde_minimap_objective", minimap.objective.is_finite() and minimap.objective.is_equal_approx(world.get_objective_position()))
 	_check("horde_compass_objective", compass.objective.is_finite() and compass.objective.is_equal_approx(world.get_objective_position()))
@@ -198,7 +199,7 @@ func _test_contract_hud() -> void:
 	var crop_label: Label = hud.get("_crop_label") as Label
 	var crop_alert: Label = hud.get("_crop_alert") as Label
 	var count_label: Label = hud.get("_count_label") as Label
-	var ammo_label: Label = hud.get("_ammo_label") as Label
+	var weapon_panel: WeaponPanel = hud.get("_weapon_panel") as WeaponPanel
 	var minimap: Minimap = hud.get("_minimap") as Minimap
 	GameEvents.crop_health_changed.emit(100.0)
 	GameEvents.boar_counts_changed.emit(0, 0)
@@ -208,8 +209,9 @@ func _test_contract_hud() -> void:
 	_check("contract_no_wave_label", not _label_shown(hud, "WaveLabel"))
 	_check("contract_no_wave_banner", not _label_shown(hud, "WaveBanner"))
 	_check("contract_alert_text", crop_alert.text == "Javalis na lavoura!", crop_alert.text)
-	_check("contract_ammo_text", ammo_label.text == "%d | %d" % [world.player.get_ammo_in_mag(), world.player.get_ammo_reserve()],
-		ammo_label.text)
+	_check("contract_ammo_text", weapon_panel.get_mag_text() == str(world.player.get_ammo_in_mag())
+		and weapon_panel.get_reserve_text() == "| %d" % world.player.get_ammo_reserve(),
+		"%s %s" % [weapon_panel.get_mag_text(), weapon_panel.get_reserve_text()])
 	_check("contract_minimap_crops", not minimap.crop_rects.is_empty() and not minimap.objective.is_finite())
 	var result: HuntResult = HuntResult.new()
 	result.outcome = HuntResult.Outcome.VICTORY

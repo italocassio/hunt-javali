@@ -6,9 +6,12 @@ extends CanvasLayer
 const POLL_INTERVAL_S: float = 0.1
 const MARGIN_PX: int = 24
 const TOUCH_TOPLEFT_MARGIN_PX: int = 100      # leaves room for the touch pause button
-const TOUCH_BOTTOM_RIGHT_MARGIN_PX: int = 530 # leaves room for the touch buttons
-const OBJECTIVES_TOP_PX: int = 132            # below the health panel and the crop bar of the compass column
+const OBJECTIVES_TOP_PX: int = 132            # below the crop bar of the compass column
 const TOUCH_OBJECTIVES_LEFT_PX: int = 128     # right of the touch zoom slider (x 32..116)
+const HEALTH_BOTTOM_PX: float = 14.0          # gap between the health strip and the bottom edge
+const BOTTOM_STACK_GAP_PX: float = 8.0        # gap between the health strip and the item bar above it
+const QUICKBAR_BOTTOM_PX: float = HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX + BOTTOM_STACK_GAP_PX
+const TOUCH_WEAPON_BOTTOM_PX: float = 320.0   # touch: the weapon panel sits in the left column, base 320 px above the bottom
 const ALARM_REPEAT_S: float = 3.0
 const PROBE_INTERVAL_S: float = 0.1
 const PROBE_ROLES: Array[String] = ["offline", "host", "client"]   # Net.Role order
@@ -45,7 +48,6 @@ const HORDE_BANNER_FIRST: String = "Defenda o celeiro! A horda chega em %d s"
 const HORDE_BANNER_WAVE: String = "Onda %d de %d"
 const HORDE_BANNER_LAST: String = "Última onda! Onda %d de %d"
 const HORDE_BANNER_CLEARED: String = "Onda %d vencida!"
-const HORDE_AMMO_TEXT: String = "%d | ∞"
 const HORDE_WON_TEXT: String = "Celeiro defendido!"
 const HORDE_LOST_TEXT: String = "O celeiro foi devorado!"
 const HORDE_BANNER_S: float = 3.0
@@ -87,7 +89,7 @@ var _ended: bool = false
 var _probe_enabled: bool = false   # Web build opened with ?probe=1 (QA hook, see _publish_probe)
 var _probe_t: float = 0.0
 var _thermal: bool = false
-var _last_ammo_text: String = ""
+var _last_weapon_slot: int = -1       # slot the weapon panel shows (-1 until bind)
 var _dog_slots_on: bool = false       # the Quickbar / touch dog slot is currently shown
 var _hunter_names: Dictionary = {}   # slot -> display name seen on hunter_joined (the roster forgets who left)
 var _stall_banner: Label = null
@@ -128,10 +130,6 @@ var _ctx_msg: KillMessage = KillMessage.new()
 var _dog_msg: KillMessage = KillMessage.new()
 var _end_msg: KillMessage = KillMessage.new()
 var _topleft_margin: MarginContainer = null
-var _bottomright_margin: MarginContainer = null
-var _health_bar: ProgressBar = ProgressBar.new()
-var _health_label: Label = null
-var _vest_label: Label = null
 var _crop_bar: ProgressBar = ProgressBar.new()
 var _crop_label: Label = null
 var _crop_alert: Label = null
@@ -146,9 +144,9 @@ var _objectives_panel: PanelContainer = null
 var _legend: ControlsLegend = ControlsLegend.new()
 var _legend_panel: PanelContainer = null
 var _dog_breed: StringName = &""      # breed the card shows (from the hunt request)
-var _weapon_label: Label = null
-var _ammo_label: Label = null
-var _reload_bar: ProgressBar = ProgressBar.new()
+var _weapon_panel: WeaponPanel = WeaponPanel.new()
+var _weapon_frame: PanelContainer = null
+var _health: HealthStrip = HealthStrip.new()
 var _quickbar: Quickbar = Quickbar.new()
 var _hint_banner: HintBanner = HintBanner.new()
 var _director: HintDirector = HintDirector.new()
@@ -178,7 +176,8 @@ func _ready() -> void:
 	_build_objectives()
 	_build_top_center()
 	_build_top_right()
-	_build_bottom_right()
+	_build_weapon_panel()
+	_build_health()
 	_build_messages()
 	_build_quickbar()
 	_root.add_child(_hint_banner)
@@ -212,7 +211,10 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 	_pause.bind(_player)
 	var items: ItemBelt = _player.get_items()
 	_quickbar.bind(items)
-	_vest_label.visible = items != null and items.damage_reduction > 0.0
+	_weapon_panel.set_weapons(_player.get_weapon_ids())
+	_weapon_panel.set_active(_player.get_weapon_slot())
+	_last_weapon_slot = _player.get_weapon_slot()
+	_health.set_vest(items != null and items.damage_reduction > 0.0)
 	if _world != null:
 		_minimap.map_rect = _world.get_map_rect()
 		_minimap.map_texture = _world.get_minimap_texture()
@@ -326,24 +328,7 @@ func _build_top_left() -> void:
 	var parts: Array = _corner("TopLeft", Control.SIZE_SHRINK_BEGIN, Control.SIZE_SHRINK_BEGIN)
 	_topleft_margin = parts[0]
 	var box: VBoxContainer = parts[1]
-	var inner: VBoxContainer = VBoxContainer.new()
-	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var row: HBoxContainer = HBoxContainer.new()
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_theme_constant_override("separation", 10)
-	row.add_child(_label("Vida", 20))
-	_style_bar(_health_bar, &"HealthBar", 22.0, 140.0)
-	_health_bar.name = "HealthBar"
-	_health_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_health_bar)
-	_health_label = _label("100", 22)
-	row.add_child(_health_label)
-	inner.add_child(row)
-	_vest_label = _label("Colete equipado", 16, COLOR_WARN)
-	_vest_label.visible = false
-	inner.add_child(_vest_label)
-	box.add_child(_panel(inner))
-	box.add_child(_fps_counter)   # under the health panel: inherits the touch left margin, clear of minimap and buttons
+	box.add_child(_fps_counter)   # alone in the corner: inherits the touch left margin, clear of the pause button
 
 
 func _build_top_center() -> void:
@@ -409,26 +394,31 @@ func _build_objectives() -> void:
 	box.add_child(_objectives_panel)
 
 
-func _build_bottom_right() -> void:
-	var parts: Array = _corner("BottomRight", Control.SIZE_SHRINK_END, Control.SIZE_SHRINK_END)
-	_bottomright_margin = parts[0]
-	var box: VBoxContainer = parts[1]
-	var inner: VBoxContainer = VBoxContainer.new()
-	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_weapon_label = _label("", 18)
-	_weapon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	inner.add_child(_weapon_label)
-	_ammo_label = _label("0 | 0", 40, COLOR_TEXT, &"HudBigLabel")
-	_ammo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	inner.add_child(_ammo_label)
-	_style_bar(_reload_bar, &"CropBar", 8.0, 160.0)
-	_reload_bar.modulate = COLOR_WARN
-	_reload_bar.visible = false
-	inner.add_child(_reload_bar)
-	box.add_child(_panel(inner))
+## Weapon panel (docs §8.4): a HudPanel frame placed by _place_weapon_frame, bottom right on the desktop and in the left
+## column on touch.
+func _build_weapon_panel() -> void:
+	_weapon_frame = _panel(_weapon_panel, 8)
+	_weapon_frame.name = "WeaponFrame"
+	_root.add_child(_weapon_frame)
 
 
-## Item bar of the desktop (docs §8.4): bottom centre, MARGIN_PX above the edge. It grows from its centre.
+## Health strip (docs §8.4): bottom centre, HEALTH_BOTTOM_PX above the edge. It grows from its centre.
+func _build_health() -> void:
+	_health.name = "HealthStrip"
+	_health.anchor_left = 0.5
+	_health.anchor_right = 0.5
+	_health.anchor_top = 1.0
+	_health.anchor_bottom = 1.0
+	_health.offset_left = 0.0
+	_health.offset_right = 0.0
+	_health.offset_top = -(HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX)
+	_health.offset_bottom = -HEALTH_BOTTOM_PX
+	_health.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_health.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_root.add_child(_health)
+
+
+## Item bar of the desktop (docs §8.4): bottom centre, above the health strip. It grows from its centre.
 func _build_quickbar() -> void:
 	_quickbar.name = "Quickbar"
 	_quickbar.anchor_left = 0.5
@@ -437,8 +427,8 @@ func _build_quickbar() -> void:
 	_quickbar.anchor_bottom = 1.0
 	_quickbar.offset_left = 0.0
 	_quickbar.offset_right = 0.0
-	_quickbar.offset_top = -float(MARGIN_PX) - Quickbar.SLOT_SIZE_PX
-	_quickbar.offset_bottom = -float(MARGIN_PX)
+	_quickbar.offset_top = -QUICKBAR_BOTTOM_PX - Quickbar.SLOT_SIZE_PX
+	_quickbar.offset_bottom = -QUICKBAR_BOTTOM_PX
 	_quickbar.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_quickbar.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_root.add_child(_quickbar)
@@ -533,15 +523,43 @@ func _connect_events() -> void:
 func _apply_touch_layout(is_touch: bool) -> void:
 	if _topleft_margin != null:
 		_topleft_margin.add_theme_constant_override("margin_left", TOUCH_TOPLEFT_MARGIN_PX if is_touch else MARGIN_PX)
-	if _bottomright_margin != null:
-		_bottomright_margin.add_theme_constant_override("margin_right",
-			TOUCH_BOTTOM_RIGHT_MARGIN_PX if is_touch else MARGIN_PX)
+	_health.set_touch(is_touch)
+	_weapon_panel.set_touch(is_touch)
+	_place_weapon_frame(is_touch)
 	_dog_card.set_touch(is_touch)
 	if _left_margin != null:
 		_left_margin.add_theme_constant_override("margin_left", TOUCH_OBJECTIVES_LEFT_PX if is_touch else MARGIN_PX)
 		_refresh_onboarding_ui()
 	if _spectate_hint != null:
 		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS % InputSetup.get_key_label(&"spectate_next")
+
+
+## Weapon frame anchors (docs §8.4): bottom right with MARGIN_PX on the desktop (grows up and to the left); on touch,
+## the left column right of the zoom slider, base TOUCH_WEAPON_BOTTOM_PX above the bottom (grows up and to the right).
+func _place_weapon_frame(is_touch: bool) -> void:
+	if _weapon_frame == null:
+		return
+	if is_touch:
+		_weapon_frame.anchor_left = 0.0
+		_weapon_frame.anchor_right = 0.0
+		_weapon_frame.anchor_top = 1.0
+		_weapon_frame.anchor_bottom = 1.0
+		_weapon_frame.offset_left = float(TOUCH_OBJECTIVES_LEFT_PX)
+		_weapon_frame.offset_right = float(TOUCH_OBJECTIVES_LEFT_PX)
+		_weapon_frame.offset_top = -TOUCH_WEAPON_BOTTOM_PX
+		_weapon_frame.offset_bottom = -TOUCH_WEAPON_BOTTOM_PX
+		_weapon_frame.grow_horizontal = Control.GROW_DIRECTION_END
+	else:
+		_weapon_frame.anchor_left = 1.0
+		_weapon_frame.anchor_right = 1.0
+		_weapon_frame.anchor_top = 1.0
+		_weapon_frame.anchor_bottom = 1.0
+		_weapon_frame.offset_left = -float(MARGIN_PX)
+		_weapon_frame.offset_right = -float(MARGIN_PX)
+		_weapon_frame.offset_top = -float(MARGIN_PX)
+		_weapon_frame.offset_bottom = -float(MARGIN_PX)
+		_weapon_frame.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_weapon_frame.grow_vertical = Control.GROW_DIRECTION_BEGIN
 
 
 # ---------------------------------------------------------------------------
@@ -649,28 +667,19 @@ func _publish_probe() -> void:
 
 
 func _update_health() -> void:
-	var hp: float = _player.get_health()
-	var frac: float = hp / maxf(_player.get_max_health(), 1.0)
-	_health_bar.value = frac * 100.0
-	_health_bar.modulate = COLOR_GOOD if frac > 0.5 else (COLOR_WARN if frac > 0.3 else COLOR_DANGER)
-	_health_label.text = str(int(ceil(hp)))
+	_health.set_health(_player.get_health(), _player.get_max_health())
 
 
 func _update_weapon() -> void:
 	var w: Weapon = _player.get_weapon()
 	if w == null:
 		return
-	var text: String = (HORDE_AMMO_TEXT % w.ammo_in_mag) if _player.has_infinite_reserve() \
-		else ("%d | %d" % [w.ammo_in_mag, w.ammo_reserve])
-	if text != _last_ammo_text:
-		_last_ammo_text = text
-		_ammo_label.text = text
-		_weapon_label.text = String(w.def.get("name", ""))
-	var low: bool = w.ammo_in_mag <= 0 or w.ammo_in_mag * 4 <= int(w.def.get("mag_size", 1))
-	_ammo_label.add_theme_color_override("font_color", COLOR_DANGER if low else COLOR_TEXT)
-	_reload_bar.visible = w.is_reloading()
-	if w.is_reloading():
-		_reload_bar.value = w.get_reload_progress() * 100.0
+	var slot: int = _player.get_weapon_slot()
+	if slot != _last_weapon_slot:
+		_last_weapon_slot = slot
+		_weapon_panel.set_active(slot)
+	_weapon_panel.set_ammo(w.ammo_in_mag, w.ammo_reserve, _player.has_infinite_reserve(), int(w.def.get("mag_size", 1)))
+	_weapon_panel.set_reload(w.is_reloading(), w.get_reload_progress())
 
 
 func _update_scope_and_crosshair() -> void:
@@ -1115,7 +1124,7 @@ func _on_spectate_changed(slot: int) -> void:
 		_spectate_banner.text = SPECTATE_TEXT % _hunter_name(slot)
 		_spectate_banner.add_theme_color_override("font_color", HunterVisualBase.slot_color(slot))
 	_down_banner.visible = _local_down and not on and not _ended
-	_bottomright_margin.visible = not on
+	_weapon_frame.visible = not on
 	_crosshair.visible = not on
 	_minimap.center_color = HunterVisualBase.slot_color(slot) if slot != NO_SLOT else Minimap.COLOR_PLAYER
 	if _world != null:

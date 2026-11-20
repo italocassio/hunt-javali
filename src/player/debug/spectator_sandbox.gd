@@ -242,7 +242,7 @@ func _check_fall_and_view(hud: Hud, delay_s: float, distance_m: float, height_m:
 	_check("down_banner_replaced", not down_banner.visible)
 	var hint: Label = hud.get("_spectate_hint") as Label
 	_check("switch_hint_with_two_allies", hint.visible and hint.text.contains("trocar"), hint.text)
-	_check("weapon_panel_hidden", not (hud.get("_bottomright_margin") as Control).visible
+	_check("weapon_panel_hidden", not (hud.get("_weapon_frame") as Control).visible
 		and not (hud.get("_crosshair") as Control).visible)
 	var target: RemoteHunter = _remotes[NEAR_SLOT]
 	var watched_tag: Label3D = target.find_child("NameTag", true, false) as Label3D
@@ -310,7 +310,7 @@ func _check_switching_and_loss(hud: Hud) -> void:
 	_check("no_ally_left_stops", not player.is_spectating() and _spectate_log.back() == -1, str(_spectate_log))
 	_check("camera_returned_to_player", get_viewport().get_camera_3d() == player.get_camera())
 	_check("banners_after_stop", not banner.visible and (hud.get("_down_banner") as Label).visible
-		and (hud.get("_bottomright_margin") as Control).visible)
+		and (hud.get("_weapon_frame") as Control).visible)
 	_check("minimap_back_to_own_view", (hud.get("_minimap") as Minimap).center_color == Minimap.COLOR_PLAYER)
 
 

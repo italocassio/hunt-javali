@@ -21,6 +21,7 @@ var _road_half_width: float = 2.0
 var _water_centers: PackedVector2Array = PackedVector2Array()
 var _water_radii: PackedFloat32Array = PackedFloat32Array()
 var _noise: FastNoiseLite
+var _grid_mask: PackedColorArray = PackedColorArray()   # r/g/b mask per grid vertex (index j * resolution + i)
 
 
 func build(hm: Heightmap, crop_rects: Array[Rect2], road_points: PackedVector2Array, road_width_m: float,
@@ -43,6 +44,12 @@ func build(hm: Heightmap, crop_rects: Array[Rect2], road_points: PackedVector2Ar
 		mat = sm
 	_build_meshes(mat)
 	_build_collision()
+
+
+## Mask (r crop soil, g road, b wet margin) of every grid vertex, same index as Heightmap.get_grid_data().
+## Empty before build(). Filled before the fallback albedo swap, so it holds the mask with or without art.
+func get_grid_mask() -> PackedColorArray:
+	return _grid_mask
 
 
 func _mask_at(x: float, z: float) -> Color:
@@ -81,6 +88,7 @@ func _albedo_from_mask(mask: Color, x: float, z: float) -> Color:
 func _build_meshes(mat: Material) -> void:
 	var res: int = heightmap.resolution
 	var quads_per_block: int = (res - 1) / BLOCKS_PER_SIDE
+	_grid_mask.resize(res * res)
 	for by: int in BLOCKS_PER_SIDE:
 		for bx: int in BLOCKS_PER_SIDE:
 			var i0: int = bx * quads_per_block
@@ -105,6 +113,7 @@ func _build_meshes(mat: Material) -> void:
 					verts[k] = Vector3(x, heightmap.get_grid(gi, gj), z)
 					norms[k] = heightmap.get_normal(x, z)
 					var mask: Color = _mask_at(x, z)
+					_grid_mask[gj * res + gi] = mask
 					cols[k] = _albedo_from_mask(mask, x, z) if _fallback_colors else mask
 					uvs[k] = Vector2(x, z) / 4.0
 			for j: int in quads_per_block:

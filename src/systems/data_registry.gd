@@ -19,6 +19,9 @@ const LISTS: Dictionary = {
 	"boars": "types", "maps": "maps", "gold": "packages",
 }
 const SHORT_NAME_MAX_CHARS: int = 9
+const MINIMAP_COLOR_KEYS: Array[String] = [
+	"grass", "crop_soil", "road", "wet", "water", "water_edge", "soy", "corn", "crop_row", "prop_default",
+]
 const ONBOARDING_FIELDS: Array[String] = [
 	"max_hunts", "eval_interval_s", "opening_delay_s", "opening_duration_s", "hint_duration_s", "hint_gap_s",
 	"queue_max", "medkit_health_below_pct", "boar_sighted_range_m", "boar_sighted_half_angle_deg", "drone_no_sighting_s",
@@ -259,6 +262,87 @@ func _validate() -> void:
 	_require_fields(_raw["pix"], ["gateway", "pix_key", "merchant_name", "merchant_city", "redeem_secret"], "pix_config")
 	_validate_onboarding()
 	_validate_horde()
+	_validate_minimap()
+
+
+# Minimap image parameters (docs/arquitetura.md §9.1 "minimap.*").
+func _validate_minimap() -> void:
+	var block: Variant = _raw["game"].get("minimap")
+	if not (block is Dictionary):
+		_errors.append("Data: game.json lacks 'minimap'")
+		return
+	var mm: Dictionary = block
+	var image_px: Variant = mm.get("image_px")
+	if not _is_int_in(image_px, 64, 512):
+		_errors.append("Data: game.minimap.image_px must be an integer in 64-512")
+	if not _is_int_in(mm.get("grid_stride"), 1, 2):
+		_errors.append("Data: game.minimap.grid_stride must be 1 or 2")
+	if not _is_int_in(mm.get("crop_row_px"), 0, 1000000):
+		_errors.append("Data: game.minimap.crop_row_px must be an integer >= 0")
+	var hs: Variant = mm.get("hillshade")
+	if not (hs is Dictionary):
+		_errors.append("Data: game.minimap.hillshade missing")
+	else:
+		var h: Dictionary = hs
+		if not _is_num_in(h.get("azimuth_deg"), 0.0, 360.0):
+			_errors.append("Data: game.minimap.hillshade.azimuth_deg must be in 0-360")
+		var alt: Variant = h.get("altitude_deg")
+		if not _is_num_in(alt, 0.0, 90.0) or float(alt) <= 0.0:
+			_errors.append("Data: game.minimap.hillshade.altitude_deg must be in (0, 90]")
+		if not _is_num_in(h.get("strength"), 0.0, 2.0):
+			_errors.append("Data: game.minimap.hillshade.strength must be in 0-2")
+		var lo: Variant = h.get("min")
+		var hi: Variant = h.get("max")
+		if not _is_num_in(lo, 0.0, INF) or float(lo) <= 0.0 or not _is_num_in(hi, 0.0, INF) or float(lo) > float(hi):
+			_errors.append("Data: game.minimap.hillshade needs 0 < min <= max")
+	var ht: Variant = mm.get("height_tint")
+	for f: String in ["low", "high"]:
+		var v: Variant = ht.get(f) if ht is Dictionary else null
+		if not _is_num_in(v, 0.0, INF) or float(v) <= 0.0:
+			_errors.append("Data: game.minimap.height_tint.%s must be a number > 0" % f)
+	var colors: Variant = mm.get("colors")
+	if not (colors is Dictionary):
+		_errors.append("Data: game.minimap.colors missing")
+	else:
+		for k: String in MINIMAP_COLOR_KEYS:
+			if not (colors as Dictionary).has(k):
+				_errors.append("Data: game.minimap.colors lacks '%s'" % k)
+		_check_color_values(colors, "colors")
+	var pc: Variant = mm.get("prop_colors")
+	if not (pc is Dictionary):
+		_errors.append("Data: game.minimap.prop_colors missing")
+	else:
+		_check_color_values(pc, "prop_colors")
+	var canopy: Variant = mm.get("canopy")
+	if not (canopy is Dictionary):
+		_errors.append("Data: game.minimap.canopy missing")
+	else:
+		for cid: Variant in (canopy as Dictionary):
+			var entry: Variant = canopy[cid]
+			if not (entry is Dictionary):
+				_errors.append("Data: game.minimap.canopy.%s must be an object" % cid)
+				continue
+			var r: Variant = entry.get("radius_m")
+			if not _is_num_in(r, 0.0, INF) or float(r) <= 0.0:
+				_errors.append("Data: game.minimap.canopy.%s.radius_m must be > 0" % cid)
+			var col: Variant = entry.get("color")
+			if not (col is String) or not Color.html_is_valid(col):
+				_errors.append("Data: game.minimap.canopy.%s.color is not a valid color" % cid)
+
+
+func _check_color_values(dict: Dictionary, label: String) -> void:
+	for k: Variant in dict:
+		var v: Variant = dict[k]
+		if not (v is String) or not Color.html_is_valid(v):
+			_errors.append("Data: game.minimap.%s.%s is not a valid color" % [label, k])
+
+
+func _is_num_in(v: Variant, lo: float, hi: float) -> bool:
+	return (v is int or v is float) and is_finite(float(v)) and float(v) >= lo and float(v) <= hi
+
+
+func _is_int_in(v: Variant, lo: int, hi: int) -> bool:
+	return _is_num_in(v, float(lo), float(hi)) and float(v) == floorf(float(v))
 
 
 # Onboarding hints (docs/arquitetura.md §9.1) and the short_name of every equipment item (§9.3).

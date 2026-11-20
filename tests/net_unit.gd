@@ -21,6 +21,9 @@ extends Node
 ##   net_horde      horde mode over the byte path: wave state host -> client, EV_HORDE_WAVE, F8 replay   RESULT:
 ##   net_mode       room mode (L_LOBBY / L_START byte of the mode), host_select_mode                NET_MODE_SELFTEST
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
+##   minimap_bake   1.4 (HF5): Mato Grosso baked to the minimap image: size, orientation, determinism   RESULT:
+##                  (src/world/debug/minimap_selftest.tscn; prints MINIMAP_BAKE_MS, budget <= 150 ms)
+## net_sync must also print "PASS minimap_same_on_both" (host and client bake the same image): see "must_pass".
 ## A child that exits without its summary line (crash, parse error, hang killed by the limit) is a FAIL.
 ##
 ## Run: tools/godot.sh --headless --path . res://tests/net_unit.tscn [-- --only=net_flow,link_selftest]
@@ -33,6 +36,8 @@ const WATCHDOG_SLACK_S: float = 30.0
 const FIXED_FPS: Array = ["--fixed-fps", "60"]
 ## "limit_s" is the per-sandbox limit (the slowest measured run is about 11 s); the watchdog of the suite is the
 ## sum of the selected limits plus WATCHDOG_SLACK_S.
+## "must_pass": names of checks whose "PASS <name>" line has to be in the child's log (a sandbox that silently drops a
+## check would otherwise stay green on its RESULT line).
 ## "wall_clock": true = run WITHOUT --fixed-fps (the sandbox compares against the wall clock: RemoteHunter
 ## interpolates by Time.get_ticks_msec(), which a fixed-fps headless run outruns).
 const SANDBOXES: Array[Dictionary] = [
@@ -44,10 +49,12 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "link_selftest", "scene": "res://src/net/debug/link_selftest.tscn", "limit_s": 90.0},
 	{"name": "spectator", "scene": "res://src/player/debug/spectator_sandbox.tscn", "limit_s": 90.0},
 	{"name": "net_dogs", "scene": "res://src/hunt/debug/net_dogs_test.tscn", "limit_s": 120.0},
-	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0},
+	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0,
+		"must_pass": ["minimap_same_on_both"]},
 	{"name": "net_horde", "scene": "res://src/hunt/debug/net_horde_test.tscn", "limit_s": 120.0},
 	{"name": "net_mode", "scene": "res://src/net/debug/net_mode_selftest.tscn", "limit_s": 60.0},
 	{"name": "remote_hunter", "scene": "res://src/player/debug/remote_sandbox.tscn", "limit_s": 60.0, "wall_clock": true},
+	{"name": "minimap_bake", "scene": "res://src/world/debug/minimap_selftest.tscn", "limit_s": 60.0},
 ]
 
 var _totals: Dictionary = {}
@@ -131,6 +138,11 @@ func _run_sandbox(sandbox: Dictionary) -> void:
 	if bool(r["aborted"]):
 		return
 	var detail: Array = ChildRunner.problems(r, "RESULT: N passed ... / LINK_SELFTEST|NET_MODE_SELFTEST checks= / remote_sandbox: PASS")
+	if detail.is_empty() and sandbox.has("must_pass"):
+		var log_text: String = FileAccess.get_file_as_string(str(r["log_path"])) if FileAccess.file_exists(str(r["log_path"])) else ""
+		for check_name: String in sandbox["must_pass"]:
+			if not log_text.contains("PASS %s" % check_name):
+				detail.append("o filho nao imprimiu 'PASS %s' (a verificacao sumiu ou falhou); log %s" % [check_name, r["log_path"]])
 	if detail.is_empty():
 		TestCase.report("PASS", "%s (%d verificacoes, %.1f s)" % [label, int(r["checks"]), float(r["secs"])], [], _totals)
 	else:

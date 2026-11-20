@@ -53,6 +53,8 @@ var _prop_circles: Array[Vector3] = []   # x, z, radius (flora exclusion)
 var _block_crop_rects: Array[Rect2] = []
 var _block_water: Array[Vector3] = []     # x, z, radius
 var _flora_placements: Dictionary = {}    # StringName id -> PackedVector2Array (last build_flora)
+var _minimap_image: Image = null
+var _minimap_texture: ImageTexture = null
 
 
 func get_map_rect() -> Rect2:
@@ -110,6 +112,16 @@ func get_static_shapes_used() -> int:
 ## XZ positions placed for a flora id by the last build_flora (empty before it).
 func get_flora_positions(id: StringName) -> PackedVector2Array:
 	return _flora_placements.get(id, PackedVector2Array()) as PackedVector2Array
+
+
+## Top-down map image for the HUD minimap (north up). Null before build_minimap.
+func get_minimap_texture() -> Texture2D:
+	return _minimap_texture
+
+
+## The CPU-side image behind get_minimap_texture (reading the texture back from the GPU depends on the renderer).
+func get_minimap_image() -> Image:
+	return _minimap_image
 
 
 # --- Build steps ---------------------------------------------------------------------------------
@@ -346,6 +358,12 @@ func build_flora(density: float, sync_layout: bool = false) -> void:
 	add_child(flora)
 	var budget: int = maxi(STATIC_SHAPE_BUDGET - _shapes_used, 0)
 	_shapes_used += flora.build(placements, heightmap, rng, obstacles, budget, COLLIDER_PRIORITY_Z)
+
+
+## Bakes the minimap image (section 8.4). Call after build_flora; cfg = Data.get_game().get("minimap", {}).
+func build_minimap(cfg: Dictionary) -> void:
+	_minimap_image = MinimapBaker.bake(self, cfg)
+	_minimap_texture = ImageTexture.create_from_image(_minimap_image) if _minimap_image != null else null
 
 
 # --- Internals -----------------------------------------------------------------------------------

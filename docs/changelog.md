@@ -3,6 +3,24 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.8.3 — 20/11/2026
+
+**Bússola com graus e marcadores; minimapa com o mapa de verdade.**
+
+- A bússola mostra os graus a cada 15°, os pontos cardeais e colaterais (N, NE, L, SE, S, SO, O, NO, com o N em
+  vermelho) e o rumo atual em graus no centro.
+- Na bússola e no minimapa, cada coisa tem forma e cor próprias: lavoura (quadrado verde), cão (círculo âmbar),
+  o javali que o cão persegue (anel âmbar), aliados (losango), ceva (hexágono turquesa), javali marcado
+  (triângulo vermelho) e javalis revelados pelo drone (círculo salmão).
+- O minimapa agora mostra uma imagem de cima do mapa real, com relevo, açude, estrada, sede, talhões com as
+  linhas de plantio e as árvores. A imagem é gerada uma vez ao carregar a caçada, sem custo durante o jogo.
+- Na Preparação, os equipamentos não mostram mais a tecla de atalho.
+- A mensagem de contexto desceu um pouco para não cobrir o aviso "Javalis na lavoura!".
+
+Detalhes técnicos: contrato 1.4 em `docs/arquitetura.md` §6.8, §6.9, §8.1, §8.4, §9.1 e §14 (HF5); classes novas
+`MapMarkers` (`src/hud/`) e `MinimapBaker` (`src/world/`); etapa `minimap` no carregamento; bloco `minimap` em
+`data/game.json`.
+
 ## 0.8.2 — 20/11/2026
 
 **Objetivos e legenda de teclas nas primeiras caçadas.**

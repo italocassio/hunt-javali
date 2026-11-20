@@ -5,6 +5,9 @@ extends HuntWorld
 ## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde, --dog,
 ## --dog_state=<Ids.DS_*>, --dog_hp=<0-100>, --dog_breed=<Ids.D_*>, --onboarding (or --hunts=N: throwaway profile that
 ## has played N hunts, so the first-hunts HUD shows)
+## Map markers (docs §8.4): --minimap_tex (test image as the minimap texture), --marked (target 0 is a marked boar),
+## --bait (a bait at (-30, -40)), --reveal (the drone reveals every alive target), --heading=<deg> (compass heading),
+## --crop_alert (forces the "Javalis na lavoura!" alert and a context message at the same time)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
@@ -18,6 +21,16 @@ const HORDE_INTERMISSION_S: float = 6.0
 const HORDE_OBJECTIVE: Vector3 = Vector3(0.0, 0.0, -40.0)
 const SANDBOX_SAVE_PATH: String = "user://sandbox_save.json"
 const DEMO_DOG_POSITION: Vector3 = Vector3(-4.0, 0.0, -6.0)
+const TEST_MAP_PX: int = 100                        # --minimap_tex: 100x100 image for the 200 m ground (2 m per px)
+const TEST_MAP_BG: Color = Color("#8C8C50")
+const TEST_MAP_GRID: Color = Color("#6E6E3C")
+const TEST_MAP_GRID_STEP_PX: int = 10
+const TEST_MAP_CROP: Color = Color("#5E9A3A")
+const TEST_MAP_CORNER: Color = Color("#D9452B")
+const TEST_MAP_CORNER_PX: int = 6
+const TEST_BAIT_POSITION: Vector3 = Vector3(-30.0, 0.0, -40.0)
+const TEST_BAIT_DURATION_S: float = 600.0
+const TEST_CONTEXT_TEXT: String = "Ceva colocada: os javalis vão para longe da lavoura"   # --crop_alert: context line shown with the alert
 const ZONE_BOXES: Dictionary = {
 	"head": [Vector3(0.0, 0.75, -0.55), Vector3(0.3, 0.3, 0.3)],
 	"vital": [Vector3(0.0, 0.6, -0.2), Vector3(0.45, 0.4, 0.5)],
@@ -54,6 +67,7 @@ var _ready_flag: bool = false
 var _elapsed: float = 0.0
 var _multipliers: Dictionary = {}
 var _args: Dictionary = {}
+var _test_map: ImageTexture = null
 
 
 func _ready() -> void:
@@ -69,6 +83,8 @@ func _ready() -> void:
 		dog_target_position = Vector3(0.0, 0.0, -TARGET_DISTANCES_M[1]) if dog_state != Ids.DS_FOLLOW else Vector3.INF
 	if _args.has("dog_hp"):
 		dog_health_pct = float(_args["dog_hp"])
+	if _args.has("minimap_tex"):
+		_test_map = _make_test_map()
 	_build_ground()
 	add_child(MapEnvironmentBase.create_fallback())
 	_build_targets()
@@ -243,12 +259,38 @@ func _spawn_player() -> void:
 	if _args.has("aim"):
 		player.bot_set_enabled(true)
 		player.bot_set_aim(true)
+	if _args.has("heading"):
+		player.rotation.y = deg_to_rad(-float(_args["heading"]))
+	if _args.has("bait"):
+		GameEvents.bait_placed.emit(TEST_BAIT_POSITION, TEST_BAIT_DURATION_S)
+	if _args.has("crop_alert"):
+		GameEvents.crop_under_attack.emit(true)
+		GameEvents.hud_message_requested.emit(TEST_CONTEXT_TEXT, TEST_BAIT_DURATION_S)
+	if _args.has("reveal"):
+		GameEvents.item_used.emit(Ids.I_SCOUT_DRONE, Vector3.ZERO)
 	if _args.has("demo"):
 		_run_demo.call_deferred()
 	if _args.has("stick"):
 		_run_stick_demo.call_deferred()
 	if _args.has("help_key"):
 		_run_help_key.call_deferred()
+
+
+## --minimap_tex: test image of the whole 200 m ground, built once. The red corner square (north-west) checks the
+## orientation and the plot of get_crop_rects() checks the scale.
+func _make_test_map() -> ImageTexture:
+	var img: Image = Image.create(TEST_MAP_PX, TEST_MAP_PX, false, Image.FORMAT_RGB8)
+	img.fill(TEST_MAP_BG)
+	for i: int in TEST_MAP_PX:
+		for j: int in range(0, TEST_MAP_PX, TEST_MAP_GRID_STEP_PX):
+			img.set_pixel(i, j, TEST_MAP_GRID)
+			img.set_pixel(j, i, TEST_MAP_GRID)
+	var px_per_m: float = float(TEST_MAP_PX) / GROUND_SIZE_M
+	for rect: Rect2 in get_crop_rects():
+		var origin: Vector2 = (rect.position - get_map_rect().position) * px_per_m
+		img.fill_rect(Rect2i(Vector2i(origin), Vector2i(rect.size * px_per_m)), TEST_MAP_CROP)
+	img.fill_rect(Rect2i(0, 0, TEST_MAP_CORNER_PX, TEST_MAP_CORNER_PX), TEST_MAP_CORNER)
+	return ImageTexture.create_from_image(img)
 
 
 ## Screenshot helper (--help_key): presses H as a real key event, so the legend folds into its "H: Ajuda" tab.
@@ -348,6 +390,16 @@ func get_dog_health_pct() -> float:
 
 func get_dog_target_position() -> Vector3:
 	return dog_target_position
+
+
+func get_minimap_texture() -> Texture2D:
+	return _test_map
+
+
+func get_marked_boar_positions() -> PackedVector3Array:
+	if _args.has("marked") and _targets.has(0) and _targets[0]["alive"]:
+		return PackedVector3Array([get_boar_position(0)])
+	return PackedVector3Array()
 
 
 func get_mode() -> StringName:

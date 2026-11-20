@@ -34,6 +34,10 @@ func get_crop_rects() -> Array[Rect2]:
 	return []
 
 
+func get_minimap_texture() -> Texture2D:      # 1.4: top-down image of the whole map rect (north up); null = none
+	return null
+
+
 func get_crop_health_pct() -> float:
 	return 100.0
 

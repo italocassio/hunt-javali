@@ -1,7 +1,7 @@
 class_name Minimap
 extends Control
-## Player-centred, north-up minimap (docs §8.4). Shows the map edge, crops, dog, baits, marked
-## boars and (only while the drone reveals them) every alive boar.
+## Player-centred, north-up minimap (docs §8.4). Draws the map image (when the world has one), the crops, the dog,
+## baits, marked boars and (only while the drone reveals them) every alive boar. Shapes and colours come from MapMarkers.
 
 const VIEW_RADIUS_M: float = 90.0
 const COLOR_BG: Color = Color(0.40, 0.36, 0.22, 0.85)
@@ -9,10 +9,10 @@ const COLOR_FRAME: Color = Color(0.96, 0.94, 0.90, 0.8)
 const COLOR_OUTSIDE: Color = Color(0.05, 0.05, 0.05, 0.85)
 const COLOR_CROP: Color = Color(0.25, 0.55, 0.28, 0.75)
 const COLOR_PLAYER: Color = Color("#F4EFE6")
-const COLOR_DOG: Color = Color("#F2C12E")
-const COLOR_BOAR: Color = Color("#D9452B")
-const COLOR_BAIT: Color = Color("#E8B923")
 const COLOR_OBJECTIVE: Color = Color("#F2C12E")
+const MAP_MODULATE: Color = Color(1.0, 1.0, 1.0, 0.92)
+const CROP_OUTLINE_PX: float = 2.0
+const MARKER_MARGIN_PX: float = 0.5   # beyond the half width and the outline, so a clamped marker stays inside the frame
 const OBJECTIVE_ICON_PX: float = 24.0
 const OBJECTIVE_SQUARE_PX: float = 12.0
 const ALLY_ARROW_TIP_PX: float = 8.0
@@ -23,12 +23,22 @@ const ALLY_FALLEN_ALPHA: float = 0.7
 const ALLY_EDGE_MARGIN_PX: float = 9.0
 const ALLY_EDGE_ARROW_PX: float = 8.0
 const ALLY_EDGE_OUTLINE_PX: float = 2.0
-const TARGET_RING_RADIUS_PX: float = 8.0
-const TARGET_RING_WIDTH_PX: float = 2.0
-const TARGET_RING_OUTLINE_PX: float = 1.5
-const TARGET_RING_POINTS: int = 24
+## Half width (radius) of each kind on the minimap (docs §8.4, table "Marcadores").
+const HALF_PX: Dictionary = {
+	&"crop": 5.0, &"bait": 5.0, &"revealed": 3.5, &"boar": 6.0, &"dog_target": 8.0, &"dog": 4.5,
+}
 
-var map_rect: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0)
+var map_rect: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0):
+	set(value):
+		map_rect = value
+		_update_region()
+		queue_redraw()
+## Image of the whole map (north up, covering map_rect); null = the plain background of before.
+var map_texture: Texture2D = null:
+	set(value):
+		map_texture = value
+		_update_region()
+		queue_redraw()
 var crop_rects: Array[Rect2] = []
 var dog_position: Vector3 = Vector3.INF
 ## What the dog is after (docs §8.4): a ring in the dog colour; Vector3.INF = nothing (the dog follows).
@@ -49,18 +59,49 @@ var center_color: Color = COLOR_PLAYER
 
 var _origin: Vector3 = Vector3.ZERO
 var _yaw: float = 0.0
+var _src_rect: Rect2 = Rect2()   # slice of map_texture, in texels
+var _dst_rect: Rect2 = Rect2()   # where that slice is drawn, in control px
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = Vector2(180.0, 180.0)
 	clip_contents = true
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	resized.connect(_update_region)
 
 
 func update_player(origin: Vector3, yaw_rad: float) -> void:
 	_origin = origin
 	_yaw = yaw_rad
+	_update_region()
 	queue_redraw()
+
+
+## Slice of map_texture (texels) that is on screen; Rect2() without texture or when the view is off the map.
+func get_map_src_rect() -> Rect2:
+	return _src_rect
+
+
+## Where get_map_src_rect() is drawn, in control px; Rect2() without texture or when the view is off the map.
+func get_map_dst_rect() -> Rect2:
+	return _dst_rect
+
+
+func _update_region() -> void:
+	_src_rect = Rect2()
+	_dst_rect = Rect2()
+	var side: float = minf(size.x, size.y)
+	if map_texture == null or side <= 0.0:
+		return
+	var scale_px: float = side * 0.5 / VIEW_RADIUS_M
+	var view: Rect2 = Rect2(Vector2(_origin.x, _origin.z) - size * 0.5 / scale_px, size / scale_px)
+	var vis: Rect2 = view.intersection(map_rect)
+	if not vis.has_area():
+		return
+	var k: float = float(map_texture.get_width()) / map_rect.size.x
+	_dst_rect = Rect2(_to_map(vis.position.x, vis.position.y), vis.size * scale_px)
+	_src_rect = Rect2((vis.position - map_rect.position) * k, vis.size * k)
 
 
 func _to_map(world_x: float, world_z: float) -> Vector2:
@@ -71,33 +112,63 @@ func _to_map(world_x: float, world_z: float) -> Vector2:
 func _draw() -> void:
 	var bounds: Rect2 = Rect2(Vector2.ZERO, size)
 	draw_rect(bounds, COLOR_OUTSIDE)
-	var top_left: Vector2 = _to_map(map_rect.position.x, map_rect.position.y)
-	var bottom_right: Vector2 = _to_map(map_rect.end.x, map_rect.end.y)
-	var ground: Rect2 = Rect2(top_left, bottom_right - top_left).intersection(bounds)
-	if ground.has_area():
-		draw_rect(ground, COLOR_BG)
+	if map_texture != null:
+		if _dst_rect.has_area():
+			draw_texture_rect_region(map_texture, _dst_rect, _src_rect, MAP_MODULATE)
+	else:
+		var top_left: Vector2 = _to_map(map_rect.position.x, map_rect.position.y)
+		var bottom_right: Vector2 = _to_map(map_rect.end.x, map_rect.end.y)
+		var ground: Rect2 = Rect2(top_left, bottom_right - top_left).intersection(bounds)
+		if ground.has_area():
+			draw_rect(ground, COLOR_BG)
 	for rect: Rect2 in crop_rects:
 		var a: Vector2 = _to_map(rect.position.x, rect.position.y)
 		var b: Vector2 = _to_map(rect.end.x, rect.end.y)
-		var clipped: Rect2 = Rect2(a, b - a).intersection(bounds)
-		if clipped.has_area():
-			draw_rect(clipped, COLOR_CROP)
+		if map_texture != null:
+			draw_rect(Rect2(a, b - a), MapMarkers.COLOR_CROP, false, CROP_OUTLINE_PX)   # clip_contents trims the overflow
+		else:
+			var clipped: Rect2 = Rect2(a, b - a).intersection(bounds)
+			if clipped.has_area():
+				draw_rect(clipped, COLOR_CROP)
 	if objective.is_finite():
 		_draw_objective()
-	for p: Vector3 in baits:
-		_dot(p, COLOR_BAIT, 4.0)
-	for p: Vector3 in marked:
-		_dot(p, COLOR_BOAR, 4.5)
-	for p: Vector3 in revealed:
-		_dot(p, COLOR_BOAR, 4.5)
-	if dog_target.is_finite():
-		_ring(dog_target, COLOR_DOG)
-	if dog_position.is_finite():
-		_dot(dog_position, COLOR_DOG, 4.5)
-	for i: int in allies.size():
-		_draw_ally(i)
+	for kind: StringName in MapMarkers.DRAW_ORDER:
+		match kind:
+			MapMarkers.KIND_CROP:
+				_draw_off_view_crops()
+			MapMarkers.KIND_BAIT:
+				for p: Vector3 in baits:
+					_marker(p, kind)
+			MapMarkers.KIND_REVEALED:
+				for p: Vector3 in revealed:
+					_marker(p, kind)
+			MapMarkers.KIND_BOAR:
+				for p: Vector3 in marked:
+					_marker(p, kind)
+			MapMarkers.KIND_DOG_TARGET:
+				if dog_target.is_finite():
+					_marker(dog_target, kind)
+			MapMarkers.KIND_DOG:
+				if dog_position.is_finite():
+					_marker(dog_position, kind)
+			MapMarkers.KIND_ALLY:
+				for i: int in allies.size():
+					_draw_ally(i)
 	_draw_player()
 	draw_rect(bounds, COLOR_FRAME, false, 2.0)
+
+
+## With the map image, a plot entirely out of view becomes a square stuck to the frame (in view it has its outline).
+func _draw_off_view_crops() -> void:
+	if map_texture == null:
+		return
+	var bounds: Rect2 = Rect2(Vector2.ZERO, size)
+	for rect: Rect2 in crop_rects:
+		var a: Vector2 = _to_map(rect.position.x, rect.position.y)
+		var b: Vector2 = _to_map(rect.end.x, rect.end.y)
+		if not Rect2(a, b - a).intersects(bounds):
+			var center: Vector2 = rect.get_center()
+			_marker(Vector3(center.x, 0.0, center.y), MapMarkers.KIND_CROP)
 
 
 ## The barn sticks to the frame when out of view, like the other markers.
@@ -112,23 +183,13 @@ func _draw_objective() -> void:
 		draw_rect(Rect2(p - Vector2.ONE * half, Vector2.ONE * half * 2.0), COLOR_OBJECTIVE)
 
 
-func _dot(world: Vector3, color: Color, radius: float) -> void:
+## One marker of MapMarkers. Out-of-view markers stick to the frame so the hunter still knows the direction.
+func _marker(world: Vector3, kind: StringName) -> void:
+	var half: float = float(HALF_PX.get(kind, 4.5))
+	var margin: float = half + MapMarkers.OUTLINE_PX + MARKER_MARGIN_PX
 	var p: Vector2 = _to_map(world.x, world.z)
-	var margin: float = radius + 2.0
-	# Out-of-view markers stick to the frame so the hunter still knows the direction.
 	p = Vector2(clampf(p.x, margin, size.x - margin), clampf(p.y, margin, size.y - margin))
-	draw_circle(p, radius + 1.5, Color.BLACK)
-	draw_circle(p, radius, color)
-
-
-## Hollow ring that sticks to the frame when out of view, like _dot.
-func _ring(world: Vector3, color: Color) -> void:
-	var p: Vector2 = _to_map(world.x, world.z)
-	var margin: float = TARGET_RING_RADIUS_PX + TARGET_RING_OUTLINE_PX + 1.0
-	p = Vector2(clampf(p.x, margin, size.x - margin), clampf(p.y, margin, size.y - margin))
-	draw_arc(p, TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, Color.BLACK,
-		TARGET_RING_WIDTH_PX + TARGET_RING_OUTLINE_PX * 2.0)
-	draw_arc(p, TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, color, TARGET_RING_WIDTH_PX)
+	MapMarkers.draw(self, kind, p, MapMarkers.color_of(kind), half)
 
 
 ## True when the world point falls inside the frame (outside it an ally is drawn as an edge arrow).

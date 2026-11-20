@@ -295,6 +295,12 @@ func _assemble() -> void:
 	t = _lap("flora", t)
 	if not await _next_frame():
 		return
+	# Top-down map image for the HUD minimap; every role builds it (section 8.1, 1.4).
+	t = Time.get_ticks_msec()
+	_map.build_minimap(Data.get_game().get("minimap", {}) as Dictionary)
+	t = _lap("minimap", t)
+	if not await _next_frame():
+		return
 	t = Time.get_ticks_msec()
 	crop = CropManager.new()
 	crop.name = "CropManager"
@@ -1278,6 +1284,10 @@ func get_contract_index() -> int:
 
 func get_map_rect() -> Rect2:
 	return _map_rect
+
+
+func get_minimap_texture() -> Texture2D:
+	return _map.get_minimap_texture() if _map != null else null
 
 
 func get_height(x: float, z: float) -> float:

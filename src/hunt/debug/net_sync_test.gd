@@ -111,6 +111,10 @@ func _rejoin_case() -> void:
 	if not await _open_pair("rejoin", false):
 		await _close_pair()
 		return
+	var host_img: Image = (_host._map as MapRoot).get_minimap_image() if _host._map != null else null
+	var client_img: Image = (_client._map as MapRoot).get_minimap_image() if _client._map != null else null
+	_check("minimap_same_on_both", host_img != null and client_img != null and host_img.get_data() == client_img.get_data(),
+		"host=%s client=%s" % [str(host_img.get_size()) if host_img != null else "null", str(client_img.get_size()) if client_img != null else "null"])
 	var replica: HuntReplica = _client.debug_replica()
 	var sync: HuntHostSync = _host.debug_host_sync()
 	var bait_s: float = float(Data.get_equipment(Ids.I_CORN_BAIT).get("effect", {}).get("duration_s", 45.0))

@@ -274,6 +274,21 @@ const CLASSES: Array[Dictionary] = [
 			"set_open(open: bool) -> void", "toggle() -> void", "is_open() -> bool",
 			"get_row_ids() -> Array[StringName]", "get_key_text(row_id: StringName) -> String",
 			"get_row_text(row_id: StringName) -> String", "get_tab_text() -> String"]},
+	# docs/arquitetura.md sections 6.8 and 8.4 (1.4, HF5): the single table of marker shapes and colours of the compass
+	# and the minimap. The KIND_*/COLOR_*/DRAW_ORDER constants are checked by tests/unit/test_compass_minimap.gd.
+	{"name": "MapMarkers", "path": "res://src/hud/map_markers.gd", "base": "RefCounted", "pkg": "A",
+		"methods": ["draw(ci: CanvasItem, kind: StringName, at: Vector2, color: Color, half_px: float) -> void",
+			"color_of(kind: StringName) -> Color"]},
+	{"name": "Compass", "path": "res://src/hud/compass.gd", "base": "Control", "pkg": "A",
+		"props": ["objective", "objective_icon"],
+		"methods": ["update_state(origin: Vector3, yaw_rad: float, marks: Array[Dictionary]) -> void",
+			"bearing_of(dx: float, dz: float) -> float", "heading_deg_of(yaw_rad: float) -> int",
+			"label_for(deg: int) -> String", "get_heading_deg() -> int", "get_heading_text() -> String"]},
+	{"name": "Minimap", "path": "res://src/hud/minimap.gd", "base": "Control", "pkg": "A",
+		"props": ["map_rect", "map_texture", "crop_rects", "dog_position", "dog_target", "marked", "revealed", "baits",
+			"objective", "objective_icon", "allies", "ally_colors", "ally_yaws", "ally_down", "center_color"],
+		"methods": ["update_player(origin: Vector3, yaw_rad: float) -> void", "is_in_view(world: Vector3) -> bool",
+			"get_map_src_rect() -> Rect2", "get_map_dst_rect() -> Rect2"]},
 	{"name": "Hud", "path": "res://src/hud/hud.gd", "base": "CanvasLayer", "pkg": "A",
 		"methods": ["bind(player: PlayerBase, world: HuntWorld) -> void"]},
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
@@ -297,7 +312,9 @@ const CLASSES: Array[Dictionary] = [
 				"get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int", "get_horde_waves_cleared() -> int",
 				"debug_horde_start_next_wave() -> void", "get_horde_eat_point(boar_id: int) -> Vector2",
 					# docs/arquitetura.md section 8.4 (1.3, HF3)
-					"get_dog_target_position() -> Vector3"]},
+					"get_dog_target_position() -> Vector3",
+					# docs/arquitetura.md sections 8.1 and 8.4 (1.4, HF5): the baked map image of the hunt
+					"get_minimap_texture() -> Texture2D"]},
 	# docs/horda.md section 5.2: internal to package B.
 	{"name": "HordeDirector", "path": "res://src/hunt/horde_director.gd", "base": "Node", "pkg": "B",
 		"signals": ["wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)",
@@ -346,10 +363,19 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "MapRoot", "path": "res://src/world/map_root.gd", "base": "Node3D", "pkg": "B",
 		"props": ["map_size_m", "grid_resolution", "terrain_seed", "height_amplitude_m", "base_flora"],
 		"methods": ["build_flora(density: float, sync_layout: bool = false) -> void",
-			"find_prop_spawn(prop_id: StringName) -> PropSpawn"]},
+			"find_prop_spawn(prop_id: StringName) -> PropSpawn",
+			# docs/arquitetura.md section 8.4 (1.4, HF5): the map image the minimap draws
+			"build_minimap(cfg: Dictionary) -> void", "get_minimap_texture() -> Texture2D", "get_minimap_image() -> Image"]},
 	{"name": "Heightmap", "path": "res://src/world/heightmap.gd", "base": "RefCounted", "pkg": "B",
-		"methods": ["get_height(x: float, z: float) -> float", "get_normal(x: float, z: float) -> Vector3"]},
-	{"name": "Terrain", "path": "res://src/world/terrain.gd", "base": "Node3D", "pkg": "B"},
+		"methods": ["get_height(x: float, z: float) -> float", "get_normal(x: float, z: float) -> Vector3",
+			# docs/arquitetura.md section 8.5 (1.4, HF5): the grid itself, read only
+			"get_grid_data() -> PackedFloat32Array"]},
+	{"name": "Terrain", "path": "res://src/world/terrain.gd", "base": "Node3D", "pkg": "B",
+		"methods": ["get_grid_mask() -> PackedColorArray"]},
+	# docs/arquitetura.md sections 8.1 and 8.4 (1.4, HF5): the CPU-baked top-down image of the map (static helpers)
+	{"name": "MinimapBaker", "path": "res://src/world/minimap_baker.gd", "base": "RefCounted", "pkg": "B",
+		"methods": ["bake(map: MapRoot, cfg: Dictionary) -> Image",
+			"world_to_pixel(map_rect: Rect2, image_px: int, x: float, z: float) -> Vector2i"]},
 	{"name": "CropField", "path": "res://src/world/crop_field.gd", "base": "Marker3D", "pkg": "B",
 		"props": ["size_m", "crop"]},
 	{"name": "CropManager", "path": "res://src/world/crop_manager.gd", "base": "Node3D", "pkg": "B",
@@ -543,7 +569,9 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"get_horde_countdown_s() -> float", "get_horde_wave_total() -> int", "get_horde_wave_remaining() -> int",
 			"get_horde_waves_cleared() -> int", "debug_horde_start_next_wave() -> void",
 			# docs/arquitetura.md section 8.4 (1.3, HF3): INF = no dog target (the default)
-			"get_dog_target_position() -> Vector3"]},
+			"get_dog_target_position() -> Vector3",
+			# docs/arquitetura.md section 8.4 (1.4, HF5): null = the world has no map image
+			"get_minimap_texture() -> Texture2D"]},
 	{"name": "CornStockVisualBase", "path": "res://src/core/corn_stock_visual_base.gd", "base": "Node3D",
 		"methods": ["stage_for(pct: float) -> int", "setup(ring_radius_m: float) -> void", "set_stock_pct(pct: float) -> void",
 			"set_under_attack(on: bool) -> void", "create_fallback() -> CornStockVisualBase"],
@@ -642,6 +670,12 @@ static func type_code(type_name: String) -> int:
 			return TYPE_CALLABLE
 		"PackedVector3Array":
 			return TYPE_PACKED_VECTOR3_ARRAY
+		"PackedFloat32Array":
+			return TYPE_PACKED_FLOAT32_ARRAY
+		"PackedColorArray":
+			return TYPE_PACKED_COLOR_ARRAY
+		"Vector2i":
+			return TYPE_VECTOR2I
 		"Variant":
 			return -1
 	return TYPE_OBJECT

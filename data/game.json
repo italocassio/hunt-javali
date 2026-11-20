@@ -41,12 +41,34 @@
     "wander_before_crop_max_s": 15.0
   },
   "loading": {
-    "step_weights": {"heightmap": 1, "terrain": 5, "props_water": 8, "flora": 3, "crop": 1, "environment": 1,
+    "step_weights": {"heightmap": 1, "terrain": 5, "props_water": 8, "flora": 3, "minimap": 1, "crop": 1, "environment": 1,
                      "player": 12, "dog": 2, "boar_warmup": 4, "shader_warmup": 60, "start": 3},
     "warmup_yaw_steps": 4,
     "settle_frames": 3,
     "settle_frame_ms": 120,
     "warmup_max_s": 30.0
+  },
+  "minimap": {
+    "image_px": 256,
+    "grid_stride": 1,
+    "hillshade": {"azimuth_deg": 315.0, "altitude_deg": 40.0, "strength": 0.8, "min": 0.65, "max": 1.25},
+    "height_tint": {"low": 0.92, "high": 1.06},
+    "crop_row_px": 3,
+    "colors": {
+      "grass": "#BDA85C", "crop_soil": "#543D26", "road": "#9E4529", "wet": "#5C4D33",
+      "water": "#33708C", "water_edge": "#24546B",
+      "soy": "#5E9A3A", "corn": "#9DB04A", "crop_row": "#3F6E2A",
+      "prop_default": "#9A9A9A"
+    },
+    "prop_colors": {
+      "farmhouse": "#C9533D", "barn": "#8C5A3C", "water_tank": "#9AA0A6",
+      "feed_trough": "#7A6248", "fence_segment": "#6E5238", "gate": "#6E5238"
+    },
+    "canopy": {
+      "cerrado_tree": {"radius_m": 2.5, "color": "#3E5F2A"},
+      "buriti": {"radius_m": 2.0, "color": "#4D7A34"},
+      "ipe": {"radius_m": 2.5, "color": "#C9B42A"}
+    }
   },
   "economy": {
     "start_money": 500,

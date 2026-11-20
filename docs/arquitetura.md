@@ -1,9 +1,12 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.3** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
+Versão do contrato: **1.4** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
 HUD/onboarding, fases 1 e 2: teclas fixas por item, barra de itens, botões de item no toque, dicas das primeiras
 caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14; fase 4, jogo 0.8.2: ação `help`, objetivos e
-legenda de teclas, nomes nos botões de toque; §4, §6.8, §8.4, §9.1, §14) · Godot **4.7.2** ·
+legenda de teclas, nomes nos botões de toque; §4, §6.8, §8.4, §9.1, §14; 1.4 = fase 5, jogo 0.8.3: bússola com
+graus e colaterais, marcadores comuns à bússola e ao minimapa, minimapa com imagem do mapa gerada na CPU, Preparação
+sem teclas de atalho; §2, §6.8, §6.9, §6.10, §8.1, §8.4, §9.1, §11, §12, §13.1, §14, Apêndice A; 1.4 (implementado
+em 0.8.3): divergências aceitas pelo coordenador registradas em §6.8, §6.10, §8.4, §11, §12, §13.1 e §14) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
@@ -152,11 +155,14 @@ hunt-javali/
 │   │   ├── dog_card.gd           class DogCard (cartão do cão, §8.4)
 │   │   ├── objectives_panel.gd   class ObjectivesPanel (objetivos das primeiras caçadas, §8.4)
 │   │   ├── controls_legend.gd    class ControlsLegend (legenda de teclas das primeiras caçadas, §8.4)
+│   │   ├── map_markers.gd        class MapMarkers (formas e cores comuns à bússola e ao minimapa, §8.4, 1.4)
 │   │   ├── debug/                (sandboxes do HUD; hud_hints_test.tscn|.gd, §14)
 │   │   └── touch/
 │   ├── hunt/                     game-developer Pacote B
 │   │   └── debug/
 │   ├── world/                    game-developer Pacote B
+│   │   ├── minimap_baker.gd      class MinimapBaker (imagem do minimapa na CPU, §8.4, 1.4)
+│   │   ├── debug/                (1.4: minimap_selftest.tscn|.gd, §14)
 │   │   └── maps/mato_grosso/
 │   ├── boars/                    game-developer Pacote B
 │   ├── dogs/                     game-developer Pacote B
@@ -607,6 +613,9 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `DogCard` | `src/hud/dog_card.gd` | HBoxContainer | cartão do cão do HUD (§8.4, 1.3, jogo 0.8.1); só vista, quem o alimenta é o `Hud`. `set_breed(dog_id: StringName) -> void` (retrato `ScenePaths.icon(dog_id)` e nome de `Data.get_dog(dog_id).name`; id vazio/desconhecido = cartão genérico "Cão" sem retrato), `set_state(state: StringName) -> void`, `set_health_pct(pct: float) -> void`, `set_touch(touch: bool) -> void`, `get_state_text() -> String`, `get_action_text() -> String`, `get_breed_text() -> String` (os três últimos para tests). Filhos: `Portrait`, `Info/Name`, `Info/State`, `Info/HealthBar`, `Info/Action` |
 | `ObjectivesPanel` | `src/hud/objectives_panel.gd` | VBoxContainer | objetivos das primeiras caçadas (§8.4, jogo 0.8.2); só vista, quem a alimenta é o `Hud`. `enum State { PENDING, OK, DONE, FAIL }`; `const ROW_DOG/ROW_DRONE/ROW_KILLS/ROW_CROP: StringName` (`&"dog"`, `&"drone"`, `&"kills"`, `&"crop"`); `set_dog_present(present: bool) -> void`, `set_drone_present(present: bool) -> void` (a linha só existe com cão / drone); `set_kills(killed: int, total: int) -> void`; `set_crop_pct(pct: float) -> void`; `mark_dog_ordered() -> void`, `mark_drone_used() -> void`; `set_touch(touch: bool) -> void` ("(E)" vira "(botão Cão)"); para tests: `get_row_ids() -> Array[StringName]` (linhas visíveis, em ordem), `get_row_text(row_id: StringName) -> String`, `get_row_state(row_id: StringName) -> int` (um `State`), `get_kills_goal() -> int`, `get_crop_min_pct() -> float`. Filhos: `Row_dog`, `Row_drone`, `Row_kills`, `Row_crop` (cada um com `Mark` e `Text`). Lê `game.onboarding.objective_kills` e `objective_crop_min_pct` no `_init` (fallbacks 3 e 50.0) |
 | `ControlsLegend` | `src/hud/controls_legend.gd` | VBoxContainer | legenda de teclas das primeiras caçadas, só teclado/mouse (§8.4, jogo 0.8.2); só vista. `set_items(item_ids: Array[StringName]) -> void` (uma linha por item usável, na ordem de `get_usable_ids()`), `set_dog_present(present: bool) -> void`, `set_open(open: bool) -> void`, `toggle() -> void`, `is_open() -> bool` (começa aberta); para tests: `get_row_ids() -> Array[StringName]`, `get_key_text(row_id: StringName) -> String`, `get_row_text(row_id: StringName) -> String`, `get_tab_text() -> String`. Ids de linha: `move`, `mouse_buttons`, `reload`, `sprint`, `crouch`, `weapons`, o id de cada item, `dog_command`, `help`. Filhos: `Tab` (visível só recolhida) e `Rows` (grade; cada linha é uma etiqueta de tecla `Key_<id>` e uma de texto `Text_<id>`) |
+| `Compass` | `src/hud/compass.gd` | Control | faixa da bússola (§8.4; 1.4: graus, colaterais, rumo no centro). `update_state(origin: Vector3, yaw_rad: float, marks: Array[Dictionary]) -> void` (assinatura de antes; `marks` = `{pos: Vector3, kind: StringName}`, `kind` de `MapMarkers`; `&"ally"` também tem `color: Color` e `down: bool`); `var objective: Vector3`, `var objective_icon: Texture2D` (horda, como antes); `static func bearing_of(dx: float, dz: float) -> float` (como antes); 1.4: `static func heading_deg_of(yaw_rad: float) -> int` (= `posmod(roundi(rad_to_deg(-yaw_rad)), 360)`), `static func label_for(deg: int) -> String` (múltiplo de 45 → "N", "NE", "L", "SE", "S", "SO", "O", "NO"; outro múltiplo de 15 → o número, ex. "105"; demais → ""), `get_heading_deg() -> int`, `get_heading_text() -> String` (ex. "135°") |
+| `Minimap` | `src/hud/minimap.gd` | Control | minimapa 180×180, centrado no caçador, norte para cima (§8.4). Membros de antes (`map_rect`, `crop_rects`, `dog_position`, `dog_target`, `marked`, `revealed`, `baits`, `objective`, `objective_icon`, `allies`, `ally_colors`, `ally_yaws`, `ally_down`, `center_color`, `update_player`, `is_in_view`); 1.4: `var map_texture: Texture2D = null` (imagem do mapa inteiro; `null` = fundo liso de antes), `get_map_src_rect() -> Rect2` (fatia da textura em texels) e `get_map_dst_rect() -> Rect2` (onde ela é desenhada, px do controle), recalculadas em `update_player` e quando `map_texture`/`map_rect` mudam; `Rect2()` sem textura ou fora do mapa |
+| `MapMarkers` | `src/hud/map_markers.gd` | RefCounted (static) | 1.4: única fonte das formas e cores dos marcadores da bússola e do minimapa (tabela em §8.4). Constantes `KIND_*` (StringName), `COLOR_*`, `OUTLINE_PX`, `DRAW_ORDER: Array[StringName]`; `static func draw(ci: CanvasItem, kind: StringName, at: Vector2, color: Color, half_px: float) -> void` (desenha a forma do tipo, com contorno preto, centrada em `at`; `half_px` = meia-largura / raio); `static func color_of(kind: StringName) -> Color` (implementado em 0.8.3: a cor do tipo pela tabela de §8.4; `&"ally"` não tem cor própria, a cor é a do slot); anel `dog_target`: `RING_WIDTH_FRAC = 0.25` (largura = 0,25 × `half_px`) e `RING_OUTLINE_LESS_PX = 0.5` (contorno = largura − 0,5). `&"ally"` não passa por aqui (losango na bússola, seta no minimapa, como antes) |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
 | `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `set_action_labels(on: bool) -> void` / `has_action_labels() -> bool` (jogo 0.8.2: com `true`, Tiro, Mira, Recarga, Troca e Agachar mostram o nome abaixo do círculo, como os botões de item e o do cão já mostram; o botão Pausa nunca; padrão `false`, quem liga é o `Hud`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
@@ -634,7 +643,8 @@ O `Player` instancia `ScenePaths.HUD` como filho em `setup()` e chama `hud.bind(
 | `BoarPuppet` | `src/boars/boar_puppet.gd` | Node3D | interna (réplica do javali, com 4 `HitZone`) |
 | `DogPuppet` | `src/dogs/dog_puppet.gd` | Node3D | interna (réplica do cão) |
 | `FallbackPlayer` | `src/hunt/debug/fallback_player.gd` | PlayerBase | cápsula simples usada se `player.tscn` não existir |
-| `MapRoot` | `src/world/map_root.gd` | Node3D | raiz de toda cena de mapa (§8.5) |
+| `MapRoot` | `src/world/map_root.gd` | Node3D | raiz de toda cena de mapa (§8.5). 1.4: `build_minimap(cfg: Dictionary) -> void` (depois de `build_flora`; `cfg` = `Data.get_game().get("minimap", {})`; chama `MinimapBaker.bake`, guarda a `Image` e cria o `ImageTexture`), `get_minimap_texture() -> Texture2D` e `get_minimap_image() -> Image` (`null` antes de `build_minimap`) |
+| `MinimapBaker` | `src/world/minimap_baker.gd` | RefCounted (static) | 1.4: `static func bake(map: MapRoot, cfg: Dictionary) -> Image` (§8.4 "Imagem do mapa"; exige o mapa montado até `build_flora`); `static func world_to_pixel(map_rect: Rect2, image_px: int, x: float, z: float) -> Vector2i` (coluna 0 = oeste/`map_rect.position.x`, linha 0 = norte/`map_rect.position.y`; fora do mapa = valor preso à borda) |
 | `Heightmap` | `src/world/heightmap.gd` | RefCounted | `get_height(x, z) -> float`, `get_normal(x, z) -> Vector3` |
 | `Terrain` | `src/world/terrain.gd` | Node3D | malha + colisão |
 | `CropField` | `src/world/crop_field.gd` | Marker3D | `@export var size_m: Vector2`, `@export var crop: StringName` (&"soy"/&"corn") |
@@ -664,6 +674,11 @@ Membros novos, internos de B (uso só dentro de `src/hunt`, `src/boars`, `src/wo
   `charge_hits(pos: Vector2, dir: Vector2, p_body_scale: float, boar_y: float, target: Vector3) -> bool`.
 - `HuntController`: `place_bait(at: Vector3)` (ceva vinda da rede), `get_baits() -> Array[Bait]`.
 - `CropManager`: `set_replicated_attack(on: bool)`, `is_under_attack() -> bool`, `get_eaten_indices() -> PackedInt32Array`.
+- 1.4 (minimapa): `Heightmap.get_grid_data() -> PackedFloat32Array` (a própria grade, `resolution²` alturas, índice
+  `j * resolution + i`; quem chama só lê); `Terrain.get_grid_mask() -> PackedColorArray` (`resolution²` máscaras r/g/b
+  de `_mask_at` em cada vértice da grade, mesmo índice; preenchida em `_build_meshes` **antes** da troca por albedo do
+  fallback, então vale com e sem o material de arte; vazia antes de `build`); `HuntController.get_minimap_texture()`
+  (override de `HuntWorld`, devolve `_map.get_minimap_texture()` ou `null` sem mapa).
 
 ### 6.10 game-systems — classes públicas (testadas pelo qa)
 
@@ -681,7 +696,7 @@ Membros novos, internos de B (uso só dentro de `src/hunt`, `src/boars`, `src/wo
 | `RedeemCode` | `src/systems/pix/redeem_code.gd` | RefCounted (static) | `static func normalize(code: String) -> String`, `static func generate(gold: int, nonce: String, secret: String) -> String`, `static func parse(code: String, secret: String) -> int` (ouro ou -1) |
 | `DonationService` | `src/systems/pix/donation_service.gd` | RefCounted | `signal redeem_finished(ok: bool, gold: int, message: String)`, `func _init(gateway: PixGateway = null)`, `func get_packages() -> Array[Dictionary]`, `func get_pix_payload(package_id: StringName) -> String`, `func redeem(code: String) -> void` |
 
-| `LoadoutPanel` | `src/ui/common/loadout_panel.gd` | VBoxContainer | painel de equipamento da Preparação, reaproveitado pelo lobby (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`; 1.3: `ItemKey_<id>` e `%DogKeyLabel`, §11) |
+| `LoadoutPanel` | `src/ui/common/loadout_panel.gd` | VBoxContainer | painel de equipamento da Preparação, reaproveitado pelo lobby (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`; `ItemKey_<id>` e `%DogKeyLabel` existiram de 1.3 a 0.8.2 e **saem** em 1.4, §11; desde 0.8.3 o painel não cita tecla nenhuma, nem na frase do cão `_dog_hint` = "Na caçada, mande o cão: Pega! / Volta!", e não ouve `GameEvents.touch_mode_changed`) |
 
 Detalhes de Pix em §9.8.
 
@@ -1109,6 +1124,10 @@ Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_
 1. `request = Router.get_pending_request()`; se `null`, `HuntRequest.make_debug()`.
 2. Carrega o mapa: `load(ScenePaths.map_scene(request.map_id)) as PackedScene` (cena do próprio B; sem
    fallback: se faltar, `push_error` e encerra com `ABANDONED`), instancia e `add_child` com nome `Map`. Gera terreno, água, props, flora, lavoura.
+   1.4: entre a flora e a lavoura, uma etapa própria (um `_next_frame` antes e outro depois, `_lap("minimap", t)`):
+   `_map.build_minimap(Data.get_game().get("minimap", {}))`. Roda em **todos** os papéis (solo, anfitrião e cliente:
+   o cliente monta o mesmo mapa pela mesma cena e, com `sync_layout`, as mesmas árvores), antes da etapa do jogador,
+   então `Hud.bind` já encontra a textura.
 3. Ambiente: `AssetLoader.instantiate(ScenePaths.environment(map_id))` ou `MapEnvironmentBase.create_fallback()`;
    `apply_quality(qualidade)`. Qualidade = `Profile.get_setting("quality")`; `"auto"` → `Ids.Q_LOW` se
    `InputSetup.is_touch_mode()`, senão `Ids.Q_MEDIUM`. Aplica também `get_viewport().scaling_3d_scale =
@@ -1141,7 +1160,8 @@ o cliente faz o mesmo antes de avisar que carregou.
 Desenha só em 2D (`_draw`, sem 3D nem shader novo): um javali em silhueta correndo em loop, uma trilha de
 progresso e a porcentagem inteira ("42%"). Anima sozinho em `_process`, sem depender do controlador.
 O controlador calcula o progresso por pesos de etapa (`loading.step_weights` em `data/game.json`: chave =
-nome da etapa do `_lap`, valor = peso relativo; o pré-aquecimento reparte o seu peso pelos sub-passos), nunca
+nome da etapa do `_lap`, valor = peso relativo, na ordem da montagem; 1.4: `"minimap": 1` entre `"flora"` e `"crop"`;
+etapa sem peso nos dados não move a barra, então o código não depende dessa chave; o pré-aquecimento reparte o seu peso pelos sub-passos), nunca
 regride e chega a 1 imediatamente antes de esconder o overlay. Fallback: sem o widget, o `Label` mostra
 "Preparando a caçada… 42%".
 
@@ -1193,15 +1213,17 @@ Queda de dano: `d ≤ falloff_start_m` → 1; `d ≥ falloff_end_m` → `min_dam
 - Do mundo via `HuntWorld` (polling a 10 Hz, sem alocar por frame além de um `PackedVector3Array`):
   minimapa (`get_map_rect`, `get_crop_rects`, `get_dog_position`, `get_dog_target_position`, `get_alive_boar_ids` +
   `get_boar_position` **só** durante revelação do drone), bússola (`get_nearest_boar_position` quando o cão
-  é `caramelo`, marcações do cão, `get_dog_position` e `get_dog_target_position`).
+  é `caramelo`, marcações do cão, `get_dog_position` e `get_dog_target_position`; 1.4: também talhões, cevas e
+  javalis revelados, ver "Bússola, marcadores e minimapa" abaixo). Uma vez, no `bind`: `get_map_rect`,
+  `get_crop_rects` e (1.4) `get_minimap_texture`.
 - Por eventos (§5): contagem, lavoura, aviso de lavoura, abates, hitmarker, estado/vida do cão, mensagens.
 - Ao `bind`, o HUD lê o estado inicial de `world` (`get_crop_health_pct`, `get_boars_killed`,
   `get_boars_total`, `has_dog`) para não depender da ordem dos sinais.
 
 Layout do HUD (referência 1280×720, âncoras; respeita margem de 24 px nas laterais):
-topo-esquerda vida + ícone do colete + botão pausa (toque); topo-centro bússola (480 px, N/L/S/O, marcador
-do cão e do javali marcado) com barra "Lavoura 87%" abaixo e aviso "Javalis na lavoura!" piscando; topo-direita
-minimapa 180×180 e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
+topo-esquerda vida + ícone do colete + botão pausa (toque); topo-centro bússola (480×54 px desde 1.4: graus a cada
+15°, cardeais e colaterais, rumo em graus no centro, marcadores da tabela abaixo) com barra "Lavoura 87%" abaixo e
+aviso "Javalis na lavoura!" piscando; topo-direita minimapa 180×180 (1.4: sobre a imagem do mapa) e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
 R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita munição "5 | 30" e nome da arma (a linha de item
 "Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro a barra de itens (só
 desktop, abaixo); faixa de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); cartão do cão
@@ -1333,7 +1355,8 @@ nada de rede novo; em rede cada caçador vê as suas. Números em `game.onboardi
 - **`HintBanner`** (`Hud/Root/HintBanner`): `HudPanel` com `Label` `HudBigLabel` 24 px centralizado; o fundo
   encolhe até a largura do texto (mais o respiro do painel), centralizado na horizontal, no máximo 60% da largura
   da tela (texto maior quebra linha), verticais 0,30–0,37 da tela, `mouse_filter` ignorado, nos dois modos. Essa faixa fica
-  livre durante o jogo vivo: abaixo da mensagem de contexto (0,22–0,30) e acima da mira; as faixas que também a
+  livre durante o jogo vivo: abaixo da mensagem de contexto (0,22–0,30 até 0.8.2; 0,25–0,33 desde 0.8.3, ver
+  "Mensagem de contexto" na Fase 5) e acima da mira; as faixas que também a
   usam (derrubado/espectador, 0,30–0,44) só aparecem com o caçador caído, quando as dicas já foram encerradas.
   Aparece e some com fade de 0,2 s (constante de desenho).
 
@@ -1380,6 +1403,157 @@ nos botões de toque. Só vistas: o `Hud` as cria em `_ready`, decide quando apa
   desenvolvedor costuma estar fora das primeiras caçadas e nada aparece. `--help_key` aperta H meio segundo depois
   de abrir (screenshot da legenda recolhida). Screenshots precisam de `--frames=600`: a janela do `screenshot.gd`
   roda sem limite de fps e 240 quadros passam antes dos 0,5 s.
+
+**Bússola, marcadores e minimapa (Fase 5, contrato 1.4, jogo 0.8.3)** — só HUD, mais uma imagem que o mundo gera
+uma vez. Nenhum sinal novo no `GameEvents`, nada novo na rede: cada peer gera a própria imagem (mesma cena, mesmas
+árvores, ver "Determinismo") e os marcadores vêm do que o `Hud` já lê e ouve.
+
+**Marcadores — tabela única em `MapMarkers`** (constantes; os dois scripts desenham por `MapMarkers.draw`):
+
+| `kind` | Constante | O que é | Fonte no `Hud` (polling 10 Hz) | Forma | Cor | `half_px` bússola | `half_px` minimapa |
+|---|---|---|---|---|---|---|---|
+| `&"crop"` | `KIND_CROP` | centro de cada talhão | `get_crop_rects()` lido uma vez no `bind`; só no modo contrato; não aparece o talhão que contém o caçador da vista (XZ) | quadrado | `COLOR_CROP` `#3FAF5A` | 6 | 5 (só com textura e só quando o talhão inteiro está fora da vista, preso à moldura; dentro da vista o talhão aparece pelo contorno; sem textura, o preenchimento de antes e nenhum quadrado) |
+| `&"bait"` | `KIND_BAIT` | ceva ativa | `_baits` (sinal `bait_placed`, expira por `duration_s`), como hoje | hexágono, vértice para cima | `COLOR_BAIT` `#3CC7B4` | 6 | 5 |
+| `&"revealed"` | `KIND_REVEALED` | javali vivo revelado pelo drone | `get_alive_boar_ids` + `get_boar_position` só enquanto `_reveal_left > 0`, como hoje | círculo | `COLOR_REVEALED` `#FF8A65` | 4,5 | 3,5 |
+| `&"boar"` | `KIND_BOAR` | javali marcado: `get_marked_boar_positions`, marcas de `dog_marked_boar` e o mais próximo quando o cão é `caramelo` | como hoje | triângulo, vértice para cima | `COLOR_BOAR` `#D9452B` | 7 | 6 |
+| `&"dog_target"` | `KIND_DOG_TARGET` | alvo do cão (1.3) | como hoje | anel (só contorno) | `COLOR_DOG` `#F2C12E` | 10 | 8 |
+| `&"dog"` | `KIND_DOG` | cão | como hoje | círculo | `COLOR_DOG` `#F2C12E` | 4,5 | 4,5 |
+| `&"ally"` | `KIND_ALLY` | outro caçador | como hoje | bússola: losango (caído: vazado); minimapa: seta com o rumo (caído: X; fora da vista: seta na moldura) — desenho próprio de cada script, como hoje | cor do slot | 6 | seta 8 |
+
+- Contorno preto `OUTLINE_PX = 1.5` em toda forma cheia; o anel mantém a largura e o contorno de antes (bússola 2,5 +
+  2×2,0 px; minimapa 2,0 + 2×1,5 px). Implementado em 0.8.3 como fórmula: largura = `RING_WIDTH_FRAC` (0,25) ×
+  `half_px`, contorno = largura − `RING_OUTLINE_LESS_PX` (0,5), o que dá esses valores com `half_px` 10 e 8. Cor de
+  cada tipo por `MapMarkers.color_of(kind)`. Objetivo da horda (celeiro): sem mudança, desenhado antes de tudo pelo membro
+  `objective` de cada script.
+- **Ordem** `MapMarkers.DRAW_ORDER = [&"crop", &"bait", &"revealed", &"boar", &"dog_target", &"dog", &"ally"]`, de trás
+  para a frente, igual nos dois. O `Hud._poll_world` monta `_marks` nessa ordem (hoje o javali do caramelo entra
+  depois do cão: passa para o bloco `boar`); `_poll_allies` continua acrescentando os aliados por último. O `Minimap`
+  desenha os seus membros na mesma ordem. Javali revelado e marcado ao mesmo tempo: o triângulo cobre o círculo.
+- Fora da faixa / da vista: bússola prende à borda com alfa 0,6 (todas as marcas, inclusive talhão e ceva);
+  minimapa prende à moldura (como `_dot` hoje).
+- Mudanças visíveis em relação a 0.8.2: no minimapa o javali marcado deixa de ser círculo e vira triângulo, a ceva
+  deixa de ser círculo `#E8B923` (quase a cor do cão) e vira hexágono `#3CC7B4`, e o revelado ganha cor própria.
+- Alocação: `_marks` continua `Array[Dictionary]` reconstruído só no polling de 10 Hz (como desde 1.3; pior caso
+  4 talhões + 4 cevas + 26 revelados + marcados + cão, alvo e 3 aliados < 70 dicionários por polling); por quadro,
+  nada novo. `Hud` guarda `_crop_centers: PackedVector3Array` e `_crop_rects: Array[Rect2]`, montados no `bind`.
+
+**Bússola (`Compass`, `custom_minimum_size = Vector2(480, 54)`, antes 44).** Constantes no script:
+- Faixa de `BAND_H_PX = 34.0` com `COLOR_BG` (o de hoje); `VISIBLE_SPAN_DEG = 180.0` (15° = 40 px a 480 px).
+- Traços na base da faixa, largura 2 px, `COLOR_TICK`: a cada `MINOR_TICK_STEP_DEG = 5.0` 4 px; a cada
+  `TICK_STEP_DEG = 15.0` 7 px; a cada 45° 10 px.
+- Rótulo acima de cada traço de 15° (`label_for(deg)`), centrado em y `LABEL_CENTER_Y_PX = 13.0`: cardeais N, L, S, O
+  com `CARDINAL_FONT_PX = 20` e contorno preto 4 px; colaterais NE, SE, SO, NO com `INTERCARDINAL_FONT_PX = 16` e
+  contorno 3 px; números (15, 30, 60, 75, 105…345) com `NUMBER_FONT_PX = 13`, sem contorno, `COLOR_TEXT` com alfa
+  0,85. N em `COLOR_NORTH` `#D9452B`; os demais em `COLOR_TEXT`. Sempre em português: L e O, nunca E e W.
+  Implementado em 0.8.3: rótulo (número, cardeal ou colateral) que não cabe inteiro na largura da faixa é pulado
+  naquele quadro; o traço continua.
+- Marcadores centrados em y = `BAND_H_PX − 9.0`, sobre os traços (como hoje).
+- **Rumo no centro:** caixa `READOUT_W_PX = 56.0` × `READOUT_H_PX = 18.0` centrada em x, de y 36 a 54, fundo
+  `COLOR_BG`, texto `get_heading_text()` ("0°" a "359°") com `READOUT_FONT_PX = 15`, `COLOR_TEXT`, centralizado. Um
+  entalhe (triângulo de 10 px de base e 6 de altura, `COLOR_TEXT`) sobe da caixa até a base da faixa e substitui o
+  ponteiro do topo de antes, que sai. Implementado em 0.8.3 (`NOTCH_BASE_PX = 10.0`, `NOTCH_H_PX = 6.0`): a base do
+  entalhe fica no topo da caixa (y 36 = `BAND_H_PX + 2`) e o vértice em y 30, 4 px dentro da faixa. O centro da faixa continua em `rad_to_deg(-yaw)` (float), e
+  `heading_deg_of(yaw)` arredonda o mesmo valor, então o número da caixa bate com o rótulo sob o entalhe.
+- `queue_redraw` a cada quadro, como hoje (o rumo muda a cada quadro): por quadro ≤ 37 traços, ≤ 13 rótulos, os
+  marcadores e um texto; nenhuma alocação além dos `PackedVector2Array` dos polígonos, como hoje.
+- Layout: a coluna do topo-centro desce 10 px (faixa da lavoura e aviso "Javalis na lavoura!" incluídos). Nada mais
+  se move, salvo a mensagem de contexto (abaixo).
+- **Mensagem de contexto (implementado em 0.8.3):** para o aviso "Javalis na lavoura!", que desceu 10 px e termina
+  perto de 0,27 da altura a 720 px, não cobri-la, o `Hud` a põe em `CONTEXT_TOP_FRAC = 0.25` (antes 0,22) com
+  `CONTEXT_HEIGHT_FRAC = 0.08` (faixa 0,25–0,33, nó `ContextMessage`). Resíduo aceito: com a dica de abertura
+  (`HintBanner`, 0,30–0,37), o aviso e o contexto na tela ao mesmo tempo, em 16:9, o texto do contexto encosta uns
+  6 px no topo do painel da dica (raro e passageiro).
+
+**Imagem do mapa (`MinimapBaker.bake`).** Uma vez por caçada, na CPU, no thread principal; sem `SubViewport`, sem
+câmera, sem ler textura da GPU (funciona em `--headless`). Entradas: `map.heightmap.get_grid_data()`,
+`map.terrain.get_grid_mask()`, `map.get_water_bodies()`, `map.get_crop_fields()`, os `PropSpawn` filhos de
+`PropSpawns`, `map.get_flora_positions(id)` para cada id de `canopy`. Parâmetros em `game.minimap` (§9.1); o script
+tem fallbacks idênticos como constantes `DEFAULT_*` (mesmo padrão de `CropManager.DEFAULT_SIGNAL_STEP_PCT`), então
+funciona antes de os dados chegarem. Passos, nesta ordem:
+1. **Base na grade.** Amostras `i, j` da grade múltiplas de `grid_stride` (1: 129×129 em Mato Grosso; 2: 65×65); a
+   imagem base tem `n = (resolution − 1) / grid_stride + 1` px de lado. Cor de cada amostra: `colors.grass`, depois
+   `lerp` para `colors.crop_soil` por `mask.r`, para `colors.road` por `mask.g` e para `colors.wet` por `mask.b` (a
+   ordem de `Terrain._albedo_from_mask`, sem o ruído). Relevo: `dx = (h(i+1, j) − h(i−1, j)) / (2·spacing)`,
+   `dz = (h(i, j+1) − h(i, j−1)) / (2·spacing)` (vizinhos presos à grade), `n = Vector3(−dx, 1, −dz).normalized()`,
+   `L = Vector3(sin(az)·cos(alt), sin(alt), −cos(az)·cos(alt))` com `az = deg_to_rad(hillshade.azimuth_deg)` medido do
+   norte no sentido horário (315 = luz de noroeste) e `alt = deg_to_rad(hillshade.altitude_deg)`;
+   `shade = clampf(lerpf(1.0, n.dot(L) / sin(alt), hillshade.strength), hillshade.min, hillshade.max)` (chão plano =
+   1,0); `tint = lerpf(height_tint.low, height_tint.high, clampf(h / amplitude_m, 0, 1))`; cor × `shade × tint`, canal
+   preso a 0–1. Bytes RGB8 escritos num `PackedByteArray` dimensionado uma vez (sem `set_pixel` nesse laço);
+   `Image.create_from_data(n, n, false, Image.FORMAT_RGB8, bytes)`.
+2. **Escala:** `resize(image_px, image_px, Image.INTERPOLATE_BILINEAR)` (nativo).
+3. **Camadas nítidas** na resolução final (`m_per_px = map_rect.size.x / image_px`; Mato Grosso com 256 px: 1 m/px),
+   nesta ordem:
+   - Água: cada `WaterBody`, pixels com centro a ≤ `radius_m` do centro em `colors.water`, e o anel de 1 px junto à
+     borda (`radius_m − m_per_px` < d ≤ `radius_m`) em `colors.water_edge` (laço só na caixa do açude).
+   - Talhões: `fill_rect` do retângulo de cada `CropField` em `colors.soy` ou `colors.corn` (pelo `crop`; outro valor
+     usa `soy`); com `crop_row_px > 0`, linhas de 1 px em `colors.crop_row` a cada `crop_row_px` px, paralelas ao
+     lado maior do talhão. Implementado em 0.8.3: a primeira linha fica 1 px dentro do talhão
+     (`CROP_ROW_FIRST_OFFSET_PX = 1`), não na borda.
+   - Construções e cercas: cada `PropSpawn` com `collision_size != Vector3.ZERO` → `fill_rect` da pegada XZ
+     (`collision_size.x` × `collision_size.z`, trocados se `absf(sin(rotation.y)) > 0.7`; mínimo 1 px) em
+     `prop_colors[prop_id]` ou `colors.prop_default`.
+   - Copas: para cada id de `canopy` e cada posição de `get_flora_positions(id)`, disco de raio
+     `maxf(radius_m / m_per_px, 1)` px em `canopy[id].color`, desenhado com `fill_rect` de 1 px de altura por linha.
+   - A estrada não tem camada: vem na máscara `g` da base.
+- **Cores exatas (implementado em 0.8.3):** cada cor `#RRGGBB` dos dados é convertida para `Color` somando meio
+  degrau de byte a cada canal (`(round(c·255) + 0,5) / 255`), porque `Image.set_pixel`/`fill_rect` truncam `c·255`;
+  assim o pixel das camadas nítidas sai exatamente no hex dos dados (o `minimap_selftest` compara por igualdade).
+  Na base, o byte é `int(c·255 + 0,5)` (arredondado).
+- **Orientação:** pixel (0, 0) = canto noroeste (x mínimo, z mínimo), x cresce para a direita (leste), z para baixo
+  (sul). É o sentido de `Minimap._to_map`: nada é espelhado (`MinimapBaker.world_to_pixel` é a referência).
+- **Determinismo:** mesma cena e mesmas colocações de flora ⇒ mesmos bytes. Os ids de `canopy` têm de ficar fora de
+  `MapRoot.DENSITY_SCALED_IDS` (grama e arbusto mudam com a qualidade). Em rede (`sync_layout = true`) as árvores
+  são as mesmas em qualquer qualidade, logo anfitrião e clientes geram a mesma imagem. No solo a imagem acompanha as
+  árvores da própria sessão.
+- **Orçamento e medição:** etapa `minimap` ≤ 60 ms em desktop nativo (linha `HUNT_TIMING minimap_ms` com
+  `-- --hunt-timing`, ou `MINIMAP_BAKE_MS` do `minimap_selftest`) e ≤ 400 ms na Web medida por
+  `python tests/web/load_ab.py <build> --throttle=4` (teto de qualquer etapa: 700 ms, §8.1). Memória: `Image` RGB8 de
+  256² (192 KiB) guardada no `MapRoot` + a textura. Válvula se a Web passar: `grid_stride = 2` (4× menos amostras na
+  base), só nos dados. Medido em 0.8.3 (desktop, headless): `MINIMAP_BAKE_MS` 9,8 e `HUNT_TIMING minimap_ms=10`.
+
+**Minimapa (`Minimap`) sobre a imagem.** `Hud.bind`: `_minimap.map_texture = _world.get_minimap_texture()` logo
+depois de `map_rect` (em todos os modos). `_init` põe `texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR`.
+`_update_region() -> void` (privado) roda no fim de `update_player` (10 Hz) e nos setters de `map_texture` e
+`map_rect` (os dois ganham setter; o valor e o tipo não mudam) e recalcula, sem alocar:
+- `scale_px = minf(size.x, size.y) * 0.5 / VIEW_RADIUS_M` (o mesmo de `_to_map`);
+- `view = Rect2(Vector2(_origin.x, _origin.z) − size * 0.5 / scale_px, size / scale_px)`; `vis = view.intersection(map_rect)`;
+  sem área, sem textura ou com `minf(size.x, size.y) <= 0` (antes do layout) → `_src_rect = Rect2()` e
+  `_dst_rect = Rect2()`;
+- `_dst_rect = Rect2(_to_map(vis.position.x, vis.position.y), vis.size * scale_px)`;
+- `_src_rect = Rect2((vis.position − map_rect.position) * k, vis.size * k)`, `k = map_texture.get_width() / map_rect.size.x`.
+
+`_draw`, de trás para a frente: `COLOR_OUTSIDE` no controle todo → com textura e `_dst_rect` com área,
+`draw_texture_rect_region(map_texture, _dst_rect, _src_rect, MAP_MODULATE)` (`MAP_MODULATE = Color(1, 1, 1, 0.92)`);
+sem textura, o retângulo `COLOR_BG` de antes → talhões: com textura só o contorno
+(`draw_rect(…, MapMarkers.COLOR_CROP, false, CROP_OUTLINE_PX)`, `CROP_OUTLINE_PX = 2.0`), e o talhão inteiro fora da
+vista vira o quadrado `crop` preso à moldura (desenhado no passo `crop` da `DRAW_ORDER`, só com textura, como
+implementado em 0.8.3); sem textura, o preenchimento `COLOR_CROP` de antes e nenhum quadrado → objetivo da horda →
+marcadores na `DRAW_ORDER` → jogador → moldura. Um único `draw_texture_rect_region` por redesenho; continua norte
+para cima e centrado em quem a câmera segue (espectador incluído). Na horda a imagem é a mesma (o mapa é o mesmo) e
+não há contorno nem marca de talhão (`crop_rects` vazio, como hoje).
+Exemplo exato para teste (mapa 256 m, textura 256 px, `size = Vector2(180, 180)` posto pelo teste, `VIEW_RADIUS_M = 90`,
+valores depois de `update_player(origem, 0.0)`): origem (0, 0, 0) →
+`get_map_src_rect() == Rect2(38, 38, 180, 180)` e `get_map_dst_rect() == Rect2(0, 0, 180, 180)`; origem (−118, 0, 0)
+→ `Rect2(0, 38, 100, 180)` e `Rect2(80, 0, 100, 180)`.
+
+**Sandbox** (`src/player/debug/sandbox_world.gd`, do A; argumentos novos depois de `--`):
+- `--minimap_tex`: `get_minimap_texture()` devolve uma imagem de teste criada uma vez no `_ready`: 100×100 RGB8
+  para o chão de 200 m (2 m/px), fundo `#8C8C50`, linha de 1 px `#6E6E3C` a cada 10 px, o talhão de
+  `get_crop_rects()` em `#5E9A3A` e um quadrado 6×6 `#D9452B` nos pixels 0–5 (canto noroeste) para conferir a
+  orientação. Sem o argumento, `null` (fundo liso, como antes).
+- `--marked`: `get_marked_boar_positions()` devolve a posição do alvo 0.
+- `--bait`: emite `GameEvents.bait_placed(Vector3(-30, 0, -40), 600.0)` depois do `setup` do jogador.
+- `--reveal`: emite `GameEvents.item_used(Ids.I_SCOUT_DRONE, Vector3.ZERO)` depois do `setup` (o `Hud` liga a
+  revelação por `reveal_s`). Cuidado (0.8.3): o `HintDirector` também ouve esse sinal e, no perfil real em
+  onboarding, pode marcar a dica do drone como aprendida; para screenshots use junto `--hunts=N` (perfil descartável).
+- `--crop_alert` (acrescentado em 0.8.3): depois do `setup` emite `GameEvents.crop_under_attack(true)` e
+  `GameEvents.hud_message_requested(TEST_CONTEXT_TEXT, 600.0)`, com `TEST_CONTEXT_TEXT` = "Ceva colocada: os javalis
+  vão para longe da lavoura" (aviso e mensagem de contexto juntos, para conferir a sobreposição).
+- `--heading=<graus>`: `player.rotation.y = deg_to_rad(-graus)` depois do `setup` (ex. `--heading=135` → caixa
+  "135°", SE sob o entalhe).
+O mapa real é conferido pelo `src/world/debug/minimap_selftest.tscn` (B, headless, grava PNG) e por screenshot de
+`src/hunt/hunt.tscn` (§14, HF5).
 
 ### 8.5 Mundo exposto: estrutura obrigatória de uma cena de mapa
 Caminho: `ScenePaths.map_scene(map_id)` = `res://src/world/maps/<map_id>/<map_id>_map.tscn` (B).
@@ -1678,6 +1852,8 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca: as telas de menu, exceto BOOT e RESULT; nunca HUNT), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
 | `onboarding.*` | obj | caçadas, s, %, m, graus, javalis | dicas, objetivos e legenda das primeiras caçadas (1.3, §8.4): lido por `Profile.is_onboarding_active` (`max_hunts`), pelo `HintDirector` (os gatilhos) e pelo `ObjectivesPanel` (`objective_kills`, `objective_crop_min_pct`) |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
+| `minimap.*` | obj | px, graus, m, cor `#RRGGBB` | imagem do minimapa (1.4, §8.4): lido só pelo `MinimapBaker` (B) via `HuntController` |
+| `loading.step_weights` | obj | — | pesos das etapas da montagem (§8.1); 1.4 ganha `"minimap": 1` entre `"flora"` e `"crop"` |
 ```json
 {
   "version": 1,
@@ -1779,6 +1955,39 @@ duas), `queue_max` (int; dicas esperando), `medkit_health_below_pct` (0–100, v
 da linha "Mantenha a lavoura acima de P%"). Validação do `Data`: todos presentes, números > 0, `max_hunts`, `queue_max`
 e `objective_kills` inteiros ≥ 1, `boar_sighted_half_angle_deg` ≤ 90, `medkit_health_below_pct` ≤ 100,
 `objective_crop_min_pct` ≤ 100. O painel lê os dois com fallback 3 e 50.0 se faltarem.
+
+`minimap.*` (1.4, jogo 0.8.3). Bloco novo no `data/game.json`, exatamente:
+```json
+"minimap": {
+  "image_px": 256,
+  "grid_stride": 1,
+  "hillshade": {"azimuth_deg": 315.0, "altitude_deg": 40.0, "strength": 0.8, "min": 0.65, "max": 1.25},
+  "height_tint": {"low": 0.92, "high": 1.06},
+  "crop_row_px": 3,
+  "colors": {
+    "grass": "#BDA85C", "crop_soil": "#543D26", "road": "#9E4529", "wet": "#5C4D33",
+    "water": "#33708C", "water_edge": "#24546B",
+    "soy": "#5E9A3A", "corn": "#9DB04A", "crop_row": "#3F6E2A",
+    "prop_default": "#9A9A9A"
+  },
+  "prop_colors": {
+    "farmhouse": "#C9533D", "barn": "#8C5A3C", "water_tank": "#9AA0A6",
+    "feed_trough": "#7A6248", "fence_segment": "#6E5238", "gate": "#6E5238"
+  },
+  "canopy": {
+    "cerrado_tree": {"radius_m": 2.5, "color": "#3E5F2A"},
+    "buriti": {"radius_m": 2.0, "color": "#4D7A34"},
+    "ipe": {"radius_m": 2.5, "color": "#C9B42A"}
+  }
+}
+```
+Semântica em §8.4 ("Imagem do mapa"). As cores de base (`grass`, `crop_soil`, `road`, `wet`) são as do albedo de
+fallback do `Terrain`; o art-director pode afiná-las editando só esses valores. Validação do `Data` (erros em
+`get_load_errors()`): bloco presente; `image_px` inteiro em 64–512; `grid_stride` inteiro 1 ou 2; `hillshade.azimuth_deg`
+em 0–360, `altitude_deg` em (0, 90], `strength` em 0–2, `0 < min ≤ max`; `height_tint.low` e `.high` > 0; `crop_row_px`
+inteiro ≥ 0 (0 = sem linhas); toda chave de `colors` listada acima presente; todo valor de `colors`, `prop_colors` e
+`canopy.*.color` String com `Color.html_is_valid`; `canopy.*.radius_m` > 0. Que os ids de `canopy` não são
+de densidade variável é checado pelo `minimap_selftest` (B), não pelo `Data`.
 
 ### 9.2 `data/weapons.json`
 | Campo | Tipo | Unid. | Significado |
@@ -2220,7 +2429,7 @@ Cena principal: `res://src/ui/boot/boot.tscn`. Troca **sempre** por `Router.goto
 | `BOOT` | `src/ui/boot/boot.tscn` | systems | `%StartButton` (tela cheia, "Toque para começar"): `Sfx.unlock_audio()`, tela cheia em toque, → `MAIN_MENU` |
 | `MAIN_MENU` | `src/ui/main_menu/main_menu.tscn` | systems | `%PlayButton` → `MAP_SELECT`; `%FriendsButton` ("Jogar com amigos (beta)"; sempre visível desde a F6) → `LOBBY`; `%ShopButton` → `SHOP`; `%DonateButton` → `DONATE`; `%SettingsButton` → `SETTINGS`; mostra `%MoneyLabel`, `%GoldLabel` |
 | `MAP_SELECT` | `src/ui/map_select/map_select.tscn` | systems | botões gerados `Map_<map_id>` (indisponível: desabilitado, "Em breve") → seta `Router.selected_map_id` → `PREPARATION`; `%BackButton` |
-| `PREPARATION` | `src/ui/preparation/preparation.tscn` | systems | `Contract_<index>` (0-based; trancado = desabilitado), `%WeaponSlot0`, `%WeaponSlot1`, `%DogOption` (OptionButton), `Item_<id>` (CheckButton), `ItemKey_<id>` e `%DogKeyLabel` (teclas, 1.3, abaixo), `%StartHuntButton` → `Router.start_hunt(Profile.build_hunt_request(...))`; `%ShopButton`; `%BackButton` → `MAP_SELECT` |
+| `PREPARATION` | `src/ui/preparation/preparation.tscn` | systems | `Contract_<index>` (0-based; trancado = desabilitado), `%WeaponSlot0`, `%WeaponSlot1`, `%DogOption` (OptionButton), `Item_<id>` (CheckButton; sem etiqueta de tecla desde 1.4, abaixo), `%StartHuntButton` → `Router.start_hunt(Profile.build_hunt_request(...))`; `%ShopButton`; `%BackButton` → `MAP_SELECT` |
 | `HUNT` | `src/hunt/hunt.tscn` | B | — |
 | `RESULT` | `src/ui/result/result.tscn` | systems | lê `Router.last_result`: resultado, lista de abates (tipo, kg, R$), bônus, total, lavoura %. `%ContinueButton` → `SHOP` (em sala: `LOBBY`); `%RetryButton` → `PREPARATION`; `%MenuButton` → `MAIN_MENU` |
 | `SHOP` | `src/ui/shop/shop.tscn` | systems | abas Armas/Equipamentos/Cães; `Buy_<id>`; `%NextHuntButton` → `PREPARATION`; `%BackButton` → `MAIN_MENU` |
@@ -2254,12 +2463,17 @@ em rede. `LoadoutPanel` (`src/ui/common/loadout_panel.gd`, `class_name LoadoutPa
 `VBoxContainer`): `setup(root: Control, dog_locked_text: String = "")`, sinal `changed`; usado pela Preparação
 (mesmos nós `%`) e pelo lobby.
 
-Teclas na tela de equipamento (1.3, `LoadoutPanel`, logo vale na Preparação e no lobby): cada `Item_<id>` de item
-com ação (`InputSetup.get_item_action(id) != &""`) fica numa `HBoxContainer` com um `Label` `ItemKey_<id>`
-(variação `BadgeLabel`, texto `InputSetup.get_key_label(ação)`, ex. "Q") à direita do `CheckButton`; passivos não
-têm etiqueta. Ao lado de `%DogOption`, `%DogKeyLabel` (`BadgeLabel`, `get_key_label(&"dog_command")` = "E"),
-visível só com cão escolhido. As etiquetas ficam ocultas com `InputSetup.is_touch_mode()` e acompanham
-`GameEvents.touch_mode_changed`. Os nomes `Item_<id>` e `%DogOption` não mudam (o `flow_test` os usa).
+Teclas na tela de equipamento: **saem em 1.4** (decisão do dono do jogo; reverte a parte de tela da HF1-S2). O
+`LoadoutPanel` (Preparação e lobby) não mostra tecla de atalho nenhuma: somem os nós `ItemKey_<id>` e
+`%DogKeyLabel`, os membros `_key_labels` e `_dog_key_label`, `_make_key_label`, `_update_key_labels`,
+`_on_touch_mode_changed` e a conexão a `GameEvents.touch_mode_changed`. Cada `Item_<id>` volta a ser filho direto da
+caixa de itens (sem a `HBoxContainer`), com `size_flags_horizontal` como os passivos; `%DogOption` fica onde estava
+(a `HBoxContainer` do cão pode ficar com ele só, ou sair). As teclas continuam no jogo: barra de itens, legenda e
+dicas (§8.4). A frase de ajuda do cão (`_dog_hint`) também perde a tecla (implementado em 0.8.3, decisão do dono do
+jogo: a Preparação não informa tecla de atalho nenhuma nos equipamentos): era "Use E ou o botão Cão: Pega! / Volta!"
+e passa a "Na caçada, mande o cão: Pega! / Volta!" (só com cão escolhido; a frase sem cão comprado e o `dog_locked_text` do `setup` não
+mudam). O `LoadoutPanel` deixa de chamar `InputSetup.get_item_action` e
+`get_key_label` (a API do `InputSetup` não muda). Os nomes `Item_<id>` e `%DogOption` não mudam (o `flow_test` os usa).
 
 Cada peer troca para `HUNT` ao receber `Net.room_state_changed(LOADING)`. Na tela de resultado em sala,
 "Voltar à sala" → `LOBBY` e `%MenuButton` chama `Net.leave_room()`.
@@ -2344,6 +2558,30 @@ conta, abertura e recolhimento da legenda, rótulos de tecla vindos de `get_key_
 nomes nos botões, escondidos no espectador, na queda e na horda salvo a legenda). O `mobile_probe.py` não muda (abre com
 `hints=0`).
 
+Cobertura da Fase 5 (contrato 1.4, jogo 0.8.3): `tests/lib/contract_sigs.gd` ganha `MapMarkers` (`draw` estático e as
+constantes `KIND_*`/`DRAW_ORDER`), `Compass.heading_deg_of`/`label_for`/`get_heading_deg`/`get_heading_text`,
+`Minimap.get_map_src_rect`/`get_map_dst_rect`, `MinimapBaker.bake`/`world_to_pixel`, `MapRoot.build_minimap`/
+`get_minimap_texture`/`get_minimap_image`, `HuntWorld.get_minimap_texture` e `HuntController.get_minimap_texture`,
+`Heightmap.get_grid_data`, `Terrain.get_grid_mask`; o `LoadoutPanel` não tem método novo. `unit_tests` ganha
+`tests/unit/test_compass_minimap.gd`: `label_for` (0 "N", 45 "NE", 90 "L", 135 "SE", 180 "S", 225 "SO", 270 "O",
+315 "NO", 15 "15", 105 "105", 7 ""), `heading_deg_of` (yaw 0 → 0; yaw `-PI/2` → 90; yaw `PI/2` → 270; yaw `-2·PI` → 0;
+nunca 360), `get_heading_text` com o grau, `DRAW_ORDER` exata e cores distintas entre `crop`, `bait`, `revealed`,
+`boar` e `dog`; `Minimap` com uma `ImageTexture` 256² e `map_rect` 256 m: os dois exemplos exatos de §8.4, origem fora
+do mapa → `Rect2()`, `map_texture = null` → `Rect2()`; `MinimapBaker.world_to_pixel` nos quatro cantos e no centro;
+o `Hud` ligado a um mundo falso (subclasse de `HuntWorld` dentro do próprio teste, com talhão, cão em `seek` com
+alvo, javali marcado e javalis vivos; ceva por `GameEvents.bait_placed`, drone por `GameEvents.item_used`): depois de
+um polling, `Compass._marks` tem os tipos `crop`, `bait`, `revealed`, `boar`, `dog_target`, `dog` nessa ordem, o
+talhão some com o caçador dentro dele, na horda não há `crop`, e `Minimap.map_texture` é a textura do mundo; e `Data` (`get_load_errors()` vazio com o bloco
+`minimap`; erro com `image_px` 1000, com `grid_stride` 3 e com uma cor `"verde"`). `net_unit` ganha o sandbox
+`minimap_bake` (`src/world/debug/minimap_selftest.tscn`, do B, `limit_s` 60) e passa a exigir o check
+`minimap_same_on_both` do `net_sync`. Teste de UI do `LoadoutPanel`: `Item_<id>` existe e nenhum `ItemKey_<id>` /
+`DogKeyLabel` existe, em modo teclado e toque. `flow_test`, `playthrough` e `mobile_probe.py` não mudam.
+Implementado em 0.8.3: o `minimap_selftest` tem 8 checks (`texture_size`, `orientation`,
+`world_to_pixel_clamped_and_northwest_origin`, `deterministic`, `quality_independent`, `canopy_not_density_scaled`,
+`budget`, `png_written`; `map_loaded` só aparece, como FAIL, se a cena do mapa não carregar) e o `net_sync_test` ganhou
+`minimap_same_on_both`. `tests/unit/test_compass_minimap.gd` e `tests/unit/test_loadout_panel_keys.gd` são da HF5-QA
+(concluídos: 63 e 10 testes); o de `LoadoutPanel` confere também que `_dog_hint` não cita tecla.
+
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
 `is_world_ready`/`world_ready`, `is_hunt_over`, `get_result`, `debug_kill_boar`, `debug_set_crop_health`,
@@ -2376,6 +2614,7 @@ resultado de renderização.
 | Carregar a caçada | ≤ 3 s; nenhuma etapa > 700 ms |
 | Memória | alvo ≤ 300 MB no total da aba |
 | Alocação | nada de `Array`/`Dictionary` novos por frame em laços de IA; HUD/minimapa a 10 Hz |
+| Minimapa (1.4) | imagem gerada 1× por caçada na CPU (`MinimapBaker`), RGB8 `image_px`² (256² = 192 KiB), sem `SubViewport`; etapa `minimap` ≤ 60 ms desktop nativo e ≤ 400 ms Web com CPU ×4 (medido em 0.8.3: 9,8 ms no desktop headless, `HUNT_TIMING minimap_ms=10`); desenho: 1 `draw_texture_rect_region` por redesenho (10 Hz), sem alocação |
 | Aliados (cooperativo) | ≤ 3 `RemoteHunter`, ≤ 5000 tris e ≤ 10 `MeshInstance3D` cada, + 1 `Label3D`; draw calls: pior caso ≤ 230 com 3 aliados |
 | Rede (cooperativo) | download do cliente ≤ 5 kB/s; quadro de estado ≤ 1100 B (`net.max_frame_bytes`); nenhuma alocação por tick além de um `PackedByteArray` por quadro; raios de visão ≤ 130/s |
 
@@ -2589,8 +2828,8 @@ Critérios de aceite:
   `mark_hint_learned(&"medkit")` não grava sozinho e aparece no arquivo depois de `save()`.
 - **HF1-AR:** os 5 ícones legíveis a 40 px no screenshot de `hud_icons_preview` (sobre `HudPanel` e sobre o
   círculo translúcido do toque); a loja continua bonita (screenshot do cartão).
-- **HF1-S2:** Preparação e lobby mostram "Q"/"G"/"V"/"B" ao lado dos itens usáveis possuídos e "E" ao lado do cão
-  escolhido; nada em modo toque; `flow_test` sem mudança.
+- **HF1-S2 (revertida em 1.4 pela HF5-S):** Preparação e lobby mostravam "Q"/"G"/"V"/"B" ao lado dos itens usáveis
+  possuídos e "E" ao lado do cão escolhido; nada em modo toque; `flow_test` sem mudança.
 - **HF2-A:** sandbox `hud_hints` imprime `RESULT:` e cobre: abertura aparece `opening_delay_s` depois de
   `hunt_started`; cada gatilho da tabela de §8.4 dispara com a condição e não dispara sem ela; uma dica por vez,
   `medkit` fura a fila, `queue_max` respeitado; cada id no máximo uma vez por caçada; usar o item esconde a dica
@@ -2618,6 +2857,88 @@ Critérios de aceite:
 - **HF4-S:** `Data.get_load_errors()` vazio com as duas chaves; sem elas, ou com `objective_kills` não inteiro ou
   `objective_crop_min_pct` > 100, o `Data` aponta o erro.
 - **HF1-QA / HF2-QA / HF4-QA:** §12 (cobertura 1.3 e Fase 4); `mobile_probe.py` verde com a build nova.
+
+### Frente HUD/gameplay — fase 5 (contrato 1.4, jogo 0.8.3; implementada e testada em 2026-11-20)
+Bússola estilo PUBG, marcadores comuns, minimapa sobre a imagem do mapa, Preparação sem teclas. Contrato em §8.4
+("Bússola, marcadores e minimapa"), §9.1 (`minimap.*`), §11 (teclas que saem) e §13.1. Nada muda em
+`project.godot`, `export_presets.cfg`, `src/net`, `GameEvents` ou no protocolo de rede; em `src/core/` só o método
+`HuntWorld.get_minimap_texture` (Apêndice A). Nenhuma imagem raster nova em `assets/`; o art-director não tem tarefa
+(as cores do minimapa ficam em `data/game.json` e podem ser afinadas depois, só nos dados). Todos em Sonnet. Toda
+tarefa termina com `check_scripts`, `unit_tests`, `flow_test` e `playthrough` sem mudança de resultado (exceto o que a
+própria tarefa atualiza nos testes).
+
+| Tarefa | Dono | Arquivos | Depende de |
+|---|---|---|---|
+| HF5-0 — núcleo (concluída) | coordenação | `src/core/hunt_world.gd`: só `get_minimap_texture()`, verbatim do Apêndice A (3 linhas) | — |
+| HF5-B — imagem do mapa (concluída) | game-developer (B) | `src/world/minimap_baker.gd` (novo); `src/world/map_root.gd` (`build_minimap`, `get_minimap_texture`, `get_minimap_image`); `src/world/heightmap.gd` (só `get_grid_data`); `src/world/terrain.gd` (só `get_grid_mask` e o preenchimento de `_grid_mask` em `_build_meshes`); `src/hunt/hunt_controller.gd` (etapa `minimap` em §8.1 e `get_minimap_texture`); `src/world/debug/minimap_selftest.tscn|.gd` (novos); `src/hunt/debug/net_sync_test.gd` (só o check `minimap_same_on_both`) | HF5-0 |
+| HF5-A — bússola, marcadores, minimapa (concluída) | game-developer (A) | `src/hud/map_markers.gd` (novo); `src/hud/compass.gd`; `src/hud/minimap.gd`; `src/hud/hud.gd` (`bind`: `map_texture`, `_crop_rects`, `_crop_centers`; `_poll_world`: tipos novos e `DRAW_ORDER`; na entrega, também `CONTEXT_TOP_FRAC`/`CONTEXT_HEIGHT_FRAC`); `src/player/debug/sandbox_world.gd` (`--minimap_tex`, `--marked`, `--bait`, `--reveal`, `--heading=`; na entrega, também `--crop_alert`) | HF5-0 (paralela à HF5-B: sem textura o minimapa usa o fundo liso) |
+| HF5-S — Preparação sem teclas e dados (concluída) | game-systems | `src/ui/common/loadout_panel.gd`; `data/game.json` (bloco `minimap` exato de §9.1 e `"minimap": 1` em `loading.step_weights` entre `"flora"` e `"crop"`, sem mexer em outros valores); `src/systems/data_registry.gd` (validação de `minimap.*`) | — (paralela; o `MinimapBaker` tem fallbacks iguais aos dados) |
+| HF5-QA (concluída) | qa-tester | `tests/lib/contract_sigs.gd`; `tests/unit/test_compass_minimap.gd` (novo); `tests/unit/test_loadout_panel_keys.gd` (novo); `tests/unit_tests.gd` (registrar os dois); `tests/net_unit.gd` (sandbox `minimap_bake`, `limit_s` 60, e o comentário da lista) | HF5-A, HF5-B, HF5-S |
+
+Ordem: HF5-0 → {HF5-A, HF5-B, HF5-S} em paralelo (nenhum arquivo em comum) → HF5-QA → coordenação: screenshots de
+integração (abaixo), exporta a Web, mede com `load_ab.py --throttle=4`, roda `mobile_probe.py`, sobe `config/version`
+para 0.8.3 e publica.
+
+Divergências da entrega aceitas pelo coordenador (já refletidas nas seções citadas; valem como contrato):
+- **Preparação (HF5-S, §11, §6.10):** a frase do cão `_dog_hint` perdeu a tecla: "Na caçada, mande o cão: Pega! /
+  Volta!". O painel não ouve mais `GameEvents.touch_mode_changed` (sai `_on_touch_mode_changed`).
+- **`MapMarkers` (HF5-A, §6.8, §8.4):** helper público `static func color_of(kind: StringName) -> Color`; anel
+  `dog_target` com largura 0,25 × `half_px` e contorno largura − 0,5.
+- **`Compass` (HF5-A, §8.4):** rótulo que não cabe inteiro na faixa é pulado (o traço fica); entalhe com base no topo
+  da caixa (y 36) e vértice em y 30.
+- **`Hud` (HF5-A, §8.4):** mensagem de contexto em `CONTEXT_TOP_FRAC = 0.25` (era 0,22), `CONTEXT_HEIGHT_FRAC = 0.08`.
+  Resíduo aceito: dica de abertura + aviso + contexto juntos, em 16:9, o texto do contexto encosta ~6 px no topo do
+  painel da dica.
+- **`Minimap` (HF5-A, §8.4):** o quadrado `crop` preso à moldura só existe com textura.
+- **Sandbox (HF5-A, §8.4):** `--crop_alert` novo; `--reveal` pode marcar a dica do drone como aprendida no perfil
+  real, usar `--hunts=N`.
+- **`MinimapBaker` (HF5-B, §8.4, §13.1):** cores dos dados com meio degrau de byte (pixel exato no hex); linhas de
+  cultivo a partir de 1 px dentro do talhão (`CROP_ROW_FIRST_OFFSET_PX`); medido 9,8 ms (desktop headless),
+  `HUNT_TIMING minimap_ms=10`.
+- **Testes (HF5-B, §12):** `minimap_selftest` com 8 checks; `net_sync_test` com `minimap_same_on_both`.
+
+Critérios de aceite:
+- **HF5-0:** `check_scripts` sem erro; `HuntWorld.new().get_minimap_texture() == null`.
+- **HF5-B:** `minimap_selftest` roda headless (`tools/godot.sh --headless --path . res://src/world/debug/minimap_selftest.tscn
+  -- --out=<caminho absoluto>.png`), termina sozinho com `RESULT:` e código 0, e cobre: monta Mato Grosso
+  (`build_heightmap`, `build_terrain`, `build_props_and_water`, `build_flora(1.0, true)`, `build_minimap(cfg)`) e imprime
+  `MINIMAP_BAKE_MS=<ms>`; `texture_size` (textura e imagem `image_px`², `FORMAT_RGB8`); `orientation` (o pixel de
+  `world_to_pixel` no centro do açude (−70, −55) tem exatamente `colors.water` e o pixel espelhado (70, 55) não tem;
+  o centro da soja (−35, 15) é `colors.soy` ou `colors.crop_row`; o centro da sede (10, −85) é `prop_colors.farmhouse`);
+  `deterministic` (segundo `MinimapBaker.bake` no mesmo mapa → `get_data()` igual); `quality_independent` (outra
+  instância do mapa com `build_flora(0.5, true)` → mesmos bytes); `canopy_not_density_scaled`; `budget`
+  (`MINIMAP_BAKE_MS` ≤ 150 é PASS; o relatório traz o valor medido e a meta é ≤ 60 ms). O PNG gravado mostra, sem
+  espelhar: soja e milho no centro-sul, açude a noroeste, sede ao norte, mata de galeria ao sul, estrada da porteira à
+  lavoura (anexar o caminho no relatório). `hunt.tscn -- --hunt-timing` em desktop imprime `HUNT_TIMING minimap_ms` ≤ 60
+  e o total de carga continua ≤ 3 s. `net_unit --only=net_sync` com `minimap_same_on_both` PASS (compara
+  `(_host._map as MapRoot).get_minimap_image().get_data()` com a do cliente; não usar `ImageTexture.get_image()`, que
+  depende do renderer); os demais sandboxes do `net_unit` sem mudança.
+- **HF5-A:** `check_scripts`, `unit_tests`, `flow_test`, `playthrough` e `net_unit --only=hud_net,hud_hints,spectator`
+  verdes (o formato de `Compass._marks` e as marcas `ally` não mudam). Screenshots com janela, 1280×720,
+  `--frames=600` (`tools/godot.sh --path . --windowed --resolution 1280x720 -s res://tools/screenshot.gd --
+  --scene=res://src/player/debug/player_sandbox.tscn --out=<png> --frames=600 <args>`):
+  1. `--minimap_tex --dog --dog_state=seek --marked --bait --reveal --heading=135`: a caixa mostra "135°" e "SE" fica
+     sob o entalhe; à vista "L", "S", "120", "150" e os traços de 5°; N em vermelho quando à vista (rodar também com
+     `--heading=0`); cada marcador com a forma e a cor da tabela de §8.4; o minimapa mostra a imagem de teste com o
+     talhão no quadrante de cima à direita (norte para cima, leste à direita) e o contorno verde sobre ele; ceva
+     hexágono turquesa, revelados círculos salmão, marcado triângulo vermelho, cão e anel âmbar.
+  2. O mesmo com `--touch=on` a 1558×720 e 960×720: bússola, faixa da lavoura e minimapa sem tocar botões nem
+     joystick.
+  3. Sem `--minimap_tex`: minimapa com o fundo liso de antes e talhão preenchido (fallback).
+  Nenhum texto "E", "W" ou "SW" na bússola. O aviso "Javalis na lavoura!" (forçado) não encobre a mensagem de contexto
+  a mais do que já encobria em 0.8.2 (comparar com um screenshot de antes). Conferir com `--crop_alert`;
+  com o contexto em 0,25 o aviso deixa de cobri-lo (resíduo com a dica, acima).
+- **HF5-S:** Preparação e lobby, em teclado e em toque, sem nenhuma etiqueta de tecla nem tecla citada em texto (a
+  frase do cão é "Na caçada, mande o cão: Pega! / Volta!"); `find_child("ItemKey_*")` e
+  `%DogKeyLabel` não existem; marcar/desmarcar `Item_<id>` e escolher o cão em `%DogOption` funcionam como antes;
+  `flow_test` sem mudança; screenshot da Preparação a 1280×720 com 3 itens e cão. `Data.get_load_errors()` vazio com o
+  bloco `minimap`; erro com `image_px` 1000, `grid_stride` 3, `hillshade.min` > `max`, uma cor `"verde"` e
+  `canopy.ipe.radius_m` 0. Em `loading.step_weights` a chave `minimap` fica entre `flora` e `crop`.
+- **HF5-QA:** §12 (cobertura da Fase 5); as 4 suítes e o `net_unit` verdes com tudo entregue.
+- **Coordenação (integração):** screenshot com janela de `src/hunt/hunt.tscn` a 1280×720 (`--frames=900`): o
+  minimapa mostra o mapa real alinhado com o mundo (andar até o açude: ele passa pelo centro do minimapa) e a bússola
+  aponta os dois talhões; `load_ab.py --throttle=4` com `minimap_ms` ≤ 400 (senão `grid_stride = 2` nos dados e
+  medir de novo); `mobile_probe.py` verde.
 
 ---
 
@@ -3280,6 +3601,10 @@ func get_normal(_x: float, _z: float) -> Vector3:
 
 func get_crop_rects() -> Array[Rect2]:
 	return []
+
+
+func get_minimap_texture() -> Texture2D:      # 1.4: top-down image of the whole map rect (north up); null = none
+	return null
 
 
 func get_crop_health_pct() -> float:

@@ -55,6 +55,10 @@ const SOUND_WAVE_CLEAR: StringName = &"horde_wave_clear"
 const ALLY_MSG_S: float = 3.0
 const STALL_TOP_FRAC: float = 0.16
 const LOCAL_DOWN_TOP_FRAC: float = 0.30
+## Context message band: starts below the "Javalis na lavoura!" alert (which ends near 0.27 of a 720 px height since the
+## compass grew 10 px in 1.4) and above the hint banner (0.30).
+const CONTEXT_TOP_FRAC: float = 0.25
+const CONTEXT_HEIGHT_FRAC: float = 0.08
 const BANNER_HEIGHT_FRAC: float = 0.07
 const BANNER_FONT_PX: int = 28
 const COLOR_TEXT: Color = Color("#F4EFE6")
@@ -74,6 +78,8 @@ var _reveal_left: float = 0.0
 var _marks: Array[Dictionary] = []
 var _event_marks: Array[Dictionary] = []
 var _baits: Array[Dictionary] = []
+var _crop_rects: Array[Rect2] = []                 # plots of the contract, read once in bind (none in the horde)
+var _crop_centers: PackedVector3Array = PackedVector3Array()   # centre of each plot, y = 0, same index as _crop_rects
 var _revealed: PackedVector3Array = PackedVector3Array()
 var _bait_points: PackedVector3Array = PackedVector3Array()
 var _marked_points: PackedVector3Array = PackedVector3Array()
@@ -209,6 +215,7 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 	_vest_label.visible = items != null and items.damage_reduction > 0.0
 	if _world != null:
 		_minimap.map_rect = _world.get_map_rect()
+		_minimap.map_texture = _world.get_minimap_texture()
 		if _world.is_horde():
 			_enter_horde_layout()
 			_wave = _world.get_horde_wave()
@@ -219,7 +226,12 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 			_wave_remaining = _world.get_horde_wave_remaining()
 			_refresh_wave_label()
 		else:
-			_minimap.crop_rects = _world.get_crop_rects()
+			_crop_rects = _world.get_crop_rects()
+			_crop_centers.resize(0)
+			for rect: Rect2 in _crop_rects:
+				var center: Vector2 = rect.get_center()
+				_crop_centers.append(Vector3(center.x, 0.0, center.y))
+			_minimap.crop_rects = _crop_rects
 		_on_crop_health(_world.get_crop_health_pct())
 		_on_counts(_world.get_boars_killed(), _world.get_boars_total())
 		_sync_dog_slots()
@@ -441,7 +453,7 @@ func _build_messages() -> void:
 	_zoom_label.visible = false
 	_root.add_child(_zoom_label)
 	_place_message(_kill_msg, "KillMessage", 0.72, 0.12, 30)
-	_place_message(_ctx_msg, "ContextMessage", 0.22, 0.08, 26)
+	_place_message(_ctx_msg, "ContextMessage", CONTEXT_TOP_FRAC, CONTEXT_HEIGHT_FRAC, 26)
 	_place_message(_dog_msg, "DogMessage", 0.58, 0.08, 28)
 	_dog_msg.set_color(COLOR_WARN)
 	_place_message(_end_msg, "EndMessage", 0.38, 0.14, 44)
@@ -683,18 +695,41 @@ func _poll_world() -> void:
 	if _world == null or _player == null:
 		return
 	var now_s: float = Time.get_ticks_msec() * 0.001
+	# _marks is built back to front in MapMarkers.DRAW_ORDER: crop, bait, revealed, boar, dog_target, dog (allies last).
 	_marks.clear()
+	if not _horde:
+		var view_pos: Vector3 = _view_hunter().global_position
+		var view_xz: Vector2 = Vector2(view_pos.x, view_pos.z)
+		for i: int in _crop_rects.size():
+			if not _crop_rects[i].has_point(view_xz):   # the plot the hunter stands in needs no marker
+				_marks.append({"pos": _crop_centers[i], "kind": MapMarkers.KIND_CROP})
+	_bait_points.resize(0)
+	for i: int in range(_baits.size() - 1, -1, -1):
+		if float(_baits[i]["until"]) < now_s:
+			_baits.remove_at(i)
+	for b: Dictionary in _baits:
+		_bait_points.append(b["pos"])
+		_marks.append({"pos": b["pos"], "kind": MapMarkers.KIND_BAIT})
+	_minimap.baits = _bait_points
+	_revealed.resize(0)
+	if _reveal_left > 0.0:
+		for id: int in _world.get_alive_boar_ids():
+			var bp: Vector3 = _world.get_boar_position(id)
+			if bp.is_finite():
+				_revealed.append(bp)
+				_marks.append({"pos": bp, "kind": MapMarkers.KIND_REVEALED})
+	_minimap.revealed = _revealed
 	_marked_points.resize(0)
 	var seen: PackedVector3Array = _world.get_marked_boar_positions()
 	for p: Vector3 in seen:
 		_marked_points.append(p)
-		_marks.append({"pos": p, "kind": &"boar"})
+		_marks.append({"pos": p, "kind": MapMarkers.KIND_BOAR})
 	for i: int in range(_event_marks.size() - 1, -1, -1):
 		if float(_event_marks[i]["until"]) < now_s:
 			_event_marks.remove_at(i)
 	for m: Dictionary in _event_marks:
 		_marked_points.append(m["pos"])
-		_marks.append({"pos": m["pos"], "kind": &"boar"})
+		_marks.append({"pos": m["pos"], "kind": MapMarkers.KIND_BOAR})
 	var dog_on: bool = _world.has_dog()
 	_sync_dog_slots()
 	if dog_on and not _dog_panel.visible:
@@ -702,41 +737,27 @@ func _poll_world() -> void:
 		_on_dog_health(_world.get_dog_health_pct())
 		_on_dog_state(_world.get_dog_state())
 	var dog_pos: Vector3 = _world.get_dog_position() if dog_on else Vector3.INF
-	if dog_pos.is_finite():
-		_marks.append({"pos": dog_pos, "kind": &"dog"})
 	var request: HuntRequest = _player.get_request()
 	if request != null and request.dog_id != _dog_breed:
 		_dog_breed = request.dog_id
 		_dog_card.set_breed(_dog_breed)
+	if request != null and request.dog_id == Ids.D_CARAMELO and dog_on:
+		var nearest: Vector3 = _world.get_nearest_boar_position(_player.global_position)
+		if nearest.is_finite():
+			_marks.append({"pos": nearest, "kind": MapMarkers.KIND_BOAR})
 	# What the dog is after (not while it follows): a ring on the compass and on the minimap.
 	var dog_target: Vector3 = Vector3.INF
 	if dog_on and _world.get_dog_state() != Ids.DS_FOLLOW:
 		dog_target = _world.get_dog_target_position()
 	if dog_target.is_finite():
-		_marks.append({"pos": dog_target, "kind": &"dog_target"})
-	if request != null and request.dog_id == Ids.D_CARAMELO and dog_on:
-		var nearest: Vector3 = _world.get_nearest_boar_position(_player.global_position)
-		if nearest.is_finite():
-			_marks.append({"pos": nearest, "kind": &"boar"})
+		_marks.append({"pos": dog_target, "kind": MapMarkers.KIND_DOG_TARGET})
+	if dog_pos.is_finite():
+		_marks.append({"pos": dog_pos, "kind": MapMarkers.KIND_DOG})
 	_minimap.dog_position = dog_pos
 	_minimap.dog_target = dog_target
 	_minimap.marked = _marked_points
-	_revealed.resize(0)
-	if _reveal_left > 0.0:
-		for id: int in _world.get_alive_boar_ids():
-			var bp: Vector3 = _world.get_boar_position(id)
-			if bp.is_finite():
-				_revealed.append(bp)
-	_minimap.revealed = _revealed
 	if _horde:
 		_poll_horde()
-	_bait_points.resize(0)
-	for i: int in range(_baits.size() - 1, -1, -1):
-		if float(_baits[i]["until"]) < now_s:
-			_baits.remove_at(i)
-	for b: Dictionary in _baits:
-		_bait_points.append(b["pos"])
-	_minimap.baits = _bait_points
 	_poll_allies()
 
 
@@ -909,6 +930,8 @@ func _enter_horde_layout() -> void:
 	_wave_label.visible = true
 	_crop_alert.text = HORDE_ALERT_TEXT
 	_minimap.crop_rects = []
+	_crop_rects = []
+	_crop_centers.resize(0)
 	if _objective_icon == null and AssetLoader.exists(ScenePaths.icon(&"barn")):
 		_objective_icon = AssetLoader.load_resource(ScenePaths.icon(&"barn")) as Texture2D
 	_minimap.objective_icon = _objective_icon

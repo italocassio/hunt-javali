@@ -19,8 +19,6 @@ var _item_checks: Dictionary = {}   # StringName -> CheckButton
 var _item_hint: Label = null
 var _dog_locked_text: String = ""
 var _weapons_locked_label: Label = null
-var _dog_key_label: Label = null
-var _key_labels: Array[Label] = []
 
 
 ## `dog_locked_text`: when not empty the dog choice is disabled and this text is shown instead of the hint.
@@ -31,8 +29,6 @@ func setup(root: Control, dog_locked_text: String = "") -> void:
 	_build_weapons()
 	_build_dog()
 	_build_items()
-	if not GameEvents.touch_mode_changed.is_connected(_on_touch_mode_changed):
-		GameEvents.touch_mode_changed.connect(_on_touch_mode_changed)
 	refresh()
 
 
@@ -113,9 +109,6 @@ func _build_dog() -> void:
 	dog_row.add_theme_constant_override("separation", 10)
 	_dog_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dog_row.add_child(_dog_option)
-	_dog_key_label = _make_key_label(&"dog_command")
-	UiKit.mark(_dog_key_label, _root, "DogKeyLabel")
-	dog_row.add_child(_dog_key_label)
 	dbox.add_child(dog_row)
 	_dog_option.item_selected.connect(_on_dog_selected)
 	_dog_option.disabled = _dog_locked_text != ""
@@ -143,19 +136,7 @@ func _build_items() -> void:
 		if not UiKit.has_global_theme():
 			check.add_theme_font_size_override("font_size", 22)
 		UiKit.mark(check, _root, "Item_%s" % id)
-		var action: StringName = InputSetup.get_item_action(id)
-		if action != &"":
-			var row: HBoxContainer = HBoxContainer.new()
-			row.add_theme_constant_override("separation", 10)
-			check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(check)
-			var key_label: Label = _make_key_label(action)
-			UiKit.mark(key_label, _root, "ItemKey_%s" % id)
-			row.add_child(key_label)
-			_key_labels.append(key_label)
-			ibox.add_child(row)
-		else:
-			ibox.add_child(check)
+		ibox.add_child(check)
 		check.toggled.connect(_on_item_toggled)
 		_item_checks[id] = check
 	if not any_owned:
@@ -163,25 +144,6 @@ func _build_items() -> void:
 	_item_hint = UiKit.muted("")
 	ibox.add_child(_item_hint)
 	add_child(items_card)
-
-
-func _make_key_label(action: StringName) -> Label:
-	var l: Label = UiKit.label(InputSetup.get_key_label(action), "BadgeLabel")
-	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	return l
-
-
-func _on_touch_mode_changed(_is_touch: bool) -> void:
-	_update_key_labels()
-
-
-## Key badges are keyboard hints: hidden in touch mode, and the dog one only with a dog chosen.
-func _update_key_labels() -> void:
-	var show_keys: bool = not InputSetup.is_touch_mode()
-	for l: Label in _key_labels:
-		l.visible = show_keys and l.text != ""
-	if _dog_key_label != null:
-		_dog_key_label.visible = show_keys and _dog_key_label.text != "" and Profile.get_loadout_dog() != &""
 
 
 func _item_slots() -> int:
@@ -210,8 +172,7 @@ func refresh() -> void:
 	if _dog_locked_text != "":
 		_dog_hint.text = _dog_locked_text
 	else:
-		_dog_hint.text = "Compre um cão na Loja para levar à caçada." if _dog_option.item_count <= 1 else ("Use E ou o botão Cão: Pega! / Volta!" if dog != &"" else "")
-	_update_key_labels()
+		_dog_hint.text = "Compre um cão na Loja para levar à caçada." if _dog_option.item_count <= 1 else ("Na caçada, mande o cão: Pega! / Volta!" if dog != &"" else "")
 	_item_hint.text = ""
 	var chosen: Array[StringName] = Profile.get_loadout_items()
 	var slots: int = _item_slots()

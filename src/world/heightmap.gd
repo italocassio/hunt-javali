@@ -38,6 +38,11 @@ func get_grid(i: int, j: int) -> float:
 	return _h[clampi(j, 0, resolution - 1) * resolution + clampi(i, 0, resolution - 1)]
 
 
+## The grid itself (resolution^2 heights, index j * resolution + i). Callers only read it.
+func get_grid_data() -> PackedFloat32Array:
+	return _h
+
+
 func set_grid(i: int, j: int, value: float) -> void:
 	_h[j * resolution + i] = value
 

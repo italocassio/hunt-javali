@@ -1,11 +1,13 @@
 """Mobile touch probe: drives the real Web build in headless Chrome (phone emulation) with real touch events.
 
-    python tests/web/mobile_probe.py [--quick] [--groups=g1,g2,g3,g4,g5] [--help]
+    python tests/web/mobile_probe.py [--quick] [--groups=g1,g2,g3,g4,g5,g7] [--help]
 
 Pipeline exercised: browser touch events -> Godot Web -> InputSetup -> TouchControls -> TouchJoystick /
 LookPad -> move_* actions -> Player.  Serves build/web/ (must already be exported) and opens it with
-?probe=1; every assertion reads window.huntProbe (published by src/hud/hud.gd: x, z, yaw_deg, pitch_deg,
-touch_mode, ammo_mag, health, joystick_active, sprinting, look_active, run_locked, t_ms).
+?probe=1&hints=0 (hints=0 keeps the onboarding hint banner out of the pixel diffs, docs/arquitetura.md 8.4);
+every assertion reads window.huntProbe (published by src/hud/hud.gd: x, z, yaw_deg, pitch_deg,
+touch_mode, ammo_mag, health, joystick_active, sprinting, look_active, run_locked, t_ms, and since 1.3
+items, busy_item, binoculars, touch_buttons).
 Pixel diffs are used only where the hook has no field (pause overlay, aim zoom).
 Stdlib only.  Screenshots + probe_results.json go to SHOTS_DIR (phone.py).  Exit code 0 only if every
 expectation holds.  Chrome and the HTTP server are always killed on exit.
@@ -14,6 +16,7 @@ Groups (each starts a fresh hunt so the crop timer never ends the run):
   g1 hook, fixed joystick, sensitivity, two-finger pitch stability
   g2 run lock, fire-drag, reload, aim, natural/fast drag speed
   g3 finger ids 0, 1, -1      g4 finger ids 7, -5, 99999      g5 multitouch pairs, pause/resume
+  g7 item buttons (1.3): layout from the probe, no overlap, tap the drone (-1), kit at full health (no spend)
 Not in the default run (g6): ids above ~100000 are rejected or wedge Chrome's touch emulation.
 """
 import json
@@ -45,6 +48,21 @@ RESUME = (422.0, 166.0)
 DEG_PER_VP_PX = 0.115
 PITCH_MULT = 0.65
 DEG_PER_CSS_PX = DEG_PER_VP_PX * VP_PER_CSS
+
+# Item and dog buttons (docs/arquitetura.md 8.4). Positions are READ from window.huntProbe.touch_buttons; these
+# constants only say what the layout must be.  Centre of item i = (width - (380 + 96 i), height - 250).
+URL_QUERY = "?probe=1&hints=0"
+ITEM_ROW_RIGHT = 380.0
+ITEM_ROW_STEP = 96.0
+ITEM_ROW_BOTTOM = 250.0
+ITEM_RADIUS = 38.0
+HIT_PADDING = 8.0                      # TouchControls.HIT_PADDING_PX: a finger within radius + 8 presses the button
+MIN_ITEM_TO_LOOK_CSS = 60.0            # LOOK_A must stay at least this far (css px) from every item button
+FIRE_FROM_RIGHT, FIRE_FROM_BOTTOM = 125.0, 130.0    # Tiro button offsets (viewport px): gives the viewport size
+JOY_FROM_LEFT = 190.0                  # fixed stick centre x (viewport px)
+JOY_ACTIVE_VP = 90.0 * 1.7             # joystick radius x active_mult (viewport px)
+ITEM_ACTIONS = ("use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars")
+REMOVED_ACTIONS = ("use_item", "item_next")
 
 SCENE = (85, 65, 260, 115)             # half-resolution PNG box (aim zoom)
 RESULTS = []
@@ -376,6 +394,130 @@ def t_pause(p):
     look_drag(p, 1, "after pause/resume", -60.0, 0, start=(450.0, 120.0))
 
 
+def viewport_from_probe(tb):
+    """Viewport size (px) derived from the Tiro button, which sits at (w - 125, h - 130)."""
+    fire = tb.get("fire")
+    if not fire:
+        return None
+    return fire[0] + FIRE_FROM_RIGHT, fire[1] + FIRE_FROM_BOTTOM
+
+
+def tap_vp(p, x_vp, y_vp, hold=0.15, fid=1):
+    """Tap at a viewport-px position (the probe reports viewport px; Phone.tap takes css px)."""
+    p.tap(x_vp * K, y_vp * K, hold=hold, fid=fid)
+
+
+def t_items(p):
+    log("--- item buttons (layout from the probe, no overlap, tap behaviour)")
+    s = st(p, 0.3)
+    fields = ("items", "busy_item", "binoculars", "touch_buttons")
+    missing = [f for f in fields if f not in s]
+    record("probe publishes items, busy_item, binoculars, touch_buttons", not missing,
+           f"missing={missing}" if missing else f"items={s.get('items')} busy_item={s.get('busy_item')!r} binoculars={s.get('binoculars')}")
+    if missing:
+        return
+    tb = s["touch_buttons"]
+    items = s["items"]
+    if "hint" in s:
+        record("hints=0 in the URL keeps the hint director off", s["hint"] == "", f"hint={s['hint']!r}")
+    size = viewport_from_probe(tb)
+    if size is None:
+        record("touch_buttons has the Tiro button", False, f"touch_buttons={tb}")
+        return
+    w, h = size
+
+    # --- layout: which buttons exist, and where
+    carried = [a for a in ITEM_ACTIONS if a.replace("use_", "", 1) in items]
+    present = [a for a in ITEM_ACTIONS if a in tb]
+    record("a button for every usable item carried and for none of the others", present == carried,
+           f"items={sorted(items)} item buttons={present}")
+    record("no button for the removed actions use_item / item_next", not any(a in tb for a in REMOVED_ACTIONS),
+           f"present={[a for a in REMOVED_ACTIONS if a in tb]}")
+    record("no dog button when the hunt has no dog (default loadout)", "dog_command" not in tb,
+           f"dog_command in touch_buttons={'dog_command' in tb}")
+    bad = []
+    for i, action in enumerate(carried):          # carried keeps ITEM_ACTIONS order = slot order
+        want = (w - (ITEM_ROW_RIGHT + ITEM_ROW_STEP * i), h - ITEM_ROW_BOTTOM)
+        got = tb.get(action)
+        if not got:
+            bad.append(f"{action}: no button")
+        elif abs(got[0] - want[0]) > 1.0 or abs(got[1] - want[1]) > 1.0 or abs(got[2] - ITEM_RADIUS) > 0.5:
+            bad.append(f"{action}: got ({got[0]:.1f}, {got[1]:.1f}, r {got[2]:.1f}) want ({want[0]:.1f}, {want[1]:.1f}, r {ITEM_RADIUS})")
+    record("item buttons sit at (w - (380 + 96 i), h - 250), radius 38", not bad and bool(carried),
+           "; ".join(bad) if bad else f"viewport {w:.0f}x{h:.0f}, buttons={carried}")
+
+    # --- no overlap: item and dog buttons against every other button (hit circle = radius + padding)
+    close = []
+    names = list(tb)
+    mine = [a for a in names if a in ITEM_ACTIONS or a == "dog_command"]
+    for a in mine:
+        for b in names:
+            if a == b or (b in mine and names.index(b) < names.index(a)):
+                continue   # each pair of item/dog buttons is checked once
+            ax, ay, ar = tb[a]
+            bx, by, br = tb[b]
+            gap = math.hypot(ax - bx, ay - by) - (ar + HIT_PADDING) - (br + HIT_PADDING)
+            if gap < 0.0:
+                close.append(f"{a}/{b} overlap by {-gap:.1f} px")
+    record("item and dog buttons do not overlap any other button", not close,
+           "; ".join(close) or f"{len(mine)} item/dog buttons against {len(names)} buttons")
+    stick_right = JOY_FROM_LEFT + JOY_ACTIVE_VP
+    inside = [a for a in carried if a in tb and tb[a][0] - tb[a][2] <= stick_right]
+    record("item buttons stay outside the joystick active area", not inside,
+           f"stick active area ends at x={stick_right:.0f}; inside: {inside}" if inside else f"stick area ends at x={stick_right:.0f}")
+    near_look = []
+    for a in carried:
+        if a not in tb:
+            continue
+        d_css = math.hypot(tb[a][0] * K - LOOK_A[0], tb[a][1] * K - LOOK_A[1])
+        if d_css < MIN_ITEM_TO_LOOK_CSS:
+            near_look.append(f"{a} {d_css:.0f} css px")
+    record("free look spot LOOK_A is at least 60 css px from every item button", not near_look,
+           "; ".join(near_look) or f"LOOK_A={LOOK_A}")
+
+    # --- tap the kit at full health: nothing is spent and nothing starts
+    if "use_medkit" in tb and items.get("medkit", 0) > 0 and s["health"] >= 99.9:
+        a = st(p, 0.2)
+        tap_vp(p, tb["use_medkit"][0], tb["use_medkit"][1])
+        b = st(p, 0.7)
+        record("kit tapped at full health: not spent, no use in progress, camera still",
+               b["items"].get("medkit") == a["items"].get("medkit") and b["busy_item"] == "" and abs(dyaw(a, b)) < 0.3
+               and abs(dpitch(a, b)) < 0.3 and b["touch_mode"],
+               f"medkit {a['items'].get('medkit')} -> {b['items'].get('medkit')} busy_item={b['busy_item']!r} "
+               f"d_yaw={dyaw(a, b):.2f} d_pitch={dpitch(a, b):.2f} touch_mode={b['touch_mode']}")
+    else:
+        record("kit tapped at full health (precondition: kit carried, count > 0, full health)", False,
+               f"use_medkit in touch_buttons={'use_medkit' in tb} items={items} health={s['health']}")
+
+    # --- tap the drone: -1 per tap down to 0, then it stays at 0 (never negative)
+    if "use_scout_drone" in tb and items.get("scout_drone", 0) > 0:
+        n0 = int(items["scout_drone"])
+        cx, cy = tb["use_scout_drone"][0], tb["use_scout_drone"][1]
+        a = st(p, 0.2)
+        seen = [n0]
+        for _ in range(n0 + 1):
+            tap_vp(p, cx, cy)
+            seen.append(int(st(p, 0.7)["items"].get("scout_drone", -99)))
+            time.sleep(0.2)
+        b = st(p, 0.2)
+        expected = [max(n0 - k, 0) for k in range(n0 + 2)]
+        record("drone tapped: count drops by 1 per tap, stops at 0 and never goes negative", seen == expected,
+               f"counts {seen} expected {expected}")
+        record("drone taps do not move the camera and keep touch mode",
+               abs(dyaw(a, b)) < 0.3 and abs(dpitch(a, b)) < 0.3 and b["touch_mode"],
+               f"d_yaw={dyaw(a, b):.2f} d_pitch={dpitch(a, b):.2f} touch_mode={b['touch_mode']}")
+    else:
+        record("drone tapped (precondition: drone carried with count > 0)", False,
+               f"use_scout_drone in touch_buttons={'use_scout_drone' in tb} items={items}")
+
+    # --- Tiro still works with the row present (Mira and Recarregar are covered by g2)
+    a = st(p, 0.2)
+    p.tap(*FIRE, hold=0.15, fid=1)
+    b = st(p, 0.6)
+    record("Tiro still fires with the item row present", b["ammo_mag"] < a["ammo_mag"],
+           f"ammo {a['ammo_mag']} -> {b['ammo_mag']}")
+
+
 GROUPS = {
     "g1": lambda p: (t_hook(p), t_fixed_joystick(p), t_sensitivity(p), t_two_fingers(p)),
     "g2": lambda p: (t_run_lock(p), t_fire_and_reload(p), t_aim(p), t_drag_speeds(p)),
@@ -383,8 +525,9 @@ GROUPS = {
     "g4": lambda p: [battery(p, i, str(i)) for i in (7, -5, 99999)],
     "g5": lambda p: (multitouch(p, 1, 2), multitouch(p, 7, 1000), multitouch(p, -1, 0), t_pause(p)),
     "g6": lambda p: battery(p, 2147483647, "int32 max"),
+    "g7": lambda p: t_items(p),
 }
-DEFAULT = ["g1", "g2", "g3", "g4", "g5"]
+DEFAULT = ["g1", "g2", "g3", "g4", "g5", "g7"]
 
 
 def main():
@@ -397,7 +540,7 @@ def main():
         else:
             print(__doc__)
             return 0 if a in ("--help", "-h") else 2
-    p = Phone("probe")
+    p = Phone("probe", query=URL_QUERY)
     t0 = time.time()
     try:
         p.start()

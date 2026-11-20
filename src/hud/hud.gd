@@ -31,7 +31,7 @@ const ALL_DOWN_TEXT: String = "Todos os caçadores caíram!"
 const DISCONNECTED_TEXT: String = "Conexão perdida."
 const SPECTATE_TEXT: String = "Assistindo: %s"
 const SPECTATE_HINT_TOUCH: String = "Toque em Tiro para trocar de caçador"
-const SPECTATE_HINT_KEYS: String = "Clique ou F para trocar de caçador"
+const SPECTATE_HINT_KEYS: String = "Clique ou %s para trocar de caçador"
 const SPECTATE_HINT_FONT_PX: int = 20
 const NO_SLOT: int = -1
 const HORDE_CROP_TEXT: String = "Celeiro %d%%"
@@ -84,7 +84,7 @@ var _probe_enabled: bool = false   # Web build opened with ?probe=1 (QA hook, se
 var _probe_t: float = 0.0
 var _thermal: bool = false
 var _last_ammo_text: String = ""
-var _last_item_text: String = ""
+var _dog_slots_on: bool = false       # the Quickbar / touch dog slot is currently shown
 var _hunter_names: Dictionary = {}   # slot -> display name seen on hunter_joined (the roster forgets who left)
 var _stall_banner: Label = null
 var _reconnect_banner: Label = null   # takes the place of the stall banner while this client is reconnecting
@@ -138,7 +138,11 @@ var _dog_bar: ProgressBar = ProgressBar.new()
 var _weapon_label: Label = null
 var _ammo_label: Label = null
 var _reload_bar: ProgressBar = ProgressBar.new()
-var _item_label: Label = null
+var _quickbar: Quickbar = Quickbar.new()
+var _hint_banner: HintBanner = HintBanner.new()
+var _director: HintDirector = HintDirector.new()
+var _hint_slot: StringName = &""      # slot blinking for the hint on screen (&"" = none, e.g. the opening)
+var _hints_enabled: bool = true       # false on the Web with ?hints=0 (QA hook, see _ready)
 var _zoom_label: Label = null
 var _touch: TouchControls = null
 var _pause: PauseOverlay = null
@@ -164,6 +168,11 @@ func _ready() -> void:
 	_build_top_right()
 	_build_bottom_right()
 	_build_messages()
+	_build_quickbar()
+	_root.add_child(_hint_banner)
+	_director.hint_shown.connect(_on_hint_shown)
+	_director.hint_hidden.connect(_on_hint_hidden)
+	add_child(_director)
 	_touch = AssetLoader.instantiate("res://src/hud/touch/touch_controls.tscn") as TouchControls
 	if _touch == null:
 		_touch = TouchControls.new()
@@ -178,6 +187,7 @@ func _ready() -> void:
 	_apply_touch_layout(InputSetup.is_touch_mode())
 	if OS.has_feature("web"):
 		_probe_enabled = bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('probe') === '1'", true))
+		_hints_enabled = not bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('hints') === '0'", true))
 
 
 func bind(player: PlayerBase, world: HuntWorld) -> void:
@@ -189,9 +199,7 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 	_touch.bind(_player)
 	_pause.bind(_player)
 	var items: ItemBelt = _player.get_items()
-	if items != null:
-		items.selection_changed.connect(_refresh_item_text)
-		items.counts_changed.connect(_refresh_item_text)
+	_quickbar.bind(items)
 	_vest_label.visible = items != null and items.damage_reduction > 0.0
 	if _world != null:
 		_minimap.map_rect = _world.get_map_rect()
@@ -208,7 +216,9 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 			_minimap.crop_rects = _world.get_crop_rects()
 		_on_crop_health(_world.get_crop_health_pct())
 		_on_counts(_world.get_boars_killed(), _world.get_boars_total())
-	_refresh_item_text()
+		_sync_dog_slots()
+	if _hints_enabled:
+		_director.setup(_player, items, _world)   # before hunt_started: the controller binds the HUD first
 	_update_health()
 	_poll_world()
 
@@ -381,10 +391,23 @@ func _build_bottom_right() -> void:
 	_reload_bar.modulate = COLOR_WARN
 	_reload_bar.visible = false
 	inner.add_child(_reload_bar)
-	_item_label = _label("", 16)
-	_item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	inner.add_child(_item_label)
 	box.add_child(_panel(inner))
+
+
+## Item bar of the desktop (docs §8.4): bottom centre, MARGIN_PX above the edge. It grows from its centre.
+func _build_quickbar() -> void:
+	_quickbar.name = "Quickbar"
+	_quickbar.anchor_left = 0.5
+	_quickbar.anchor_right = 0.5
+	_quickbar.anchor_top = 1.0
+	_quickbar.anchor_bottom = 1.0
+	_quickbar.offset_left = 0.0
+	_quickbar.offset_right = 0.0
+	_quickbar.offset_top = -float(MARGIN_PX) - Quickbar.SLOT_SIZE_PX
+	_quickbar.offset_bottom = -float(MARGIN_PX)
+	_quickbar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_quickbar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_root.add_child(_quickbar)
 
 
 func _build_messages() -> void:
@@ -479,9 +502,8 @@ func _apply_touch_layout(is_touch: bool) -> void:
 	if _bottomright_margin != null:
 		_bottomright_margin.add_theme_constant_override("margin_right",
 			TOUCH_BOTTOM_RIGHT_MARGIN_PX if is_touch else MARGIN_PX)
-	_refresh_item_text()   # touch mode shows the item on its button instead
 	if _spectate_hint != null:
-		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS
+		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS % InputSetup.get_key_label(&"spectate_next")
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +552,8 @@ func _process(delta: float) -> void:
 
 ## QA hook for the Web build: window.huntProbe = {x, z, yaw_deg, pitch_deg, touch_mode, ammo_mag, health,
 ## joystick_active, sprinting, look_active, run_locked, t_ms, slot, role, path, boars_alive,
-## allies: [{slot, x, z}]}, refreshed 10 times per second. Solo: slot 0, role "offline", path "none", no allies.
+## allies: [{slot, x, z}], items: {item_id: count}, busy_item, binoculars, hint, touch_buttons: {action: [x, y, r]}},
+## refreshed 10 times per second. Solo: slot 0, role "offline", path "none", no allies.
 func _publish_probe() -> void:
 	var allies: Array[Dictionary] = []
 	var link_slot: int = -1
@@ -546,6 +569,20 @@ func _publish_probe() -> void:
 				link_slot = hunter.slot
 	if not Net.is_host():
 		link_slot = 0   # a client's only link is the host
+	var item_counts: Dictionary = {}      # item id -> count (-1: the binoculars)
+	var busy_item: StringName = &""
+	var binoculars: bool = false
+	var items: ItemBelt = _player.get_items()
+	if items != null:
+		for item_id: StringName in items.get_usable_ids():
+			item_counts[String(item_id)] = items.get_count(item_id)
+		busy_item = items.get_busy_item()
+		binoculars = items.is_binoculars_active()
+	var touch_buttons: Dictionary = {}    # action -> [x, y, radius] in viewport px, every button that exists now
+	for action_name: StringName in _touch.get_button_diameters():
+		var center: Vector2 = _touch.get_button_center(action_name)
+		touch_buttons[String(action_name)] = [snappedf(center.x, 0.1), snappedf(center.y, 0.1),
+			snappedf(_touch.get_button_radius(action_name), 0.1)]
 	var state: Dictionary = {
 		"x": snappedf(_player.global_position.x, 0.001),
 		"z": snappedf(_player.global_position.z, 0.001),
@@ -564,6 +601,11 @@ func _publish_probe() -> void:
 		"path": PROBE_PATHS[clampi(Net.get_link_path(link_slot), 0, PROBE_PATHS.size() - 1)] if link_slot >= 0 else "none",
 		"boars_alive": boars_alive,
 		"allies": allies,
+		"items": item_counts,
+		"busy_item": String(busy_item),
+		"binoculars": binoculars,
+		"hint": String(_director.get_current_hint()),
+		"touch_buttons": touch_buttons,
 	}
 	JavaScriptBridge.eval("window.huntProbe = " + JSON.stringify(state) + ";", true)
 
@@ -628,6 +670,7 @@ func _poll_world() -> void:
 		_marked_points.append(m["pos"])
 		_marks.append({"pos": m["pos"], "kind": &"boar"})
 	var dog_on: bool = _world.has_dog()
+	_sync_dog_slots()
 	if dog_on and not _dog_panel.visible:
 		_dog_panel.visible = true
 		_dog_bar.value = _world.get_dog_health_pct()
@@ -703,21 +746,14 @@ func _poll_allies() -> void:
 	_spectate_hint.visible = spectating and not _ended and standing > 0
 
 
-func _refresh_item_text() -> void:
-	if _player == null or _item_label == null:
+## The dog slot of the Quickbar and the dog button of the touch layer exist only while the hunt has a dog.
+func _sync_dog_slots() -> void:
+	var present: bool = _world != null and _world.has_dog()
+	if present == _dog_slots_on:
 		return
-	var items: ItemBelt = _player.get_items()
-	var text: String = ""
-	if items != null and items.get_selected_id() != &"":
-		var id: StringName = items.get_selected_id()
-		var count: int = items.get_count(id)
-		text = String(Data.get_equipment(id).get("name", ""))
-		if count >= 0:
-			text += " x%d" % count
-		if not InputSetup.is_touch_mode():
-			text += "  [Q]" + (" [F]" if items.get_usable_ids().size() > 1 else "")
-	_item_label.text = text
-	_item_label.visible = text != "" and not InputSetup.is_touch_mode()
+	_dog_slots_on = present
+	_quickbar.set_dog_present(present)
+	_touch.set_dog_present(present)
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +910,8 @@ func _on_bait_placed(position: Vector3, duration_s: float) -> void:
 
 
 func _on_dog_state(state: StringName) -> void:
+	_quickbar.set_dog_state(state)
+	_touch.set_dog_state(state)
 	_dog_panel.visible = true
 	var name_text: String = String(DOG_STATE_TEXT.get(String(state), String(state)))
 	_dog_label.text = "Cão: " + name_text
@@ -903,6 +941,27 @@ func _on_item_used(item_id: StringName, _position: Vector3) -> void:
 
 func _on_thermal(active: bool) -> void:
 	_thermal = active
+
+
+## A contextual hint (§8.4): the text in the banner and, when it is about a slot, that slot blinks in both layouts.
+func _on_hint_shown(_hint_id: StringName, text: String, slot_id: StringName) -> void:
+	_hint_banner.show_hint(text)
+	_set_hint_flash(_hint_slot, false)
+	_hint_slot = slot_id
+	_set_hint_flash(_hint_slot, true)
+
+
+func _on_hint_hidden(_hint_id: StringName) -> void:
+	_hint_banner.hide_hint()
+	_set_hint_flash(_hint_slot, false)
+	_hint_slot = &""
+
+
+func _set_hint_flash(slot_id: StringName, on: bool) -> void:
+	if slot_id == &"":
+		return
+	_quickbar.flash(slot_id, on)
+	_touch.flash_slot(slot_id, on)
 
 
 ## Roster name first, then the one seen on hunter_joined, then the hunter node, then a generic fallback.

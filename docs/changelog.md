@@ -3,6 +3,24 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.8.0 — 20/11/2026
+
+**Barra de equipamento e dicas para quem está começando.**
+
+- Barra de equipamento embaixo, no centro: cada item tem o seu espaço, com ícone, quantidade e tecla própria
+  (Q kit, G ceva, V drone, B binóculo, E cão). Acabou o "trocar item com F".
+- No celular, cada item ganhou o seu botão, com nome e contador; o botão do cão agora diz "Cão".
+- Dicas na hora certa nas 3 primeiras caçadas: vida baixa ("Q: Curar"), javali à vista com o cão do lado,
+  muito tempo sem achar javali (drone) e javalis na lavoura (ceva). Depois que o jogador usa a ação, a dica não
+  volta mais.
+- A tela de preparação mostra a tecla de cada item e a do cão.
+- Ícones dos itens redesenhados para ler bem em tamanho pequeno.
+- No modo espectador, F continua trocando de caçador.
+
+Detalhes técnicos: contrato 1.3 (`docs/arquitetura.md` §4, §6.8, §8.4, §8.11, §9.1, §10); classes novas
+`Quickbar`, `HintDirector` e `HintBanner`; `ItemBelt.use_item(id)` substitui a seleção; save ganha
+`onboarding.learned` (sem mudar a versão do save); `?hints=0` desliga as dicas na Web.
+
 ## 0.7.4 — 19/11/2026
 
 **Todos os menus no estilo cinematográfico, e retratos das armas.**

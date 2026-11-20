@@ -254,11 +254,24 @@ func _check_autoload_signatures() -> void:
 		if iconsts.has("ACTIONS"):
 			var expected: Array[String] = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
-				"weapon_swap", "dog_command", "use_item", "item_next", "pause"]
+				"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
+					"spectate_next", "pause"]
 			var got: Array[String] = []
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))
 			_t.call("eq", got, expected, "InputSetup.ACTIONS")
+			# docs/arquitetura.md section 4 (1.3): the selected-item scheme is gone for good.
+			for removed: String in ["use_item", "item_next"]:
+				_t.call("ok", not got.has(removed), "InputSetup.ACTIONS ainda tem a acao removida '%s'" % removed)
+				_t.call("ok", not InputMap.has_action(removed), "InputMap ainda tem a acao removida '%s'" % removed)
+		_t.call("ok", iconsts.has("ITEM_ACTIONS"), "InputSetup.ITEM_ACTIONS ausente")
+		if iconsts.has("ITEM_ACTIONS"):
+			var item_actions: Dictionary = iconsts["ITEM_ACTIONS"]
+			var expected_items: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
+				&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
+			# Key order IS the slot order (quickbar and touch row), so compare the keys as a list too.
+			_t.call("eq", item_actions.keys(), expected_items.keys(), "InputSetup.ITEM_ACTIONS (ids e ordem)")
+			_t.call("eq", item_actions, expected_items, "InputSetup.ITEM_ACTIONS (id -> acao)")
 
 
 ## Net (docs/multiplayer.md section 3.4): signals, enums and the offline state of the F1 stub.

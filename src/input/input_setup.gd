@@ -4,7 +4,11 @@ extends Node
 
 const ACTIONS: PackedStringArray = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 	"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
-	"weapon_swap", "dog_command", "use_item", "item_next", "pause"]
+	"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
+	"spectate_next", "pause"]
+## Usable item id -> its action. The insertion order is THE order of the item slots (quickbar, touch row).
+const ITEM_ACTIONS: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
+	&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
 
 const ACTION_DEADZONE: float = 0.2
 ## Real mouse motion longer than this (px) switches "auto" mode back to mouse/keyboard.
@@ -31,8 +35,11 @@ const _KEYS: Dictionary = {
 	"weapon_4": [KEY_4],
 	"weapon_5": [KEY_5],
 	"dog_command": [KEY_E],
-	"use_item": [KEY_Q],
-	"item_next": [KEY_F],
+	"use_medkit": [KEY_Q],
+	"use_corn_bait": [KEY_G],
+	"use_scout_drone": [KEY_V],
+	"use_binoculars": [KEY_B],
+	"spectate_next": [KEY_F],
 	"pause": [KEY_ESCAPE, KEY_P],
 }
 const _LEFT_ONLY: Array[int] = [KEY_SHIFT, KEY_CTRL]
@@ -84,6 +91,30 @@ func set_touch_override(mode: String) -> void:
 	_touching.clear()   # an explicit mode change starts a fresh touch-activity window
 	_last_touch_msec = -100000
 	_apply_touch_mode(_resolve_initial())
+
+
+## Action of a usable item id (docs §4); &"" for items without one (passives).
+func get_item_action(item_id: StringName) -> StringName:
+	return ITEM_ACTIONS.get(item_id, &"") as StringName
+
+
+## First key of an action as shown to the player ("Q", "E"); "" when the action has no key.
+func get_key_label(action_name: StringName) -> String:
+	if not InputMap.has_action(action_name):
+		return ""
+	for ev: InputEvent in InputMap.action_get_events(action_name):
+		var key: InputEventKey = ev as InputEventKey
+		if key == null:
+			continue
+		if key.physical_keycode != KEY_NONE:
+			# On non-QWERTY layouts the printed key differs from the physical position.
+			var label: Key = KEY_NONE
+			if DisplayServer.get_name() != "headless":   # the headless server errors on this call
+				label = DisplayServer.keyboard_get_label_from_physical(key.physical_keycode)
+			return OS.get_keycode_string(label if label != KEY_NONE else key.physical_keycode)
+		if key.keycode != KEY_NONE:
+			return OS.get_keycode_string(key.keycode)
+	return ""
 
 
 func release_all_actions() -> void:

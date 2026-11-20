@@ -21,18 +21,32 @@ const COLOR_RING: Color = Color(1.0, 1.0, 1.0, 0.55)
 const COLOR_ON: Color = Color("#F2C12E")
 const COLOR_TEXT: Color = Color("#F4EFE6")
 const FONT_SIZE: int = 20
+## Item buttons (docs §8.4): one round button per usable item, in a row at the height of the old Item
+## button. Centre of item i = (width - (ITEM_ROW_RIGHT_PX + ITEM_ROW_STEP_PX * i), height - ITEM_ROW_BOTTOM_PX).
+const ITEM_BUTTON_D: float = 76.0
+const ITEM_ROW_RIGHT_PX: float = 380.0
+const ITEM_ROW_STEP_PX: float = 96.0
+const ITEM_ROW_BOTTOM_PX: float = 250.0
+const ITEM_NAME_FONT_PX: int = 16
+const ITEM_COUNT_FONT_PX: int = 16
+const DOG_SLOT: StringName = &"dog_command"
+const FLASH_HZ: float = 2.0
+const DIM_ALPHA: float = 0.35
+const BUSY_VEIL: Color = Color(0.0, 0.0, 0.0, 0.55)
+const BUSY_SECTOR: Color = Color(1.0, 1.0, 1.0, 0.5)
+const COLOR_DANGER: Color = Color("#D9452B")
+const BUSY_SECTOR_STEPS: int = 48
 
 ## action, diameter, label, icon id, offset from the bottom-right corner (dx, dy as positive numbers),
 ## mode: "hold" presses while touched, "toggle" flips on each tap.
+## The dog button only exists while there is a dog (set_dog_present).
 const BUTTONS: Array[Dictionary] = [
 	{"action": &"fire", "d": 130.0, "label": "Tiro", "icon": &"btn_fire", "from": "br", "ox": 125.0, "oy": 130.0, "mode": "hold"},
 	{"action": &"aim", "d": 100.0, "label": "Mira", "icon": &"btn_aim", "from": "br", "ox": 290.0, "oy": 105.0, "mode": "toggle"},
 	{"action": &"reload", "d": 84.0, "label": "Recarga", "icon": &"btn_reload", "from": "br", "ox": 100.0, "oy": 285.0, "mode": "hold"},
 	{"action": &"weapon_swap", "d": 76.0, "label": "Troca", "icon": &"btn_swap", "from": "br", "ox": 235.0, "oy": 235.0, "mode": "hold"},
 	{"action": &"crouch", "d": 76.0, "label": "Agachar", "icon": &"btn_crouch", "from": "br", "ox": 410.0, "oy": 130.0, "mode": "hold"},
-	{"action": &"use_item", "d": 84.0, "label": "Item", "icon": &"btn_item", "from": "br", "ox": 380.0, "oy": 250.0, "mode": "hold"},
-	{"action": &"item_next", "d": 64.0, "label": "»", "icon": &"", "from": "br", "ox": 475.0, "oy": 250.0, "mode": "hold"},
-	{"action": &"dog_command", "d": 76.0, "label": "Cão", "icon": &"btn_dog", "from": "br", "ox": 235.0, "oy": 350.0, "mode": "hold"},
+	{"action": &"dog_command", "d": 76.0, "label": "Cão", "icon": &"btn_dog", "from": "br", "ox": 235.0, "oy": 350.0, "mode": "hold", "slot": &"dog_command"},
 	{"action": &"pause", "d": 64.0, "label": "II", "icon": &"btn_pause", "from": "tl", "ox": 56.0, "oy": 56.0, "mode": "hold"},
 ]
 
@@ -58,7 +72,11 @@ var _last_pos: Dictionary = {}        # slot -> last known position (deltas are 
 var _max_delta_px: float = 150.0
 var _slider_rect: Rect2 = Rect2()
 var _icons: Dictionary = {}           # icon id -> Texture2D
-var _item_label: String = ""
+var _defs: Array[Dictionary] = []     # buttons that exist right now (BUTTONS minus an absent dog, plus the item row)
+var _items: ItemBelt = null
+var _dog_present: bool = false
+var _dog_retreating: bool = false
+var _flashing: Dictionary = {}        # slot id -> true
 var _ended: bool = false
 
 
@@ -71,10 +89,7 @@ func _ready() -> void:
 	joystick.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	look_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_surface.draw.connect(_draw_surface)
-	for def: Dictionary in BUTTONS:
-		var icon_id: StringName = def["icon"]
-		if icon_id != &"" and AssetLoader.exists(ScenePaths.icon(icon_id)):
-			_icons[icon_id] = AssetLoader.load_resource(ScenePaths.icon(icon_id))
+	_rebuild_buttons()
 	look_pad.look.connect(_on_look)
 	get_viewport().size_changed.connect(_layout)
 	GameEvents.touch_mode_changed.connect(_on_touch_mode_changed)
@@ -85,11 +100,31 @@ func _ready() -> void:
 
 func bind(player: Player) -> void:
 	_player = player
-	var items: ItemBelt = player.get_items()
-	if items != null:
-		items.selection_changed.connect(_refresh_item_label)
-		items.counts_changed.connect(_refresh_item_label)
-	_refresh_item_label()
+	_items = player.get_items()
+	_rebuild_buttons()
+
+
+## The dog button exists only while the hunt has a dog.
+func set_dog_present(present: bool) -> void:
+	if present == _dog_present:
+		return
+	_dog_present = present
+	if not present:
+		_dog_retreating = false
+		_flashing.erase(DOG_SLOT)
+	_rebuild_buttons()
+
+
+func set_dog_state(state: StringName) -> void:
+	_dog_retreating = state == Ids.DS_RETREAT
+
+
+## Blinks the amber ring of a button (slot ids as in the Quickbar) until flash_slot(id, false).
+func flash_slot(slot_id: StringName, on: bool) -> void:
+	if on:
+		_flashing[slot_id] = true
+	else:
+		_flashing.erase(slot_id)
 
 
 func end_hunt() -> void:
@@ -126,9 +161,41 @@ func _screen_size() -> Vector2:
 	return get_viewport().get_visible_rect().size
 
 
+## Rebuilds the list of existing buttons (fixed ones, the dog while present, one per usable item) and lays
+## them out. A finger that was holding a button that no longer exists is released.
+func _rebuild_buttons() -> void:
+	_defs.clear()
+	for def: Dictionary in BUTTONS:
+		if def["action"] == DOG_SLOT and not _dog_present:
+			continue
+		_defs.append(def)
+	if _items != null:
+		var index: int = 0
+		for item_id: StringName in _items.get_usable_ids():
+			var action_name: StringName = InputSetup.get_item_action(item_id)
+			if action_name == &"":
+				continue
+			var def: Dictionary = Data.get_equipment(item_id)
+			_defs.append({"action": action_name, "d": ITEM_BUTTON_D, "icon": item_id, "slot": item_id,
+				"label": String(def.get("short_name", def.get("name", ""))), "from": "br",
+				"ox": ITEM_ROW_RIGHT_PX + ITEM_ROW_STEP_PX * index, "oy": ITEM_ROW_BOTTOM_PX, "mode": "hold"})
+			index += 1
+	for def: Dictionary in _defs:
+		var icon_id: StringName = def["icon"]
+		if icon_id != &"" and not _icons.has(icon_id) and AssetLoader.exists(ScenePaths.icon(icon_id)):
+			_icons[icon_id] = AssetLoader.load_resource(ScenePaths.icon(icon_id))
+	_centers.clear()
+	_radii.clear()
+	_layout()
+	for finger: int in _finger_to_action.keys():
+		if not _radii.has(_finger_to_action[finger]):
+			_release_button_finger(finger)
+			_finger_to_action.erase(finger)
+
+
 func _layout() -> void:
 	var s: Vector2 = _screen_size()
-	for def: Dictionary in BUTTONS:
+	for def: Dictionary in _defs:
 		var c: Vector2
 		if String(def["from"]) == "br":
 			c = Vector2(s.x - float(def["ox"]), s.y - float(def["oy"]))
@@ -339,52 +406,91 @@ func _set_slider_from(pos: Vector2) -> void:
 	_player.set_zoom_fraction(t)
 
 
-func _refresh_item_label() -> void:
-	_item_label = ""
-	if _player == null or _player.get_items() == null:
-		return
-	var items: ItemBelt = _player.get_items()
-	var id: StringName = items.get_selected_id()
-	if id == &"":
-		return
-	var count: int = items.get_count(id)
-	var short_name: String = String(Data.get_equipment(id).get("name", ""))
-	_item_label = short_name if count < 0 else "%s x%d" % [short_name, count]
-	_surface.queue_redraw()
-
-
 # --- Drawing ---
 
 func _draw_surface() -> void:
 	if not visible:
 		return
 	var font: Font = ThemeDB.fallback_font
-	for def: Dictionary in BUTTONS:
+	var flash_on: bool = fmod(Time.get_ticks_msec() * 0.001 * FLASH_HZ, 1.0) < 0.5
+	for def: Dictionary in _defs:
 		var action_name: StringName = def["action"]
 		var c: Vector2 = _centers.get(action_name, Vector2.ZERO)
 		var r: float = float(_radii.get(action_name, 0.0))
 		var down: bool = bool(_down.get(action_name, false))
 		var on: bool = bool(_toggled.get(action_name, false))
 		var fire: bool = action_name == &"fire"
+		var slot_id: StringName = def.get("slot", &"")
+		var is_slot: bool = slot_id != &""
+		var state: Dictionary = _slot_state(slot_id) if is_slot else {}
+		var dimmed: bool = bool(state.get("dimmed", false))
+		var lit: bool = bool(state.get("lit", false))
+		var alpha: float = DIM_ALPHA if dimmed else 1.0
 		var fill: Color = COLOR_FIRE if fire else COLOR_FILL
 		if down or on:
 			fill = COLOR_FIRE_DOWN if fire else COLOR_FILL_DOWN
+		fill.a *= alpha
 		_surface.draw_circle(c, r, fill)
-		_surface.draw_arc(c, r, 0.0, TAU, 48, COLOR_ON if on else COLOR_RING, 4.0 if on else 3.0, true)
+		var ring: Color = COLOR_ON if (on or lit) else COLOR_RING
+		ring.a *= alpha
+		_surface.draw_arc(c, r, 0.0, TAU, 48, ring, 4.0 if (on or lit) else 3.0, true)
 		var icon_id: StringName = def["icon"]
 		var label: String = String(def["label"])
-		if action_name == &"use_item" and _item_label != "":
-			label = _item_label
 		if _icons.has(icon_id):
 			var tex: Texture2D = _icons[icon_id]
 			var icon_size: float = r * 1.2
-			_surface.draw_texture_rect(tex, Rect2(c - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false)
-			if action_name == &"use_item":
-				_draw_text(font, label, c + Vector2(0.0, r + 20.0), 16)
+			var tint: Color = Color(COLOR_ON.r, COLOR_ON.g, COLOR_ON.b, alpha) if lit else Color(1.0, 1.0, 1.0, alpha)
+			_surface.draw_texture_rect(tex, Rect2(c - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, tint)
+			if is_slot:
+				_draw_text(font, label, c + Vector2(0.0, r + 20.0), ITEM_NAME_FONT_PX)
 		else:
 			_draw_text(font, label, c + Vector2(0.0, 7.0), FONT_SIZE if label.length() < 8 else 15)
+		if is_slot:
+			_draw_slot_state(font, c, r, state, flash_on and _flashing.has(slot_id))
 	if _slider_visible():
 		_draw_slider()
+
+
+## Display state of an item / dog button: {dimmed, lit, count (-1 = none), busy (< 0 = idle)}.
+func _slot_state(slot_id: StringName) -> Dictionary:
+	var state: Dictionary = {"dimmed": false, "lit": false, "count": -1, "busy": -1.0}
+	if slot_id == DOG_SLOT:
+		state["dimmed"] = _dog_retreating
+		return state
+	if _items == null:
+		return state
+	var count: int = _items.get_count(slot_id)
+	state["count"] = count
+	state["dimmed"] = count == 0
+	state["lit"] = slot_id == Ids.I_BINOCULARS and _items.is_binoculars_active()
+	if _items.get_busy_item() == slot_id:
+		state["busy"] = _items.get_busy_progress()
+	return state
+
+
+func _draw_slot_state(font: Font, c: Vector2, r: float, state: Dictionary, flash_now: bool) -> void:
+	var busy: float = float(state["busy"])
+	if busy >= 0.0:
+		_surface.draw_circle(c, r, BUSY_VEIL)
+		if busy > 0.0:
+			var steps: int = maxi(int(ceil(BUSY_SECTOR_STEPS * busy)), 1)
+			var pts: PackedVector2Array = PackedVector2Array([c])
+			for i: int in range(steps + 1):
+				var a: float = -PI * 0.5 + TAU * busy * float(i) / float(steps)   # clockwise from the top
+				pts.append(c + Vector2(cos(a), sin(a)) * r * 0.85)
+			if pts.size() >= 3:
+				_surface.draw_colored_polygon(pts, BUSY_SECTOR)
+	var count: int = int(state["count"])
+	if count >= 0:
+		var text: String = "x%d" % count
+		var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, ITEM_COUNT_FONT_PX).x
+		# Top-right corner of the circle, written over the ring.
+		var anchor: Vector2 = c + Vector2(r * 0.72 - w * 0.5, -r * 0.72 + ITEM_COUNT_FONT_PX * 0.35)
+		_surface.draw_string_outline(font, anchor, text, HORIZONTAL_ALIGNMENT_LEFT, -1, ITEM_COUNT_FONT_PX, 5, Color.BLACK)
+		_surface.draw_string(font, anchor, text, HORIZONTAL_ALIGNMENT_LEFT, -1, ITEM_COUNT_FONT_PX,
+			COLOR_DANGER if count == 0 else COLOR_TEXT)
+	if flash_now:
+		_surface.draw_arc(c, r + 2.0, 0.0, TAU, 48, COLOR_ON, 5.0, true)
 
 
 func _draw_text(font: Font, text: String, baseline_center: Vector2, size_px: int) -> void:

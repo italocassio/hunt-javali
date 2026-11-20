@@ -13,6 +13,7 @@ extends Node
 ##   net_boars      replication: flora layout, puppets, interpolation, real weapon -> C_SHOT -> kill  RESULT:
 ##   net_flow       crop mirror, bait, thermal, drone, end of hunt, drops, economy, scoreboard        RESULT:
 ##   hud_net        shot ids with the local slot, hit marker ignores allies, ally kill message        RESULT:
+##   hud_hints      1.3 onboarding: HintDirector triggers, queue, learned ids, touch text, horde bait   RESULT:
 ##   link_selftest  NetLink over NetLoopback: loss, reordering, RTC promotion/downgrade, relay rate   LINK_SELFTEST
 ##   spectator      F6: allies on minimap/compass, SpectatorCamera, "Assistindo" banner, solo untouched  RESULT:
 ##   net_dogs       F7: one Dog per slot on the host, DogPuppet on the client, dog records, commands  RESULT:
@@ -39,6 +40,7 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "net_boars", "scene": "res://src/hunt/debug/net_boars_test.tscn", "limit_s": 120.0},
 	{"name": "net_flow", "scene": "res://src/hunt/debug/net_flow_test.tscn", "limit_s": 120.0},
 	{"name": "hud_net", "scene": "res://src/hud/debug/hud_net_test.tscn", "limit_s": 90.0},
+	{"name": "hud_hints", "scene": "res://src/hud/debug/hud_hints_test.tscn", "limit_s": 60.0},
 	{"name": "link_selftest", "scene": "res://src/net/debug/link_selftest.tscn", "limit_s": 90.0},
 	{"name": "spectator", "scene": "res://src/player/debug/spectator_sandbox.tscn", "limit_s": 90.0},
 	{"name": "net_dogs", "scene": "res://src/hunt/debug/net_dogs_test.tscn", "limit_s": 120.0},

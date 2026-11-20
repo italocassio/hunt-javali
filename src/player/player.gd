@@ -604,10 +604,10 @@ func _pump_discrete_input(delta: float) -> void:
 		_select_weapon(4)
 	if Input.is_action_just_pressed(&"weapon_swap"):
 		_select_weapon((_slot + 1) % maxi(_weapons.size(), 1))
-	if Input.is_action_just_pressed(&"use_item"):
-		_use_selected_item()
-	if Input.is_action_just_pressed(&"item_next") and _items != null:
-		_items.next()
+	if _items != null:
+		for item_id: StringName in InputSetup.ITEM_ACTIONS:
+			if Input.is_action_just_pressed(InputSetup.ITEM_ACTIONS[item_id] as StringName):
+				_items.use_item(item_id)
 	if Input.is_action_just_pressed(&"dog_command"):
 		GameEvents.dog_command_requested.emit()
 	if Input.is_action_just_pressed(&"zoom_in"):
@@ -820,12 +820,6 @@ func _select_weapon(slot: int) -> void:
 	weapon_changed.emit(slot, _weapons[slot].weapon_id)
 	if _aim_active:
 		_update_thermal()
-
-
-func _use_selected_item() -> void:
-	if _items == null or not _alive:
-		return
-	_items.use_selected()
 
 
 func _on_weapon_fired(_shot_id: int, weapon: Weapon) -> void:

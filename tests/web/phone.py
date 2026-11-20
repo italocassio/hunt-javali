@@ -42,9 +42,10 @@ HOOK_JS = r"""
 
 
 class Phone:
-    def __init__(self, tag: str = "run"):
+    def __init__(self, tag: str = "run", query: str = QUERY):
         os.makedirs(SHOTS_DIR, exist_ok=True)
         self.tag = tag
+        self.query = query
         self.step = 0
         self.server = StaticServer(BUILD_DIR)
         self.server.start()
@@ -70,7 +71,7 @@ class Phone:
         c.call("Page.navigate", {"url": self.url()})
 
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.server.port}/index.html{QUERY}"
+        return f"http://127.0.0.1:{self.server.port}/index.html{self.query}"
 
     def stop(self):
         try:

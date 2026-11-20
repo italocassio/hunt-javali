@@ -280,7 +280,7 @@ func _check_switching_and_loss(hud: Hud) -> void:
 	await _press(&"fire")
 	_check("switch_to_next_standing", cam.get_target_slot() == FAR_SLOT and banner.text == "Assistindo: Caio",
 		"%d %s" % [cam.get_target_slot(), banner.text])
-	await _press(&"item_next")
+	await _press(&"spectate_next")
 	_check("switch_wraps_around", cam.get_target_slot() == NEAR_SLOT and banner.text == "Assistindo: Ana")
 	# The menu is open: the click on its button must not switch.
 	GameEvents.hunt_paused_changed.emit(true)

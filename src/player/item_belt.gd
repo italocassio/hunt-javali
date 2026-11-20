@@ -3,7 +3,6 @@ extends Node
 ## Equipment carried into the hunt (docs §8.11): passives (vest, extra ammo, thermal scope),
 ## the active binoculars and the consumables (medkit, corn bait, scout drone).
 
-signal selection_changed()
 signal counts_changed()
 signal binoculars_changed(active: bool)
 signal use_started(item_id: StringName, duration_s: float)
@@ -20,7 +19,6 @@ var drone_reveal_s: float = 0.0
 
 var _usable: Array[StringName] = []
 var _counts: Dictionary = {}          # StringName -> int (consumables only)
-var _selected: int = 0
 var _binoculars_on: bool = false
 var _busy_item: StringName = &""
 var _busy_left: float = 0.0
@@ -51,22 +49,25 @@ func setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void:
 			"consumable":
 				_usable.append(item_id)
 				_counts[item_id] = request.get_item_count(item_id)
-	_selected = 0
-	selection_changed.emit()
+	# Slot order follows InputSetup.ITEM_ACTIONS (docs §8.11), not the loadout order.
+	var ordered: Array[StringName] = []
+	for item_id: StringName in InputSetup.ITEM_ACTIONS:
+		if _usable.has(item_id):
+			ordered.append(item_id)
+	for item_id: StringName in _usable:
+		if not ordered.has(item_id):
+			ordered.append(item_id)   # usable item without an action: still listed, after the others
+	_usable = ordered
+	counts_changed.emit()
 
 
 func has_item(item_id: StringName) -> bool:
 	return _usable.has(item_id)
 
 
+## Active + consumable items carried, in the order of InputSetup.ITEM_ACTIONS.
 func get_usable_ids() -> Array[StringName]:
 	return _usable
-
-
-func get_selected_id() -> StringName:
-	if _usable.is_empty():
-		return &""
-	return _usable[_selected]
 
 
 ## Consumables: remaining count. Active items (binoculars): -1.
@@ -74,15 +75,13 @@ func get_count(item_id: StringName) -> int:
 	return int(_counts.get(item_id, -1))
 
 
-func next() -> void:
-	if _usable.size() < 2:
-		return
-	_selected = (_selected + 1) % _usable.size()
-	selection_changed.emit()
-
-
 func is_busy() -> bool:
 	return _busy_left > 0.0
+
+
+## Item being used right now (the medkit); &"" = none.
+func get_busy_item() -> StringName:
+	return _busy_item if _busy_left > 0.0 else &""
 
 
 func get_busy_progress() -> float:
@@ -110,12 +109,14 @@ func set_binoculars(active: bool) -> void:
 	binoculars_changed.emit(active)
 
 
-func use_selected() -> bool:
-	return use_item(get_selected_id())
-
-
+## The single point of use (docs §8.11). True when the use started or had an effect.
 func use_item(item_id: StringName) -> bool:
-	if item_id == &"" or not has_item(item_id):
+	if item_id == &"" or not Data.get_equipment_ids().has(item_id):   # unknown: false, no message (§8.11)
+		return false
+	if not has_item(item_id):
+		var def: Dictionary = Data.get_equipment(item_id)
+		if String(def.get("kind", "")) in ["active", "consumable"]:
+			_message("Você não trouxe este item: %s." % String(def.get("name", "item")))
 		return false
 	if is_busy():
 		return false

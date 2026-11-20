@@ -1,6 +1,8 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.2** (jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`) · Godot **4.7.2** ·
+Versão do contrato: **1.3** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
+HUD/onboarding, fases 1 e 2: teclas fixas por item, barra de itens, botões de item no toque, dicas das primeiras
+caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
@@ -143,6 +145,10 @@ hunt-javali/
 │   │   └── debug/                (sandbox do pacote A)
 │   ├── weapons/                  game-developer Pacote A
 │   ├── hud/                      game-developer Pacote A
+│   │   ├── quickbar.gd           class Quickbar (barra de itens, §8.4)
+│   │   ├── hint_director.gd      class HintDirector (gatilhos das dicas, sem UI, §8.4)
+│   │   ├── hint_banner.gd        class HintBanner (faixa da dica, §8.4)
+│   │   ├── debug/                (sandboxes do HUD; hud_hints_test.tscn|.gd, §14)
 │   │   └── touch/
 │   ├── hunt/                     game-developer Pacote B
 │   │   └── debug/
@@ -310,12 +316,21 @@ Registradas por **`InputSetup`** (`res://src/input/input_setup.gd`, Pacote A) em
 | `weapon_2` | 2 | — | — |
 | `weapon_3`, `weapon_4`, `weapon_5` (0.5.0) | 3, 4, 5 | — | — (slot inexistente = nada; na horda há 5 armas, `docs/horda.md` §7) |
 | `weapon_swap` | — | — | botão Trocar arma (cicla todas as armas carregadas) |
-| `dog_command` | E | — | botão Cão |
-| `use_item` | Q | — | botão Item |
-| `item_next` | F | — | seta pequena ao lado do botão Item |
+| `dog_command` | E | — | botão Cão (só existe com cão na caçada, §8.4) |
+| `use_medkit` | Q | — | botão do kit (só se equipado) |
+| `use_corn_bait` | G | — | botão da ceva (só se equipada) |
+| `use_scout_drone` | V | — | botão do drone (só se equipado) |
+| `use_binoculars` | B | — | botão do binóculo (só se equipado; liga/desliga) |
+| `spectate_next` | F | — | — (no toque o espectador troca com Tiro ou Trocar) |
 | `pause` | Esc, P | — | botão Pausa |
 
 O olhar (mouse e arrasto na metade direita) **não é ação**: é tratado pelo `Player` diretamente.
+
+**Itens com tecla fixa (1.3).** Não existe item selecionado nem ciclo: cada item usável tem a sua ação
+(`use_<item_id>`) e a sua tecla. As ações `use_item` e `item_next` **deixaram de existir** (removidas de
+`ACTIONS`, do `Player`, do `TouchControls` e dos testes). F ficou só para o espectador (`spectate_next`, §11).
+Apertar a tecla de um item que não veio na caçada mostra "Você não trouxe este item: <nome>." (ver
+`ItemBelt.use_item`, §8.11). G, V e B não colidem com nenhuma tecla anterior.
 
 **Mouse injetado.** Com `emulate_mouse_from_touch=true`, todo toque gera um clique de mouse falso
 (`event.device == InputEvent.DEVICE_ID_EMULATION`); se o botão esquerdo estivesse no InputMap, tocar para
@@ -334,13 +349,21 @@ emulação.
 API de `InputSetup` (sem `class_name`):
 ```gdscript
 const ACTIONS: PackedStringArray = ["move_forward","move_back","move_left","move_right","fire","aim",
-	"zoom_in","zoom_out","reload","sprint","crouch","weapon_1","weapon_2","weapon_swap",
-	"dog_command","use_item","item_next","pause","weapon_3","weapon_4","weapon_5"]
+	"zoom_in","zoom_out","reload","sprint","crouch","weapon_1","weapon_2","weapon_3","weapon_4","weapon_5",
+	"weapon_swap","dog_command","use_medkit","use_corn_bait","use_scout_drone","use_binoculars",
+	"spectate_next","pause"]
+## Usable item id -> its action. The insertion order is THE order of the item slots (quickbar, touch row).
+const ITEM_ACTIONS: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
+	&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
 func register_actions() -> void          # chamado no _ready; idempotente
 func is_touch_mode() -> bool
 func set_touch_override(mode: String) -> void   # "auto" | "on" | "off"; reaplica e emite se mudou
 func release_all_actions() -> void       # Input.action_release em todas (fim de caçada / pausa)
+func get_item_action(item_id: StringName) -> StringName   # ITEM_ACTIONS.get(item_id, &""); &"" = item sem ação (passivo)
+func get_key_label(action_name: StringName) -> String     # OS.get_keycode_string da 1ª tecla da ação ("Q", "E"); "" se não tem tecla
 ```
+`get_key_label` é a **única** fonte do texto de tecla mostrado ao jogador (barra de itens, dicas, tela de
+equipamento). Ninguém escreve "Q" ou "E" literal em texto de UI.
 
 ---
 
@@ -351,7 +374,7 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 
 | Sinal | Emissor | Ouvintes | Quando |
 |---|---|---|---|
-| `hunt_started(request: HuntRequest)` | B `HuntController` | A `Hud`/`Player`, tests | mundo pronto, jogador posicionado, contagem inicial emitida |
+| `hunt_started(request: HuntRequest)` | B `HuntController` | A `Hud`/`Player`/`HintDirector`, tests | mundo pronto, jogador posicionado, contagem inicial emitida |
 | `hunt_ended(result: HuntResult)` | B `HuntController` | A (solta mouse, desliga input, some com controles de toque), tests | uma única vez, no frame em que a condição de fim é detectada |
 | `hunt_paused_changed(paused: bool)` | A `PauseOverlay` | tests | ao pausar/despausar |
 | `hunt_abandon_requested()` | A `PauseOverlay` ("Desistir") | B `HuntController` | B encerra com `ABANDONED` |
@@ -359,7 +382,7 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 | `player_damaged(amount: float, source_position: Vector3, health_after: float)` | A `Player.apply_damage` | A `Hud` (indicador direcional), tests | dano já reduzido pelo colete |
 | `player_healed(amount: float, health_after: float)` | A `Player` | A `Hud` | kit usado |
 | `player_died()` | A `Player` | B `HuntController` | vida chegou a 0 (uma vez) |
-| `item_used(item_id: StringName, position: Vector3)` | A `ItemBelt` | B (ceva; conta consumíveis), tests | **só consumíveis** (`medkit`, `corn_bait`, `scout_drone`), após decrementar |
+| `item_used(item_id: StringName, position: Vector3)` | A `ItemBelt` | B (ceva; conta consumíveis), A `HintDirector` (aprendido), tests | **só consumíveis** (`medkit`, `corn_bait`, `scout_drone`), após decrementar |
 | `thermal_vision_changed(active: bool)` | A `Player` | B (`BoarVisualBase.set_highlight`) | mira térmica equipada e entrou/saiu da mira |
 | `dog_command_requested()` | A (tecla E / botão Cão) | B `Dog` | B decide se é "Pega!" ou "Volta!" |
 | `boar_spawned(boar_id: int, type_id: StringName, weight_kg: float)` | B | tests | javali entrou no mapa |
@@ -368,12 +391,12 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 | `boar_killed(kill: KillInfo)` | B `HuntController` | A `Hud` (mensagem de abate), tests | morte, já com `reward_money` |
 | `boar_counts_changed(killed: int, total: int)` | B | A `Hud` | no início e a cada morte |
 | `crop_health_changed(pct: float)` | B `CropManager` | A `Hud` | quando variou ≥ `hunt.crop_health_signal_step_pct` desde o último envio, e ao chegar a 0 |
-| `crop_under_attack(active: bool)` | B `CropManager` | A `Hud` ("Javalis na lavoura!" + `crop_alarm`) | nº de javalis comendo passa de 0→>0 (true) ou >0→0 (false) |
+| `crop_under_attack(active: bool)` | B `CropManager` | A `Hud` ("Javalis na lavoura!" + `crop_alarm`), A `HintDirector` (dica da ceva) | nº de javalis comendo passa de 0→>0 (true) ou >0→0 (false) |
 | `bait_placed(position: Vector3, duration_s: float)` | B | A `Hud` (minimapa), tests | ceva instanciada |
 | `dog_state_changed(state: StringName)` | B `Dog` | A `Hud` | transição (`Ids.DS_*`) |
 | `dog_health_changed(pct: float)` | B `Dog` | A `Hud` | vida do cão mudou (0–100) |
 | `dog_marked_boar(position: Vector3, duration_s: float)` | B `Dog` | A `Hud` (bússola + minimapa) | cão apontou/acuou/agarrou |
-| `dog_command_executed(command: StringName)` | B `Dog` | A `Hud` (balão "Pega!"/"Volta!") | `Ids.CMD_ATTACK` ou `Ids.CMD_RECALL` |
+| `dog_command_executed(command: StringName)` | B `Dog` | A `Hud` (balão "Pega!"/"Volta!"), A `HintDirector` (aprendido) | `Ids.CMD_ATTACK` ou `Ids.CMD_RECALL` |
 | `hud_message_requested(text: String, duration_s: float)` | B (e A) | A `Hud` | mensagens de contexto em PT-BR |
 | `wallet_changed(money: int, gold: int)` | `Profile` | menus | qualquer alteração de saldo |
 | `inventory_changed()` | `Profile` | menus | compra, consumo |
@@ -393,6 +416,9 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 
 Em horda, `crop_health_changed`/`crop_under_attack` carregam o **estoque do celeiro** e `boar_counts_changed` continua
 contando a partida inteira (todas as ondas).
+
+As dicas das primeiras caçadas (§8.4) **não** têm sinal no barramento: são locais ao Pacote A (sinais do próprio
+`HintDirector`) e não mudam `src/core/`. Em rede cada máquina tem o seu `Profile` e vê só as próprias dicas.
 
 `player_died()` continua significando "o caçador **desta máquina** morreu". Sinais de cão
 (`dog_state_changed`, `dog_health_changed`, `dog_command_executed`) passam a valer só para o cão do jogador
@@ -493,7 +519,16 @@ func mark_code_redeemed(code: String) -> void
 # settings
 func get_setting(key: String) -> Variant                  # stub: valor default da tabela §10
 func set_setting(key: String, value: Variant) -> void     # valida, emite settings_changed, salva
+# onboarding (dicas das primeiras caçadas, §8.4; 1.3)
+func is_onboarding_active() -> bool                       # stats.hunts_played < game.onboarding.max_hunts. stub false
+func is_hint_learned(hint_id: StringName) -> bool         # hint_id está em onboarding.learned. stub false
+func mark_hint_learned(hint_id: StringName) -> void       # idempotente; só memória (NÃO salva); id inválido → push_warning e ignora
 ```
+Onboarding: `hint_id` válido = id de equipamento de `data/equipment.json` com `kind` `"active"` ou
+`"consumable"`, ou `"dog_command"` (a mesma regra vale no `sanitize`, §10). `mark_hint_learned` não grava para
+não escrever no IndexedDB no meio da caçada: o aprendido entra no próximo `save()`, que sempre acontece em
+`apply_hunt_result` (toda caçada termina nele, inclusive desistência). Aba fechada no meio da caçada perde o
+aprendido daquela caçada, igual a `hunts_played`. `reset_progress()` zera `onboarding.learned`.
 `apply_hunt_result`: `money += result.total_money`; subtrai `result.consumables_used` do inventário;
 se `VICTORY` **e `result.counts_for_progression`**: marca o contrato vencido e desbloqueia o próximo
 (`index + 1`, se existir); atualiza stats; `save()`. Chamado só por `Router.finish_hunt`. Settings novo:
@@ -555,10 +590,13 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `Weapon` | `src/weapons/weapon.gd` | Node | interna ao A |
 | `WeaponHolder` | `src/weapons/weapon_holder.gd` | Node3D | interna |
 | `Hitscan` | `src/weapons/hitscan.gd` | RefCounted (static) | `static func cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array[RID]) -> Dictionary` |
-| `ItemBelt` | `src/player/item_belt.gd` | Node | interna |
+| `ItemBelt` | `src/player/item_belt.gd` | Node | interna ao A; API em §8.11 (usada por `Player`, `Hud`, `Quickbar`, `TouchControls`, `HintDirector` e tests) |
 | `Hud` | `src/hud/hud.gd` (cena `src/hud/hud.tscn`) | CanvasLayer | `func bind(player: PlayerBase, world: HuntWorld) -> void` |
+| `Quickbar` | `src/hud/quickbar.gd` | HBoxContainer | barra de itens do desktop (§8.4). `const DOG_SLOT: StringName = &"dog_command"`; `bind(items: ItemBelt) -> void` (cria `Slot_<item_id>` para cada `items.get_usable_ids()`, na ordem; conecta `counts_changed`, `binoculars_changed`, `use_started`, `use_finished`); `set_dog_present(present: bool) -> void` (cria/remove `Slot_dog_command`, sempre o último); `set_dog_state(state: StringName) -> void` (espaço do cão apagado em `Ids.DS_RETREAT`); `flash(slot_id: StringName, on: bool) -> void` (pisca a borda até `flash(id, false)`; id inexistente = nada); `get_slot_ids() -> Array[StringName]` (ordem da tela) |
+| `HintDirector` | `src/hud/hint_director.gd` | Node | lógica das dicas, **sem nenhum `Control`** (§8.4). `signal hint_shown(hint_id: StringName, text: String, slot_id: StringName)` (`slot_id` = `&""` na abertura); `signal hint_hidden(hint_id: StringName)`; `const OPENING: StringName = &"opening"`; `setup(player: PlayerBase, items: ItemBelt, world: HuntWorld) -> void` (lê `Profile.is_onboarding_active()` e `game.onboarding` uma vez; inativo = não conecta nada e `set_process(false)`); `is_active() -> bool`; `get_current_hint() -> StringName` (`&""` = nenhuma); `get_queue() -> Array[StringName]` (cópia, tests); `get_shown_this_hunt() -> Array[StringName]` (cópia, tests) |
+| `HintBanner` | `src/hud/hint_banner.gd` | PanelContainer | faixa da dica (§8.4). `show_hint(text: String) -> void`, `hide_hint() -> void`, `is_showing() -> bool`, `get_text() -> String`. Não tem relógio: quem decide quando some é o `HintDirector` |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
-| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna |
+| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
 | `RemoteHunter` | `src/player/remote_hunter.gd` (cena `src/player/remote_hunter.tscn`, `ScenePaths.REMOTE_HUNTER`) | PlayerBase | caçador de outro jogador; API de `PlayerBase` (`setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld)`, `net_apply_state`…); `net_write_state` devolve os últimos 14 bytes recebidos (`NetCodec.HUNTER_STATE_BYTES`), então o anfitrião reenvia todos os caçadores sem caso especial; sem corpo e sem forma de colisão |
 | `SpectatorCamera` | `src/player/spectator_camera.gd` | Node3D | interna |
@@ -631,7 +669,7 @@ Membros novos, internos de B (uso só dentro de `src/hunt`, `src/boars`, `src/wo
 | `RedeemCode` | `src/systems/pix/redeem_code.gd` | RefCounted (static) | `static func normalize(code: String) -> String`, `static func generate(gold: int, nonce: String, secret: String) -> String`, `static func parse(code: String, secret: String) -> int` (ouro ou -1) |
 | `DonationService` | `src/systems/pix/donation_service.gd` | RefCounted | `signal redeem_finished(ok: bool, gold: int, message: String)`, `func _init(gateway: PixGateway = null)`, `func get_packages() -> Array[Dictionary]`, `func get_pix_payload(package_id: StringName) -> String`, `func redeem(code: String) -> void` |
 
-| `LoadoutPanel` | `src/ui/common/loadout_panel.gd` | VBoxContainer | painel de equipamento da Preparação, reaproveitado pelo lobby (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`) |
+| `LoadoutPanel` | `src/ui/common/loadout_panel.gd` | VBoxContainer | painel de equipamento da Preparação, reaproveitado pelo lobby (`%WeaponSlot0`, `%WeaponSlot1`, `%DogOption`, `Item_<id>`; 1.3: `ItemKey_<id>` e `%DogKeyLabel`, §11) |
 
 Detalhes de Pix em §9.8.
 
@@ -975,9 +1013,15 @@ ids de arma e de passo já listados. Nenhum id novo.
 - **Ícones** `res://assets/ui/icons/<id>.svg` (`ScenePaths.icon(id)`), 128×128, SVG escrito à mão. Ids:
   todos os ids de arma, equipamento e cão; `money`, `gold`, `boar`, `crop`, `health`, `ammo`, `lock`,
   `dog_paw`, `app_icon`, `barn` (0.5.0, horda); mapas `map_mato_grosso`, `map_pantanal`, `map_campanha_gaucha`,
-  `map_triangulo_mineiro`; toque `btn_fire`, `btn_aim`, `btn_reload`, `btn_swap`, `btn_dog`, `btn_item`,
+  `map_triangulo_mineiro`; toque `btn_fire`, `btn_aim`, `btn_reload`, `btn_swap`, `btn_dog`,
   `btn_crouch`, `btn_pause`, `joystick_base`, `joystick_knob`. Fallback: sem ícone (texto) / círculos
-  desenhados com `draw_circle`.
+  desenhados com `draw_circle`. `btn_item` saiu da lista em 1.3 (o botão Item genérico acabou; o arquivo pode
+  ser apagado pelo art-director).
+- **Ícones da barra de itens e dos botões de item** (1.3): **sem ids novos**. Itens usam `ScenePaths.icon(<item_id>)`
+  (`medkit`, `corn_bait`, `scout_drone`, `binoculars`, os mesmos da loja) e o cão usa `btn_dog`. Requisito novo
+  para esses 5 SVGs: legíveis a 40 px sobre `HudPanel` e sobre o círculo translúcido do toque (silhueta clara
+  `#F4EFE6` com no máximo um acento de cor da paleta, sem detalhe abaixo de 6 px na escala 128). Continuam
+  servindo à loja. Fallback: o nome curto (`short_name`, §9.3; "Cão" para o cão) escrito no espaço.
 - **Fundos de menu** (0.7.3) `ScenePaths.MENU_BACKGROUND` = `res://assets/ui/main_menu_cerrado.png` (boot e
   menu principal) e `ScenePaths.PREPARATION_BACKGROUND` = `res://assets/ui/preparation_cerrado.png` (seleção de
   mapa e preparação). Pinturas 16:9 fornecidas pelo dono do jogo: única exceção à arte procedural. Importadas
@@ -1131,7 +1175,9 @@ Queda de dano: `d ≤ falloff_start_m` → 1; `d ≥ falloff_end_m` → `min_dam
 - Cão: dano interno ao B (`Dog.take_damage`), nunca abaixo de 1 de vida.
 
 ### 8.4 HUD recebe estado
-- Do próprio pacote A (leitura direta, todo frame): vida, munição, arma, mira/zoom, item selecionado.
+- Do próprio pacote A (leitura direta, todo frame): vida, munição, arma, mira/zoom. Itens: por sinais do
+  `ItemBelt` (§8.11), sem polling, exceto o preenchimento do uso em andamento (`get_busy_progress`, só enquanto
+  `is_busy()`).
 - Do mundo via `HuntWorld` (polling a 10 Hz, sem alocar por frame além de um `PackedVector3Array`):
   minimapa (`get_map_rect`, `get_crop_rects`, `get_dog_position`, `get_alive_boar_ids` +
   `get_boar_position` **só** durante revelação do drone), bússola (`get_nearest_boar_position` quando o cão
@@ -1144,14 +1190,116 @@ Layout do HUD (referência 1280×720, âncoras; respeita margem de 24 px nas lat
 topo-esquerda vida + ícone do colete + botão pausa (toque); topo-centro bússola (480 px, N/L/S/O, marcador
 do cão e do javali marcado) com barra "Lavoura 87%" abaixo e aviso "Javalis na lavoura!" piscando; topo-direita
 minimapa 180×180 e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
-R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita munição "5 | 30" e nome da arma; anel de dano
-direcional em torno do centro (1,2 s); estado do cão abaixo do minimapa.
-Toque (CanvasLayer 11, visível só em modo toque): joystick à esquerda (raio 90 px, flutuante no 40%
-esquerdo da tela), arrastar na metade direita para olhar (por índice de toque), botões
-`TouchScreenButton` com `action` = nome da ação: Tiro (110 px, baixo-direita), Mira, Recarregar, Trocar,
-Cão, Item (+ `item_next`), Agachar, Pausa. Slider vertical de zoom à direita quando mirando com
-`ads_zoom_max > ads_zoom_min`. Pausa (CanvasLayer 20, `process_mode = ALWAYS`): "Retomar", "Configurações"
-(instancia `ScenePaths.SETTINGS_PANEL` se existir; sinal `closed`), "Desistir da caçada".
+R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita munição "5 | 30" e nome da arma (a linha de item
+"Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro a barra de itens (só
+desktop, abaixo); faixa de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); estado do cão
+abaixo do minimapa.
+Toque (CanvasLayer 11, visível só em modo toque): joystick fixo à esquerda, arrastar fora dos botões para olhar
+(por índice de toque), botões desenhados pelo `TouchControls` que apertam a ação: Tiro, Mira, Recarregar,
+Trocar, Agachar, Pausa (posições de hoje, `TouchControls.BUTTONS`), o botão do cão e um botão por item
+(abaixo). Slider vertical de zoom quando mirando com `ads_zoom_max > ads_zoom_min`. Pausa (CanvasLayer 20,
+`process_mode = ALWAYS`): "Retomar", "Configurações" (instancia `ScenePaths.SETTINGS_PANEL` se existir; sinal
+`closed`), "Desistir da caçada".
+
+**Espaços de item (1.3).** Um espaço por item de `ItemBelt.get_usable_ids()` (ativos e consumíveis do loadout,
+na ordem de `InputSetup.ITEM_ACTIONS`: kit, ceva, drone, binóculo) e, por último, um espaço do cão
+(id `&"dog_command"`) enquanto `world.has_dog()`. Passivos (colete, munição extra, mira térmica) nunca entram.
+Sem nenhum espaço, a barra fica invisível. Estados de um espaço (iguais no desktop e no toque):
+
+| Estado | Quando | Visual |
+|---|---|---|
+| normal | — | ícone (§7.9) + quantidade "x2" no canto inferior direito (só consumíveis) |
+| esgotado | consumível com `get_count == 0` | ícone e fundo com alfa 0,35; quantidade "0" em `#D9452B`; continua apertável ("Acabou: …") |
+| em uso | `use_started(id, s)` até `use_finished` | véu escuro (preto 55%) com setor circular claro crescendo de 0 a 1 por `get_busy_progress()`, sentido horário a partir do topo |
+| ligado | binóculo com `is_binoculars_active()` | borda âmbar `#F2C12E` 3 px e ícone em âmbar |
+| cão recuando | espaço do cão e estado `Ids.DS_RETREAT` | alfa 0,35 (não obedece "Pega!") |
+| piscando | `flash(id, true)` até `flash(id, false)` | borda âmbar alternando a 2 Hz (constante própria `FLASH_HZ = 2.0`, mesmo valor de `Hud.BLINK_HZ`; não referencie `Hud` de dentro da `Quickbar`) |
+
+**Barra de itens (desktop)** — `Quickbar` (`Hud/Root/Quickbar`), visível só com `InputSetup.is_touch_mode() ==
+false`. O `Hud` a ancora no centro-baixo, 24 px acima da borda (`MARGIN_PX`). Cada espaço `Slot_<id>` é um
+`HudPanel` de 64×64 px, ícone 32 px no centro, quantidade 14 px, letra da tecla (`InputSetup.get_key_label(ação)`, 14 px) numa
+etiqueta escura no canto superior esquerdo, separação 8 px. No máximo 4 espaços (`loadout.item_slots` = 3 itens
++ cão) = 280 px; a 1280×720 fica em x 500–780, y 632–696, sem tocar a mensagem de abate (0,72–0,84 da altura) nem o painel de munição. Constantes de
+desenho no próprio script (não são balanceamento). Desenho com `draw_*` em `_draw`; `queue_redraw` só quando
+um sinal muda o estado e a cada frame apenas enquanto há espaço em uso ou piscando.
+
+**Botões de item (toque)** — `TouchControls`. Saem o botão Item e a seta "»". Botões redondos de 76 px,
+modo "hold" (apertam a ação `use_<id>` do item; `use_binoculars` alterna no próprio `ItemBelt`). Fileira
+horizontal na altura do antigo botão Item: centro do i-ésimo item (i = índice em `get_usable_ids()`, 0 = o mais
+perto do polegar) em `(largura − (380 + 96·i), altura − 250)`. No máximo 3 itens (`loadout.item_slots`), então
+x vai de `largura − 572` a `largura − 380`: com 96 px de passo, os raios de toque (38 + 8) não se sobrepõem; a
+1280×720 o mais à esquerda fica em x = 708, a 960×720 (iPad 4:3) em x = 388, fora da área ativa do joystick
+(acaba em x ≈ 314 naquela altura); não invadem Tiro, Mira, Recarregar, Trocar e Agachar (o mais próximo,
+Agachar, fica 44 px abaixo). O botão do cão fica onde já estava (centro `(largura − 235, altura − 350)`, 76 px)
+e só existe enquanto houver cão (`set_dog_present`). Cada botão de item e o do cão mostram o nome curto
+(`short_name` do item, "Cão" para o cão; 16 px) logo abaixo do círculo, e os consumíveis mostram "x2" no canto
+superior direito. Letras de tecla não aparecem no toque. O ponto livre do `mobile_probe.py` (`LOOK_A`) fica a
+≈ 100 px CSS do terceiro botão de item (o probe exige 60).
+
+Gancho de QA da build Web (`?probe=1`, `Hud._publish_probe`), campos novos em 1.3: `items` (objeto
+`{item_id: get_count}`, -1 para o binóculo), `busy_item` (String, `""` = nenhum), `binoculars` (bool),
+`hint` (id da dica atual, `""` = nenhuma) e `touch_buttons` (objeto `{ação: [x, y, raio]}` em px do viewport,
+para todo botão que existe agora, inclusive `use_*` e `dog_command`). O `mobile_probe.py` passa a ler a posição
+dos botões de item daí, em vez de constantes. Na Web, `?hints=0` na URL (lido pelo `Hud` do mesmo jeito que
+`?probe=1`) deixa o `HintDirector` inativo: o `mobile_probe.py` abre com `?probe=1&hints=0` para que nenhuma dica
+apareça no meio dos diffs de pixel (a faixa da dica cruza a área do diff da mira). A lógica das dicas é testada
+pelo sandbox `hud_hints` (§12), não pelo probe.
+
+**Dicas das primeiras caçadas (Fase 2)** — lógica em `HintDirector`, texto em `HintBanner`, piscar na
+`Quickbar` / `TouchControls`. O `Hud` cria os três em `_ready`, chama `director.setup(player, items, world)` em
+`bind` e liga: `hint_shown` → `banner.show_hint(text)` + `quickbar.flash(slot_id, true)` +
+`touch.flash_slot(slot_id, true)`; `hint_hidden` → `banner.hide_hint()` + `flash(…, false)` nos dois. Só local:
+nada de rede novo; em rede cada caçador vê as suas. Números em `game.onboarding` (§9.1).
+- **Ativo** só se `Profile.is_onboarding_active()` (as `max_hunts` primeiras caçadas, por `stats.hunts_played`)
+  no `setup`. Inativo: nenhuma conexão, nenhum processamento, nenhuma gravação.
+- **Ids** (dica = espaço = aprendido): `medkit`, `corn_bait`, `scout_drone`, `dog_command`; mais `opening`, que
+  não tem espaço nem aprendido. Uma dica com id aprendido (`Profile.is_hint_learned`) nunca entra na fila.
+- **Avaliação** a cada `eval_interval_s` (acumulado por `delta` no `_process`; com a árvore pausada não corre),
+  só com o caçador vivo, hunt não encerrado e sem espectador. Condições (todas precisam valer):
+
+| Dica | Condição de disparo |
+|---|---|
+| `opening` | `opening_delay_s` depois de `hunt_started`, se existe pelo menos um espaço (o `HuntController` chama `player.setup` → `hud.bind` → `director.setup` antes de emitir `hunt_started`; nada é avaliado antes dele) |
+| `medkit` | kit equipado com `get_count > 0`, `not items.is_busy()` e `vida / vida máx × 100 < medkit_health_below_pct` |
+| `dog_command` | `world.has_dog()`, `world.get_dog_state() == Ids.DS_FOLLOW` e um javali **avistado** nesta avaliação |
+| `scout_drone` | drone equipado com `get_count > 0`, `world.get_alive_boar_ids()` não vazio e nenhum javali avistado há `drone_no_sighting_s` (contados desde `hunt_started` ou desde o último avistamento) |
+| `corn_bait` | ceva equipada com `get_count > 0` e o último `crop_under_attack` foi `true` |
+
+  **Avistado** (critério barato, sem raio): algum id de `world.get_alive_boar_ids()` com
+  `world.get_boar_position(id)` a até `boar_sighted_range_m` (distância XZ) e dentro de
+  `boar_sighted_half_angle_deg` da direção do olhar no plano XZ (`player.get_look_direction()`). Não testa
+  linha de visão: um javali atrás de uma árvore conta como avistado (aceito para uma dica). Uma alocação de
+  `PackedInt32Array` por avaliação (4 por segundo com o valor padrão), nenhuma outra.
+- **Fila:** uma dica por vez. Disparou e não está na fila, não é a atual e não foi mostrada nesta caçada → entra
+  no fim; se a fila já tem `queue_max` ids, a nova é ignorada (volta a disparar na avaliação seguinte). Exceção:
+  `medkit` entra na frente e, se passar do limite, sai o último da fila. A atual dura
+  `hint_duration_s` (`opening_duration_s` para a abertura); depois `hint_gap_s` sem dica; então a próxima da
+  fila é reavaliada e só aparece se a condição ainda vale (senão é descartada sem contar como mostrada). Cada id
+  aparece no máximo uma vez por caçada.
+- **Aprendido:** `item_used(id, …)` com `id` em {`medkit`, `corn_bait`, `scout_drone`} e qualquer
+  `dog_command_executed(…)` chamam `Profile.mark_hint_learned(id)` (o cão: `&"dog_command"`), tirem a dica da fila
+  e, se ela é a atual, a escondem na hora (`hint_hidden`). Vale mesmo sem a dica ter aparecido. A dica do kit já
+  some em `ItemBelt.use_started(&"medkit", …)` (o `item_used` só vem ao fim do uso); o aprendido continua no
+  `item_used`. Uso cancelado não traz a dica de volta naquela caçada.
+- **Fim:** `hunt_ended`, `player_died` e `spectate_changed(slot >= 0)` escondem a atual e esvaziam a fila.
+- **Texto** resolvido na hora de mostrar, conforme `InputSetup.is_touch_mode()`; `%s` = `get_key_label` da ação.
+  Constantes em `hint_director.gd` (texto de jogador fica no código, como o resto do HUD):
+
+| Dica | Teclado | Toque |
+|---|---|---|
+| `opening` | "Seus itens ficam na barra embaixo. Aperte a tecla de cada um para usar." | "Cada item tem o seu botão. Toque nele para usar." |
+| `medkit` | "%s: Curar" | "Toque no kit para curar" |
+| `dog_command` | "%s: Mandar o cão atacar" | "Toque em Cão para mandar o cão atacar" |
+| `scout_drone` | "%s: Drone revela os javalis no minimapa" | "Toque no drone: ele revela os javalis no minimapa" |
+| `corn_bait` | "%s: Ceva atrai os javalis para longe da lavoura" | "Toque na ceva para atrair os javalis para longe da lavoura" |
+| `corn_bait` em horda (`world.is_horde()`) | "%s: Ceva atrai os javalis para longe do celeiro" | "Toque na ceva para atrair os javalis para longe do celeiro" |
+
+- **`HintBanner`** (`Hud/Root/HintBanner`): `HudPanel` com `Label` `HudBigLabel` 24 px centralizado; o fundo
+  encolhe até a largura do texto (mais o respiro do painel), centralizado na horizontal, no máximo 60% da largura
+  da tela (texto maior quebra linha), verticais 0,30–0,37 da tela, `mouse_filter` ignorado, nos dois modos. Essa faixa fica
+  livre durante o jogo vivo: abaixo da mensagem de contexto (0,22–0,30) e acima da mira; as faixas que também a
+  usam (derrubado/espectador, 0,30–0,44) só aparecem com o caçador caído, quando as dicas já foram encerradas.
+  Aparece e some com fade de 0,2 s (constante de desenho).
 
 ### 8.5 Mundo exposto: estrutura obrigatória de uma cena de mapa
 Caminho: `ScenePaths.map_scene(map_id)` = `res://src/world/maps/<map_id>/<map_id>_map.tscn` (B).
@@ -1259,6 +1407,9 @@ jogador, regenera `regen_per_s`, não obedece "Pega!" até `return_health_frac`)
 `dog_command_requested`: se `follow` → `seek` + `dog_command_executed(Ids.CMD_ATTACK)` + HUD "Pega!";
 caso contrário → `return` + `CMD_RECALL` + "Volta!". Caramelo também alimenta a bússola continuamente
 (`get_nearest_boar_position`). O cão nunca morre.
+HUD (1.3, A): o espaço do cão na barra e o botão Cão do toque existem enquanto `has_dog()` (o `Hud` chama
+`set_dog_present` no polling de 10 Hz) e repassam `dog_state_changed` a `set_dog_state` (apagado em `retreat`).
+A tecla E (`dog_command`) aparece na barra; nada muda no B.
 
 **Em rede (F7; detalhe em `docs/multiplayer.md` §6.5).** O anfitrião simula um `Dog` por slot com cão
 (`owner_slot`; raça do roster, `NetPeerInfo.dog_id`); o cliente só tem `DogPuppet` (réplica interpolada, seção
@@ -1275,14 +1426,46 @@ de vários cães): se dois cães pegam o mesmo javali, o primeiro a soltar liber
 ### 8.11 Itens (A, com efeito no mundo pelo B)
 | Item | Tipo | Efeito | Dono do efeito |
 |---|---|---|---|
-| `binoculars` | ativo | alterna visão 6x sem arma (Q); bloqueia tiro | A |
+| `binoculars` | ativo | alterna visão 6x sem arma (B, `use_binoculars`); bloqueia tiro | A |
 | `leather_vest` | passivo | reduz dano recebido | A |
 | `medkit` | consumível | cura `heal` em `use_time_s` (sem atirar) | A; emite `item_used` |
 | `corn_bait` | consumível | coloca ceva no chão à frente (2 m) | A emite `item_used`; B cria `Bait` + `bait_placed` |
 | `extra_ammo` | passivo | reserva × `reserve_mult` | A |
 | `thermal_scope` | passivo | ao mirar, javalis a ≤ `highlight_range_m` destacados | A emite `thermal_vision_changed`; B chama `set_highlight` |
 | `scout_drone` | consumível | revela todos os javalis no minimapa por `reveal_s` | A (HUD), emite `item_used` |
-`use_item` usa o item selecionado entre ativos/consumíveis equipados; `item_next` cicla.
+
+Uso direto por id (1.3): o `Player`, em `_update_input`, para cada `(item_id, ação)` de
+`InputSetup.ITEM_ACTIONS`, chama `_items.use_item(item_id)` em `Input.is_action_just_pressed(ação)` (vivo, input
+aberto, sem bot). Mesmo caminho para teclado e toque (o botão do toque aperta a ação). Não há seleção.
+
+API do `ItemBelt` (`src/player/item_belt.gd`, A):
+```gdscript
+signal counts_changed()
+signal binoculars_changed(active: bool)
+signal use_started(item_id: StringName, duration_s: float)   # só o kit (uso com tempo)
+signal use_finished(item_id: StringName)                     # &"" = uso cancelado (cancel_use)
+const MESSAGE_S: float = 2.0
+const BAIT_DISTANCE_M: float = 2.0
+var damage_reduction: float; var reserve_mult: float; var thermal_range_m: float; var drone_reveal_s: float
+func setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void
+func has_item(item_id: StringName) -> bool              # usável (ativo/consumível) equipado
+func get_usable_ids() -> Array[StringName]              # ativos+consumíveis equipados, na ordem de InputSetup.ITEM_ACTIONS (não na do loadout)
+func get_count(item_id: StringName) -> int              # consumível equipado: restante; ativo ou não equipado: -1
+func use_item(item_id: StringName) -> bool              # único ponto de uso; true se começou/teve efeito
+func cancel_use() -> void
+func is_busy() -> bool
+func get_busy_item() -> StringName                      # novo; &"" = nenhum
+func get_busy_progress() -> float                       # 0..1
+func is_binoculars_active() -> bool
+func get_binoculars_zoom() -> float
+func set_binoculars(active: bool) -> void
+```
+**Removidos:** `signal selection_changed()`, `next()`, `get_selected_id()`, `use_selected()` (e o estado
+`_selected`). `use_item(id)` com item usável (`kind` `"active"`/`"consumable"`) que não veio na caçada: devolve
+`false` e emite `hud_message_requested("Você não trouxe este item: <name>.", MESSAGE_S)` (`name` de
+`data/equipment.json`); passivo, id vazio ou desconhecido: `false` sem mensagem. Demais regras de hoje mantidas (kit com vida cheia, "Acabou: …",
+ocupado = `false`). `PlayerBase.bot_use_item(item_id)` continua chamando `use_item(item_id)` sem mudança, e o
+`FallbackPlayer` não muda.
 
 ### 8.12 Caçada em rede (B, com A e N)
 Formatos de registro: `docs/multiplayer.md` §4. Offline (`Net.get_role() == Role.OFFLINE`) tudo acima vale
@@ -1407,6 +1590,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `shop.max_consumable_owned` | int | — | loja |
 | `coop.*` | número/lista | m, s | modo cooperativo (B, A) |
 | `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca: as telas de menu, exceto BOOT e RESULT; nunca HUNT), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
+| `onboarding.*` | obj | caçadas, s, %, m, graus | dicas das primeiras caçadas (1.3, §8.4): lido por `Profile.is_onboarding_active` (`max_hunts`) e pelo `HintDirector` (o resto) |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
 ```json
 {
@@ -1465,6 +1649,19 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
+  "onboarding": {
+    "max_hunts": 3,
+    "eval_interval_s": 0.25,
+    "opening_delay_s": 2.0,
+    "opening_duration_s": 6.0,
+    "hint_duration_s": 5.0,
+    "hint_gap_s": 1.5,
+    "queue_max": 3,
+    "medkit_health_below_pct": 50.0,
+    "boar_sighted_range_m": 60.0,
+    "boar_sighted_half_angle_deg": 35.0,
+    "drone_no_sighting_s": 60.0
+  },
   "coop": {
     "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],
     "extra_group_delay_s": 20.0,
@@ -1483,6 +1680,14 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 ```
 `coop.*` (B, A, `Net`): `boar_count_mult_by_players` é indexado por `player_count − 1`; os demais campos estão
 em §8.12.
+
+`onboarding.*` (1.3): `max_hunts` (int; dicas enquanto `stats.hunts_played < max_hunts`), `eval_interval_s`
+(período de avaliação dos gatilhos), `opening_delay_s` (de `hunt_started` até a dica de abertura),
+`opening_duration_s` / `hint_duration_s` (quanto cada dica fica na tela), `hint_gap_s` (intervalo sem dica entre
+duas), `queue_max` (int; dicas esperando), `medkit_health_below_pct` (0–100, vida em % da máxima),
+`boar_sighted_range_m` e `boar_sighted_half_angle_deg` (critério de "avistado", meio-ângulo do cone em graus),
+`drone_no_sighting_s` (tempo sem avistamento para sugerir o drone). Validação do `Data`: todos presentes, números
+> 0, `max_hunts` e `queue_max` inteiros ≥ 1, `boar_sighted_half_angle_deg` ≤ 90, `medkit_health_below_pct` ≤ 100.
 
 ### 9.2 `data/weapons.json`
 | Campo | Tipo | Unid. | Significado |
@@ -1553,6 +1758,7 @@ em §8.12.
 | Campo | Tipo | Significado |
 |---|---|---|
 | `id`, `name`, `description` | string | |
+| `short_name` | string | 1.3: nome curto (≤ 9 caracteres) sob o botão de item do toque e no fallback sem ícone; obrigatório em todo item |
 | `kind` | `"passive"` \| `"active"` \| `"consumable"` | passivo/ativo: compra única; consumível: acumula |
 | `price`, `currency` | int, string | preço unitário |
 | `max_per_hunt` | int | consumíveis levados por caçada |
@@ -1561,20 +1767,20 @@ em §8.12.
 {
   "version": 1,
   "items": [
-    {"id": "binoculars", "name": "Binóculo", "description": "Zoom de 6x para achar o bando sem espantá-lo.",
+    {"id": "binoculars", "name": "Binóculo", "short_name": "Binóculo", "description": "Zoom de 6x para achar o bando sem espantá-lo.",
      "kind": "active", "price": 600, "currency": "money", "max_per_hunt": 1, "effect": {"zoom": 6.0}},
-    {"id": "leather_vest", "name": "Colete de couro", "description": "Reduz o dano das presas em 35%.",
+    {"id": "leather_vest", "name": "Colete de couro", "short_name": "Colete", "description": "Reduz o dano das presas em 35%.",
      "kind": "passive", "price": 2500, "currency": "money", "max_per_hunt": 1, "effect": {"damage_reduction": 0.35}},
-    {"id": "medkit", "name": "Kit de primeiros socorros", "description": "Recupera 50 de vida. Consumível.",
+    {"id": "medkit", "name": "Kit de primeiros socorros", "short_name": "Kit", "description": "Recupera 50 de vida. Consumível.",
      "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5}},
-    {"id": "corn_bait", "name": "Ceva de milho", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
+    {"id": "corn_bait", "name": "Ceva de milho", "short_name": "Ceva", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
      "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 2,
      "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4}},
-    {"id": "extra_ammo", "name": "Munição extra", "description": "Dobra a munição de reserva de todas as armas.",
+    {"id": "extra_ammo", "name": "Munição extra", "short_name": "Munição", "description": "Dobra a munição de reserva de todas as armas.",
      "kind": "passive", "price": 800, "currency": "money", "max_per_hunt": 1, "effect": {"reserve_mult": 2.0}},
-    {"id": "thermal_scope", "name": "Mira térmica", "description": "Ao mirar, destaca javalis até 150 m.",
+    {"id": "thermal_scope", "name": "Mira térmica", "short_name": "Térmica", "description": "Ao mirar, destaca javalis até 150 m.",
      "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
-    {"id": "scout_drone", "name": "Drone batedor", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
+    {"id": "scout_drone", "name": "Drone batedor", "short_name": "Drone", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
      "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0}}
   ]
 }
@@ -1880,6 +2086,7 @@ Esquema (versão 2):
     "mato_grosso": {"unlocked": 1, "best_crop_pct": [-1.0, -1.0, -1.0, -1.0, -1.0]}
   },
   "stats": {"hunts_played": 0, "hunts_won": 0, "boars_killed": 0, "heaviest_kg": 0.0, "money_earned_total": 0},
+  "onboarding": {"learned": []},
   "redeemed_codes": [],
   "settings": {
     "mouse_sensitivity": 1.0,
@@ -1902,6 +2109,13 @@ consumíveis e `1` para passivos/ativos possuídos. Settings: `mouse_sensitivity
 vazio aparece como "Caçador N", N = slot + 1). A versão do save continua 2: save antigo ganha
 `player_name = ""` pelo `sanitize`. Nada de sala, código ou resultado pendente é gravado.
 
+`onboarding.learned` (1.3): lista de ids de dica já aprendidos (`Profile.mark_hint_learned`, §6.3), sem
+repetição. Migração **pelo `sanitize`, sem subir a versão** (mesma regra do `player_name`): bloco ausente ou com
+tipo errado → `{"learned": []}`; na lista, só ficam Strings que são id de equipamento `active`/`consumable` ou
+`"dog_command"`, sem duplicatas, na ordem em que estavam. Não há o que inferir de um save antigo (quem já tem 3
+caçadas não vê dicas de qualquer forma), por isso não há passo `2 → 3`. Escrita: junto com qualquer `save()`;
+`mark_hint_learned` sozinho não grava (§6.3).
+
 ---
 
 ## 11. Fluxo de cenas
@@ -1915,7 +2129,7 @@ Cena principal: `res://src/ui/boot/boot.tscn`. Troca **sempre** por `Router.goto
 | `BOOT` | `src/ui/boot/boot.tscn` | systems | `%StartButton` (tela cheia, "Toque para começar"): `Sfx.unlock_audio()`, tela cheia em toque, → `MAIN_MENU` |
 | `MAIN_MENU` | `src/ui/main_menu/main_menu.tscn` | systems | `%PlayButton` → `MAP_SELECT`; `%FriendsButton` ("Jogar com amigos (beta)"; sempre visível desde a F6) → `LOBBY`; `%ShopButton` → `SHOP`; `%DonateButton` → `DONATE`; `%SettingsButton` → `SETTINGS`; mostra `%MoneyLabel`, `%GoldLabel` |
 | `MAP_SELECT` | `src/ui/map_select/map_select.tscn` | systems | botões gerados `Map_<map_id>` (indisponível: desabilitado, "Em breve") → seta `Router.selected_map_id` → `PREPARATION`; `%BackButton` |
-| `PREPARATION` | `src/ui/preparation/preparation.tscn` | systems | `Contract_<index>` (0-based; trancado = desabilitado), `%WeaponSlot0`, `%WeaponSlot1`, `%DogOption` (OptionButton), `Item_<id>` (CheckButton), `%StartHuntButton` → `Router.start_hunt(Profile.build_hunt_request(...))`; `%ShopButton`; `%BackButton` → `MAP_SELECT` |
+| `PREPARATION` | `src/ui/preparation/preparation.tscn` | systems | `Contract_<index>` (0-based; trancado = desabilitado), `%WeaponSlot0`, `%WeaponSlot1`, `%DogOption` (OptionButton), `Item_<id>` (CheckButton), `ItemKey_<id>` e `%DogKeyLabel` (teclas, 1.3, abaixo), `%StartHuntButton` → `Router.start_hunt(Profile.build_hunt_request(...))`; `%ShopButton`; `%BackButton` → `MAP_SELECT` |
 | `HUNT` | `src/hunt/hunt.tscn` | B | — |
 | `RESULT` | `src/ui/result/result.tscn` | systems | lê `Router.last_result`: resultado, lista de abates (tipo, kg, R$), bônus, total, lavoura %. `%ContinueButton` → `SHOP` (em sala: `LOBBY`); `%RetryButton` → `PREPARATION`; `%MenuButton` → `MAIN_MENU` |
 | `SHOP` | `src/ui/shop/shop.tscn` | systems | abas Armas/Equipamentos/Cães; `Buy_<id>`; `%NextHuntButton` → `PREPARATION`; `%BackButton` → `MAIN_MENU` |
@@ -1949,6 +2163,13 @@ em rede. `LoadoutPanel` (`src/ui/common/loadout_panel.gd`, `class_name LoadoutPa
 `VBoxContainer`): `setup(root: Control, dog_locked_text: String = "")`, sinal `changed`; usado pela Preparação
 (mesmos nós `%`) e pelo lobby.
 
+Teclas na tela de equipamento (1.3, `LoadoutPanel`, logo vale na Preparação e no lobby): cada `Item_<id>` de item
+com ação (`InputSetup.get_item_action(id) != &""`) fica numa `HBoxContainer` com um `Label` `ItemKey_<id>`
+(variação `BadgeLabel`, texto `InputSetup.get_key_label(ação)`, ex. "Q") à direita do `CheckButton`; passivos não
+têm etiqueta. Ao lado de `%DogOption`, `%DogKeyLabel` (`BadgeLabel`, `get_key_label(&"dog_command")` = "E"),
+visível só com cão escolhido. As etiquetas ficam ocultas com `InputSetup.is_touch_mode()` e acompanham
+`GameEvents.touch_mode_changed`. Os nomes `Item_<id>` e `%DogOption` não mudam (o `flow_test` os usa).
+
 Cada peer troca para `HUNT` ao receber `Net.room_state_changed(LOADING)`. Na tela de resultado em sala,
 "Voltar à sala" → `LOBBY` e `%MenuButton` chama `Net.leave_room()`.
 
@@ -1959,7 +2180,8 @@ lobby entra na sala sozinho com o nome salvo.
 Espectador (F6): `SpectatorCamera` (`src/player/spectator_camera.gd`, extends `Camera3D`; `begin`,
 `get_target_slot`, `get_candidates`, `switch_target`, `is_active`), criada pelo `Player` ao morrer se houver
 aliado vivo; ela emite `spectate_changed`. `Player.get_spectator()`, `Player.is_spectating()`. Troca de alvo
-por `fire`, `item_next` ou `weapon_swap`; respeita só o terreno. Minimapa: `ally_yaws`, `ally_down`,
+por `fire`, `spectate_next` (F; era `item_next` até 1.2) ou `weapon_swap` (`SpectatorCamera.SWITCH_ACTIONS`);
+respeita só o terreno. Minimapa: `ally_yaws`, `ally_down`,
 `center_color`, `is_in_view()` (arrays paralelos a `allies`/`ally_colors`); aliado vivo = seta na cor do slot,
 caído = X, fora do alcance = seta na borda. Bússola: losango na cor do slot (oco se caído). Jogador caído em
 rede pode abrir a pausa (P) para sair; no solo continua recusando. Loja aberta a partir da sala volta para o
@@ -2009,6 +2231,18 @@ Todo teste que mexe em perfil chama primeiro `Profile.set_save_path("user://test
 Servidor de salas: `bun test` em `server/` (lógica neutra em `server/rooms.js`) e `server/check.js` contra Bun
 local e produção (`wrangler dev` não funciona em Bun: o Worker é verificado publicando e rodando
 `bun check.js <url de produção>`). Detalhe em `docs/multiplayer.md` §2.2 (A7).
+
+Cobertura da frente HUD/onboarding (1.3): `check_scripts` usa a lista nova de ações (§4; falha se `use_item` ou
+`item_next` existirem), `tests/lib/contract_sigs.gd` ganha `Quickbar`, `HintDirector`, `HintBanner` (pacote A),
+os 3 métodos de onboarding do `Profile` e `get_item_action`/`get_key_label` do `InputSetup`; `unit_tests` ganha
+`tests/unit/test_onboarding.gd` (`is_onboarding_active` com `hunts_played` 2 e 3; `mark_hint_learned`
+idempotente, id inválido ignorado, não grava sozinho e entra no `save()` seguinte; `reset_progress` zera;
+`sanitize` com bloco ausente, tipo errado, ids desconhecidos e duplicados; save v2 antigo sem o bloco abre com
+`learned = []` e versão 2; validação de `game.onboarding` e de `short_name`); `net_unit` ganha o sandbox
+`hud_hints` (`src/hud/debug/hud_hints_test.tscn`, do A, com `--fixed-fps 60`); `mobile_probe.py` ganha um grupo
+de itens e passa a abrir a build com `?probe=1&hints=0` (lê `touch_buttons`/`items` do probe: tocar o drone baixa
+`items.scout_drone` em 1; tocar o kit com vida cheia não gasta; nenhum botão de item a menos de 60 px CSS de
+`LOOK_A`; os testes de Tiro, Mira e Recarregar continuam passando).
 
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
@@ -2212,6 +2446,53 @@ de resultado e é publicável (a entrada do menu é visível para todos desde a 
 | F6 — lobby completo, aliados no HUD, espectador: beta (concluída em 2026-11-14 (sessão manual com 3 aparelhos reais ainda pendente)) | "Jogar com amigos (beta)" visível para todos | systems, A, art-director, qa (Sonnet) | `flow_test` sem mudança; abrir `?sala=CODE` entra na sala sem digitar; servidor inacessível → `server_unreachable` em ≤ 9 s e "Voltar" funciona; morrer com aliado vivo mostra a câmera de espectador e "Assistindo: <Nome>"; sessão manual de 3 jogadores (PC, Android, iPhone) relatada; `mobile_probe.py` verde |
 | F7 — cães em rede (concluída em 2026-11-14) | cada jogador leva o seu cão e manda "Pega!"/"Volta!" | B, qa (Sonnet) | N6: comando do cliente muda o estado só do cão dele; sinais de cão só no HUD do dono; marcação aparece para os dois; solo sem mudança |
 | F8 — robustez móvel (contrato em `docs/multiplayer.md` §4.7; implementação pendente) | cair e voltar na mesma página sem perder a caçada | coordenação (servidor, `src/core`) e systems (`data/net.json`) primeiro; N e B (Fable) e A (Sonnet) em paralelo; qa (Sonnet) | `Net.debug_cut(5.0)` no cliente: ele volta no mesmo slot com os mesmos javalis vivos, os mesmos canteiros e o mesmo placar parcial, e a caçada termina `VICTORY` nos dois; token errado e carência estourada terminam `DISCONNECTED`; `bun test` com a reentrada; relatório de fps e banda em celular intermediário como anfitrião de 4 (lista completa em §4.7.10 de lá) |
+
+### Frente HUD/onboarding — fases 1 e 2 (contrato 1.3)
+Nada muda em `src/core/`, `project.godot`, `export_presets.cfg` nem no Pacote B ou N. Todos em Sonnet. Toda tarefa
+termina com `check_scripts`, `unit_tests`, `flow_test` e `playthrough` sem mudança de resultado (exceto o que a
+própria tarefa atualiza nos testes).
+
+| Tarefa | Dono | Arquivos | Depende de |
+|---|---|---|---|
+| HF1-A — teclas fixas, barra, botões de toque | game-developer (A) | `src/input/input_setup.gd`; `src/player/item_belt.gd`, `player.gd`, `spectator_camera.gd`, `src/player/debug/spectator_sandbox.gd` (`item_next` → `spectate_next`); `src/hud/hud.gd`, `src/hud/quickbar.gd` (novo); `src/hud/touch/touch_controls.gd` (+ `.tscn` se precisar) | — |
+| HF1-S — dados, save e Profile | game-systems | `data/game.json` (`onboarding`), `data/equipment.json` (`short_name` no arquivo real, sem mexer em outros valores); `src/systems/data_registry.gd` (validação), `save_service.gd` (`sanitize` do bloco), `profile.gd` (3 métodos, `reset_progress`) | — (paralela à HF1-A; sem arquivo em comum) |
+| HF1-AR — ícones legíveis no HUD | art-director | `assets/ui/icons/{medkit,corn_bait,scout_drone,binoculars,btn_dog}.svg` (ajuste no lugar, mesmos ids); `assets/preview/hud_icons_preview.tscn|.gd` | — (paralela) |
+| HF1-S2 — teclas na tela de equipamento | game-systems | `src/ui/common/loadout_panel.gd` | HF1-A (`InputSetup.get_item_action`/`get_key_label`) |
+| HF1-QA | qa-tester | `tests/check_scripts.gd`, `tests/lib/contract_sigs.gd`, `tests/unit/test_onboarding.gd` (novo; parte de dados/save/Profile), `tests/unit_tests.gd` (registrar), `tests/web/mobile_probe.py` | HF1-A, HF1-S, HF1-S2 |
+| HF2-A — dicas | game-developer (A) | `src/hud/hint_director.gd`, `hint_banner.gd` (novos), `src/hud/hud.gd` (criação, ligações, `?hints=0`, campo `hint` do probe), `src/hud/debug/hud_hints_test.tscn|.gd` (novos; mundo falso estendendo `HuntWorld` só no `debug/`) | HF1-A, HF1-S |
+| HF2-QA | qa-tester | `tests/net_unit.gd` (sandbox `hud_hints`, `limit_s` 60), `tests/lib/contract_sigs.gd` (`HintDirector`, `HintBanner`) | HF2-A |
+
+O A lê `short_name` com fallback para `name` (`def.get("short_name", def.get("name", ""))`), então HF1-A não
+espera HF1-S. Ordem: {HF1-A, HF1-S, HF1-AR} em paralelo → HF1-S2 → HF1-QA → HF2-A → HF2-QA → coordenação
+exporta a Web, roda `mobile_probe.py`, sobe `config/version` e publica.
+
+Critérios de aceite:
+- **HF1-A:** `ACTIONS` e `ITEM_ACTIONS` exatamente como §4; nenhuma ocorrência das ações `"use_item"`/`"item_next"`
+  (o método `ItemBelt.use_item` fica) nem de `selection_changed`/`get_selected_id`/`use_selected`/`_item_label`
+  em `src/`. No `player_sandbox` (relato
+  manual): Q, G, V e B usam cada item direto; E manda o cão; F parado não faz nada; no `spectator_sandbox`
+  (`net_unit --only=spectator`) F troca de alvo. Com loadout `[medkit, scout_drone]` + `caramelo`, a barra
+  mostra `Slot_medkit` ("Q", "x1"), `Slot_scout_drone` ("V", "x3"), `Slot_dog_command` ("E") nessa ordem; V →
+  "x2"; drone esgotado → espaço apagado; kit com vida 60 → setor cresce por 1,5 s e o espaço fica "x0" apagado; B
+  com binóculo → borda âmbar, B de novo → normal. Sem item usável e sem cão: barra invisível e nenhum botão de
+  item/cão no toque. Toque: `get_button_center(&"use_medkit") == (w − 380, h − 250)`,
+  `get_button_center(&"use_scout_drone") == (w − 476, h − 250)`, `use_item` e `item_next` sem botão. Campos
+  `items`, `busy_item`, `binoculars`, `touch_buttons` no probe. Screenshots com janela: desktop 1280×720 e toque
+  1558×720 e 960×720 (com 3 itens e cão), sem sobreposição com Tiro, Mira, Recarregar, Trocar, Agachar e joystick.
+- **HF1-S:** `Data.get_load_errors()` vazio; `short_name` em todos os 7 itens; save sem `onboarding` abre com
+  `learned = []` e versão 2; `is_onboarding_active()` true com `hunts_played` 2, false com 3;
+  `mark_hint_learned(&"medkit")` não grava sozinho e aparece no arquivo depois de `save()`.
+- **HF1-AR:** os 5 ícones legíveis a 40 px no screenshot de `hud_icons_preview` (sobre `HudPanel` e sobre o
+  círculo translúcido do toque); a loja continua bonita (screenshot do cartão).
+- **HF1-S2:** Preparação e lobby mostram "Q"/"G"/"V"/"B" ao lado dos itens usáveis possuídos e "E" ao lado do cão
+  escolhido; nada em modo toque; `flow_test` sem mudança.
+- **HF2-A:** sandbox `hud_hints` imprime `RESULT:` e cobre: abertura aparece `opening_delay_s` depois de
+  `hunt_started`; cada gatilho da tabela de §8.4 dispara com a condição e não dispara sem ela; uma dica por vez,
+  `medkit` fura a fila, `queue_max` respeitado; cada id no máximo uma vez por caçada; usar o item esconde a dica
+  na hora e chama `mark_hint_learned`; id aprendido nunca aparece; `hunts_played = 3` → `is_active() == false`
+  e nenhum sinal; texto de toque com `set_touch_override("on")`; morte e `hunt_ended` limpam tudo; em horda a
+  dica da ceva fala em celeiro. Screenshot com janela da dica do kit com o espaço piscando.
+- **HF1-QA / HF2-QA:** §12 (cobertura 1.3); `mobile_probe.py` verde com a build nova.
 
 ---
 

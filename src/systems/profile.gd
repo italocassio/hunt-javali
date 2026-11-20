@@ -12,6 +12,7 @@ var _inventory: Inventory = Inventory.new()
 var _progression: Progression = Progression.new()
 var _stats: Dictionary = {}
 var _redeemed: Array[String] = []
+var _learned_hints: Array[String] = []
 var _settings: Dictionary = SaveService.default_settings()
 var _last_applied: HuntResult = null
 var _flush_pending: bool = false
@@ -305,6 +306,26 @@ func mark_code_redeemed(code: String) -> void:
 		_redeemed.append(normalized)
 
 
+# --- Onboarding ---
+
+func is_onboarding_active() -> bool:
+	var max_hunts: int = int(Data.get_game().get("onboarding", {}).get("max_hunts", 0))
+	return int(_stats.get("hunts_played", 0)) < max_hunts
+
+
+func is_hint_learned(hint_id: StringName) -> bool:
+	return _learned_hints.has(String(hint_id))
+
+
+## Memory only: the next save() (always in apply_hunt_result) writes it.
+func mark_hint_learned(hint_id: StringName) -> void:
+	if not SaveService.is_valid_hint_id(hint_id):
+		push_warning("Profile.mark_hint_learned: invalid hint id '%s'" % hint_id)
+		return
+	if not _learned_hints.has(String(hint_id)):
+		_learned_hints.append(String(hint_id))
+
+
 # --- Settings ---
 
 func get_setting(key: String) -> Variant:
@@ -363,6 +384,7 @@ func _to_dict() -> Dictionary:
 		"progression": _progression.to_dict(),
 		"stats": _stats.duplicate(),
 		"redeemed_codes": _redeemed.duplicate(),
+		"onboarding": {"learned": _learned_hints.duplicate()},
 		"settings": _settings.duplicate(),
 	}
 	out.merge(_inventory.to_dict())
@@ -377,6 +399,9 @@ func _apply_dict(d: Dictionary) -> void:
 	_redeemed.clear()
 	for c: Variant in d["redeemed_codes"]:
 		_redeemed.append(str(c))
+	_learned_hints.clear()
+	for h: Variant in d["onboarding"]["learned"]:
+		_learned_hints.append(str(h))
 	_settings = (d["settings"] as Dictionary).duplicate()
 
 

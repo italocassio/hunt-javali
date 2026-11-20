@@ -71,6 +71,19 @@
   },
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
+  "onboarding": {
+    "max_hunts": 3,
+    "eval_interval_s": 0.25,
+    "opening_delay_s": 2.0,
+    "opening_duration_s": 6.0,
+    "hint_duration_s": 5.0,
+    "hint_gap_s": 1.5,
+    "queue_max": 3,
+    "medkit_health_below_pct": 50.0,
+    "boar_sighted_range_m": 60.0,
+    "boar_sighted_half_angle_deg": 35.0,
+    "drone_no_sighting_s": 60.0
+  },
   "coop": {
     "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],
     "extra_group_delay_s": 20.0,

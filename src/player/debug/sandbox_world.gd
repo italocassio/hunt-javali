@@ -2,7 +2,7 @@ class_name SandboxWorld
 extends HuntWorld
 ## Package A sandbox: flat 200x200 ground (layer 1), three shootable targets with HitZones and a
 ## kill counter. Stands in for the hunt so the player, weapons and HUD run without Package B.
-## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde
+## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde, --dog
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
@@ -36,6 +36,8 @@ var horde_wave_total: int = 0
 var horde_wave_remaining: int = 0
 var horde_waves_cleared: int = 0
 var horde_objective: Vector3 = HORDE_OBJECTIVE
+var dog_present: bool = false
+var dog_state: StringName = Ids.DS_FOLLOW
 var kill_log: Array[KillInfo] = []
 var hit_log: Array[HitInfo] = []
 var _targets: Dictionary = {}     # id -> {node, health, zones, last_shot, one_shot, alive}
@@ -286,6 +288,15 @@ func _kill(id: int, zone: StringName) -> void:
 
 
 # --- HuntWorld overrides ---
+## --dog fakes a dog that follows (Quickbar / touch dog slot); tests may also set dog_present / dog_state.
+func has_dog() -> bool:
+	return dog_present or _args.has("dog")
+
+
+func get_dog_state() -> StringName:
+	return dog_state
+
+
 func get_mode() -> StringName:
 	return Ids.MODE_HORDE if horde_mode else Ids.MODE_CONTRACT
 

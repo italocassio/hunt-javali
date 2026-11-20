@@ -160,6 +160,10 @@ const PROFILE_METHODS: Array[String] = [
 	# docs/horda.md section 10.1
 	"horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool) -> int",
 	"horde_bonus(stock_pct: float) -> int",
+	# docs/arquitetura.md section 6.3 (1.3): onboarding hints
+	"is_onboarding_active() -> bool",
+	"is_hint_learned(hint_id: StringName) -> bool",
+	"mark_hint_learned(hint_id: StringName) -> void",
 ]
 
 const INPUT_SETUP_METHODS: Array[String] = [
@@ -167,6 +171,9 @@ const INPUT_SETUP_METHODS: Array[String] = [
 	"is_touch_mode() -> bool",
 	"set_touch_override(mode: String) -> void",
 	"release_all_actions() -> void",
+	# docs/arquitetura.md section 4 (1.3): fixed keys per item
+	"get_item_action(item_id: StringName) -> StringName",
+	"get_key_label(action_name: StringName) -> String",
 ]
 
 const SFX_METHODS: Array[String] = [
@@ -207,7 +214,7 @@ const AUTOLOAD_ORDER: Array[String] = ["GameEvents", "Data", "Profile", "InputSe
 
 const ROUTER_PROPERTIES: Array[String] = ["selected_map_id", "selected_contract_index", "last_result"]
 const PROFILE_CONSTANTS: Array[String] = ["SAVE_VERSION", "DEFAULT_SAVE_PATH"]
-const INPUT_CONSTANTS: Array[String] = ["ACTIONS"]
+const INPUT_CONSTANTS: Array[String] = ["ACTIONS", "ITEM_ACTIONS"]
 
 ## Public classes of packages A, B and game-systems (6.8, 6.9, 6.10).
 ## name -> {path, base (script class name or native class), methods, signals, props, pkg (A, B, S or N)}
@@ -226,11 +233,37 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "WeaponHolder", "path": "res://src/weapons/weapon_holder.gd", "base": "Node3D", "pkg": "A"},
 	{"name": "Hitscan", "path": "res://src/weapons/hitscan.gd", "base": "RefCounted", "pkg": "A",
 		"methods": ["cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array) -> Dictionary"]},
-	{"name": "ItemBelt", "path": "res://src/player/item_belt.gd", "base": "Node", "pkg": "A"},
+	# docs/arquitetura.md section 8.11 (1.3): direct use by id, no selection (selection_changed/next/get_selected_id/use_selected are gone)
+	{"name": "ItemBelt", "path": "res://src/player/item_belt.gd", "base": "Node", "pkg": "A",
+		"signals": ["counts_changed()", "binoculars_changed(active: bool)", "use_started(item_id: StringName, duration_s: float)",
+			"use_finished(item_id: StringName)"],
+		"methods": ["setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void",
+			"has_item(item_id: StringName) -> bool", "get_usable_ids() -> Array[StringName]", "get_count(item_id: StringName) -> int",
+			"use_item(item_id: StringName) -> bool", "cancel_use() -> void", "is_busy() -> bool",
+			"get_busy_item() -> StringName", "get_busy_progress() -> float", "is_binoculars_active() -> bool",
+			"get_binoculars_zoom() -> float", "set_binoculars(active: bool) -> void"]},
+	# docs/arquitetura.md sections 6.8 and 8.4: the desktop item bar
+	{"name": "Quickbar", "path": "res://src/hud/quickbar.gd", "base": "HBoxContainer", "pkg": "A",
+		"methods": ["bind(items: ItemBelt) -> void", "set_dog_present(present: bool) -> void",
+			"set_dog_state(state: StringName) -> void", "flash(slot_id: StringName, on: bool) -> void",
+			"get_slot_ids() -> Array[StringName]"]},
+	# docs/arquitetura.md sections 6.8 and 8.4: the logic of the first-hunt hints (no Control) and its banner.
+	# HintDirector.OPENING (const) is not checked: the package-class check compares methods, props and signals only.
+	{"name": "HintDirector", "path": "res://src/hud/hint_director.gd", "base": "Node", "pkg": "A",
+		"signals": ["hint_shown(hint_id: StringName, text: String, slot_id: StringName)", "hint_hidden(hint_id: StringName)"],
+		"methods": ["setup(player: PlayerBase, items: ItemBelt, world: HuntWorld) -> void", "is_active() -> bool",
+			"get_current_hint() -> StringName", "get_queue() -> Array[StringName]",
+			"get_shown_this_hunt() -> Array[StringName]"]},
+	{"name": "HintBanner", "path": "res://src/hud/hint_banner.gd", "base": "PanelContainer", "pkg": "A",
+		"methods": ["show_hint(text: String) -> void", "hide_hint() -> void", "is_showing() -> bool",
+			"get_text() -> String"]},
 	{"name": "Hud", "path": "res://src/hud/hud.gd", "base": "CanvasLayer", "pkg": "A",
 		"methods": ["bind(player: PlayerBase, world: HuntWorld) -> void"]},
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
-	{"name": "TouchControls", "path": "res://src/hud/touch/touch_controls.gd", "base": "CanvasLayer", "pkg": "A"},
+	{"name": "TouchControls", "path": "res://src/hud/touch/touch_controls.gd", "base": "CanvasLayer", "pkg": "A",
+		"methods": ["bind(player: Player) -> void", "set_dog_present(present: bool) -> void",
+			"set_dog_state(state: StringName) -> void", "flash_slot(slot_id: StringName, on: bool) -> void",
+			"get_button_center(action_name: StringName) -> Vector2", "get_button_radius(action_name: StringName) -> float"]},
 	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
 	# docs/multiplayer.md section 3.3 / 3.6: an ally in the world. The PlayerBase virtuals it overrides.
 	{"name": "RemoteHunter", "path": "res://src/player/remote_hunter.gd", "base": "PlayerBase", "pkg": "A",

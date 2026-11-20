@@ -18,6 +18,11 @@ const LISTS: Dictionary = {
 	"weapons": "weapons", "equipment": "items", "dogs": "dogs",
 	"boars": "types", "maps": "maps", "gold": "packages",
 }
+const SHORT_NAME_MAX_CHARS: int = 9
+const ONBOARDING_FIELDS: Array[String] = [
+	"max_hunts", "eval_interval_s", "opening_delay_s", "opening_duration_s", "hint_duration_s", "hint_gap_s",
+	"queue_max", "medkit_health_below_pct", "boar_sighted_range_m", "boar_sighted_half_angle_deg", "drone_no_sighting_s",
+]
 
 var _raw: Dictionary = {}
 var _index: Dictionary = {}   # file key -> { id String -> Dictionary }
@@ -251,7 +256,37 @@ func _validate() -> void:
 	for pkg: Dictionary in get_gold_packages():
 		_require_fields(pkg, ["name", "price_brl", "gold"], str(pkg.get("id", "?")))
 	_require_fields(_raw["pix"], ["gateway", "pix_key", "merchant_name", "merchant_city", "redeem_secret"], "pix_config")
+	_validate_onboarding()
 	_validate_horde()
+
+
+# Onboarding hints (docs/arquitetura.md §9.1) and the short_name of every equipment item (§9.3).
+func _validate_onboarding() -> void:
+	for entry: Variant in _raw["equipment"].get("items", []):
+		if not (entry is Dictionary):
+			continue
+		var short_name: Variant = entry.get("short_name")
+		if not (short_name is String) or (short_name as String).strip_edges() == "":
+			_errors.append("Data: equipment '%s' lacks short_name" % entry.get("id", "?"))
+		elif (short_name as String).length() > SHORT_NAME_MAX_CHARS:
+			_errors.append("Data: equipment '%s' short_name is longer than %d characters" % [entry.get("id", "?"), SHORT_NAME_MAX_CHARS])
+	var block: Variant = _raw["game"].get("onboarding")
+	if not (block is Dictionary):
+		_errors.append("Data: game.json lacks 'onboarding'")
+		return
+	var ob: Dictionary = block
+	for f: String in ONBOARDING_FIELDS:
+		var v: Variant = ob.get(f)
+		if not (v is int or v is float) or not is_finite(float(v)) or float(v) <= 0.0:
+			_errors.append("Data: game.onboarding.%s must be a number > 0" % f)
+	for f: String in ["max_hunts", "queue_max"]:
+		var v: Variant = ob.get(f)
+		if (v is int or v is float) and float(v) != floorf(float(v)):
+			_errors.append("Data: game.onboarding.%s must be an integer" % f)
+	if float(ob.get("boar_sighted_half_angle_deg", 0.0)) > 90.0:
+		_errors.append("Data: game.onboarding.boar_sighted_half_angle_deg must be <= 90")
+	if float(ob.get("medkit_health_below_pct", 0.0)) > 100.0:
+		_errors.append("Data: game.onboarding.medkit_health_below_pct must be <= 100")
 
 
 # Horde mode rules (docs/horda.md §3.1). Skipped when the file could not be read (error already recorded).

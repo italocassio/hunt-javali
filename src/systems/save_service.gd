@@ -7,6 +7,7 @@ const FORMAT_NAME: String = "cacada-ao-javali-save"
 const CURRENT_VERSION: int = 2
 const DRONE_ID: String = "scout_drone"   # item granted by the v1 -> v2 migration (amount comes from economy.start_items)
 const MAX_CODES: int = 500
+const DOG_COMMAND_HINT: StringName = &"dog_command"
 
 const DEFAULT_SETTINGS: Dictionary = {
 	"mouse_sensitivity": 1.0,
@@ -178,6 +179,16 @@ static func sanitize(data: Dictionary) -> Dictionary:
 				codes.append(c)
 	out["redeemed_codes"] = codes
 
+	# Onboarding (no version bump: a missing or malformed block becomes an empty list)
+	var learned: Array = []
+	var onboarding_in: Dictionary = _dict(data.get("onboarding"))
+	var raw_learned: Variant = onboarding_in.get("learned")
+	if raw_learned is Array:
+		for h: Variant in raw_learned:
+			if h is String and is_valid_hint_id(StringName(h)) and not learned.has(h):
+				learned.append(h)
+	out["onboarding"] = {"learned": learned}
+
 	# Settings
 	var settings_in: Dictionary = _dict(data.get("settings"))
 	var settings: Dictionary = {}
@@ -185,6 +196,16 @@ static func sanitize(data: Dictionary) -> Dictionary:
 		settings[key] = sanitize_setting(key, settings_in.get(key))
 	out["settings"] = settings
 	return out
+
+
+## Valid onboarding hint id: an active/consumable equipment id, or "dog_command".
+static func is_valid_hint_id(hint_id: StringName) -> bool:
+	if hint_id == DOG_COMMAND_HINT:
+		return true
+	if not Data.get_equipment_ids().has(hint_id):   # unknown ids are ignored quietly (no Data error)
+		return false
+	var kind: String = str(Data.get_equipment(hint_id).get("kind", ""))
+	return kind == "active" or kind == "consumable"
 
 
 ## A fresh profile built from data/game.json (economy.*).

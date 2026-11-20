@@ -8,7 +8,7 @@ extends Camera3D
 ## Solo never reaches this node: the Player only creates it when an ally is standing at the moment of the fall.
 ## Emits GameEvents.spectate_changed(slot) on start and on every change of target, -1 when it lets go.
 
-const SWITCH_ACTIONS: Array[StringName] = [&"fire", &"item_next", &"weapon_swap"]
+const SWITCH_ACTIONS: Array[StringName] = [&"fire", &"spectate_next", &"weapon_swap"]
 const POSE_RATE: float = 9.0              # 1/s of the exponential catch-up of position and angles
 const PITCH_FOLLOW: float = 0.5           # fraction of the ally's look pitch the camera copies
 const MAX_PITCH_DEG: float = 20.0         # keeps the followed ally inside the frame

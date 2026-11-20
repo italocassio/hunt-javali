@@ -2,7 +2,8 @@ class_name SandboxWorld
 extends HuntWorld
 ## Package A sandbox: flat 200x200 ground (layer 1), three shootable targets with HitZones and a
 ## kill counter. Stands in for the hunt so the player, weapons and HUD run without Package B.
-## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde, --dog
+## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde, --dog,
+## --dog_state=<Ids.DS_*>, --dog_hp=<0-100>, --dog_breed=<Ids.D_*>
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
@@ -14,6 +15,7 @@ const HORDE_WAVE_COUNT: int = 3
 const HORDE_FIRST_DELAY_S: float = 12.0
 const HORDE_INTERMISSION_S: float = 6.0
 const HORDE_OBJECTIVE: Vector3 = Vector3(0.0, 0.0, -40.0)
+const DEMO_DOG_POSITION: Vector3 = Vector3(-4.0, 0.0, -6.0)
 const ZONE_BOXES: Dictionary = {
 	"head": [Vector3(0.0, 0.75, -0.55), Vector3(0.3, 0.3, 0.3)],
 	"vital": [Vector3(0.0, 0.6, -0.2), Vector3(0.45, 0.4, 0.5)],
@@ -38,6 +40,11 @@ var horde_waves_cleared: int = 0
 var horde_objective: Vector3 = HORDE_OBJECTIVE
 var dog_present: bool = false
 var dog_state: StringName = Ids.DS_FOLLOW
+## Fake dog for the HUD card, compass and minimap (INF = not placed). --dog_state=seek places the dog and
+## aims it at target 1; --dog_hp=N sets its health.
+var dog_position: Vector3 = Vector3.INF
+var dog_target_position: Vector3 = Vector3.INF
+var dog_health_pct: float = 100.0
 var kill_log: Array[KillInfo] = []
 var hit_log: Array[HitInfo] = []
 var _targets: Dictionary = {}     # id -> {node, health, zones, last_shot, one_shot, alive}
@@ -52,6 +59,12 @@ func _ready() -> void:
 	if _args.has("horde"):
 		horde_mode = true
 	_multipliers = Data.get_boar_rules().get("zone_multipliers", {})
+	if _args.has("dog_state"):
+		dog_state = StringName(String(_args["dog_state"]))
+		dog_position = DEMO_DOG_POSITION
+		dog_target_position = Vector3(0.0, 0.0, -TARGET_DISTANCES_M[1]) if dog_state != Ids.DS_FOLLOW else Vector3.INF
+	if _args.has("dog_hp"):
+		dog_health_pct = float(_args["dog_hp"])
 	_build_ground()
 	add_child(MapEnvironmentBase.create_fallback())
 	_build_targets()
@@ -113,6 +126,8 @@ func _request() -> HuntRequest:
 	r.weapon_ids = [Ids.W_CARBINE_22, Ids.W_SHOTGUN_12]
 	r.item_ids = [Ids.I_BINOCULARS, Ids.I_LEATHER_VEST, Ids.I_MEDKIT, Ids.I_CORN_BAIT]
 	r.item_counts = {Ids.I_MEDKIT: 2, Ids.I_CORN_BAIT: 1}
+	if has_dog():
+		r.dog_id = StringName(String(_args.get("dog_breed", Ids.D_CARAMELO)))   # --dog_breed=foxhound|dogo
 	if _args.has("weapons"):
 		r.weapon_ids.clear()
 		for id: String in String(_args["weapons"]).split(",", false):
@@ -295,6 +310,18 @@ func has_dog() -> bool:
 
 func get_dog_state() -> StringName:
 	return dog_state
+
+
+func get_dog_position() -> Vector3:
+	return dog_position
+
+
+func get_dog_health_pct() -> float:
+	return dog_health_pct
+
+
+func get_dog_target_position() -> Vector3:
+	return dog_target_position
 
 
 func get_mode() -> StringName:

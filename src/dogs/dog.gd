@@ -129,6 +129,11 @@ func get_xz() -> Vector2:
 	return Vector2(position.x, position.z)
 
 
+## Where the boar this dog is after stands now; Vector3.INF without a living target (follow, retreat, return).
+func get_target_position() -> Vector3:
+	return _target.global_position if _target_alive() else Vector3.INF
+
+
 func get_yaw() -> float:
 	return _yaw
 

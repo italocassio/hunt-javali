@@ -15,6 +15,10 @@ const COLOR_OBJECTIVE: Color = Color("#F2C12E")
 const OBJECTIVE_PX: float = 20.0
 const FONT_SIZE: int = 20
 const ALLY_HALF_PX: float = 6.0
+const TARGET_RING_RADIUS_PX: float = 10.0
+const TARGET_RING_WIDTH_PX: float = 2.5
+const TARGET_RING_OUTLINE_PX: float = 2.0
+const TARGET_RING_POINTS: int = 24
 const ALLY_FALLEN_WIDTH_PX: float = 3.0
 const ALLY_FALLEN_ALPHA: float = 0.85
 const CARDINALS: Dictionary = {0: "N", 90: "L", 180: "S", 270: "O"}
@@ -101,7 +105,7 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> v
 	rel = clampf(rel, -VISIBLE_SPAN_DEG * 0.5, VISIBLE_SPAN_DEG * 0.5)
 	var x: float = w * 0.5 + rel / VISIBLE_SPAN_DEG * w
 	var kind: StringName = mark["kind"]
-	var color: Color = COLOR_DOG if kind == &"dog" else COLOR_BOAR
+	var color: Color = COLOR_DOG if kind == &"dog" or kind == &"dog_target" else COLOR_BOAR
 	if kind == &"ally":
 		color = mark.get("color", COLOR_TEXT)
 	if at_edge:
@@ -112,6 +116,11 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> v
 	elif kind == &"dog":
 		draw_circle(Vector2(x, cy), 6.0, Color.BLACK)
 		draw_circle(Vector2(x, cy), 4.5, color)
+	elif kind == &"dog_target":
+		# What the dog is after: a ring in the dog colour (it also wraps the boar triangle when the boar is marked).
+		draw_arc(Vector2(x, cy), TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, Color.BLACK,
+			TARGET_RING_WIDTH_PX + TARGET_RING_OUTLINE_PX * 2.0)
+		draw_arc(Vector2(x, cy), TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, color, TARGET_RING_WIDTH_PX)
 	else:
 		draw_colored_polygon(PackedVector2Array([Vector2(x - 8.0, cy + 7.0), Vector2(x + 8.0, cy + 7.0),
 			Vector2(x, cy - 8.0)]), Color.BLACK)
@@ -119,7 +128,7 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float, h: float) -> v
 			Vector2(x, cy - 5.5)]), color)
 
 
-## Ally in the slot colour: a diamond (boars are triangles, the dog a dot). A fallen one is hollow and dimmed.
+## Ally in the slot colour: a diamond (boars are triangles, the dog a dot, the dog's target a ring). A fallen one is hollow and dimmed.
 func _draw_ally_marker(at: Vector2, color: Color, down: bool) -> void:
 	var outer: PackedVector2Array = PackedVector2Array([at + Vector2(0.0, -ALLY_HALF_PX - 2.0),
 		at + Vector2(ALLY_HALF_PX + 2.0, 0.0), at + Vector2(0.0, ALLY_HALF_PX + 2.0), at + Vector2(-ALLY_HALF_PX - 2.0, 0.0)])

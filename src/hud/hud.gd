@@ -61,10 +61,6 @@ const COLOR_WARN: Color = Color("#F2C12E")
 const COLOR_DANGER: Color = Color("#D9452B")
 const COLOR_PANEL: Color = Color(0.12, 0.10, 0.086, 0.72)
 const COLOR_BAR_BG: Color = Color(0.0, 0.0, 0.0, 0.55)
-const DOG_STATE_TEXT: Dictionary = {
-	"follow": "Seguindo", "seek": "Procurando", "point": "Apontando", "bay": "Acuando",
-	"hold": "Segurando", "retreat": "Ferido", "return": "Voltando",
-}
 
 var _player: Player = null
 var _world: HuntWorld = null
@@ -133,8 +129,8 @@ var _count_label: Label = null
 var _wave_label: Label = null
 var _wave_banner: Label = null
 var _dog_panel: PanelContainer = null
-var _dog_label: Label = null
-var _dog_bar: ProgressBar = ProgressBar.new()
+var _dog_card: DogCard = DogCard.new()
+var _dog_breed: StringName = &""      # breed the card shows (from the hunt request)
 var _weapon_label: Label = null
 var _ammo_label: Label = null
 var _reload_bar: ProgressBar = ProgressBar.new()
@@ -363,13 +359,8 @@ func _build_top_right() -> void:
 	_wave_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_wave_label.visible = false
 	box.add_child(_wave_label)
-	var inner: VBoxContainer = VBoxContainer.new()
-	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_dog_label = _label("Cão", 18)
-	inner.add_child(_dog_label)
-	_style_bar(_dog_bar, &"HealthBar", 10.0, 150.0)
-	inner.add_child(_dog_bar)
-	_dog_panel = _panel(inner, 8)
+	_dog_card.name = "DogCard"
+	_dog_panel = _panel(_dog_card, 8)
 	_dog_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_dog_panel.visible = false
 	box.add_child(_dog_panel)
@@ -502,6 +493,7 @@ func _apply_touch_layout(is_touch: bool) -> void:
 	if _bottomright_margin != null:
 		_bottomright_margin.add_theme_constant_override("margin_right",
 			TOUCH_BOTTOM_RIGHT_MARGIN_PX if is_touch else MARGIN_PX)
+	_dog_card.set_touch(is_touch)
 	if _spectate_hint != null:
 		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS % InputSetup.get_key_label(&"spectate_next")
 
@@ -673,17 +665,27 @@ func _poll_world() -> void:
 	_sync_dog_slots()
 	if dog_on and not _dog_panel.visible:
 		_dog_panel.visible = true
-		_dog_bar.value = _world.get_dog_health_pct()
+		_on_dog_health(_world.get_dog_health_pct())
 		_on_dog_state(_world.get_dog_state())
 	var dog_pos: Vector3 = _world.get_dog_position() if dog_on else Vector3.INF
 	if dog_pos.is_finite():
 		_marks.append({"pos": dog_pos, "kind": &"dog"})
 	var request: HuntRequest = _player.get_request()
+	if request != null and request.dog_id != _dog_breed:
+		_dog_breed = request.dog_id
+		_dog_card.set_breed(_dog_breed)
+	# What the dog is after (not while it follows): a ring on the compass and on the minimap.
+	var dog_target: Vector3 = Vector3.INF
+	if dog_on and _world.get_dog_state() != Ids.DS_FOLLOW:
+		dog_target = _world.get_dog_target_position()
+	if dog_target.is_finite():
+		_marks.append({"pos": dog_target, "kind": &"dog_target"})
 	if request != null and request.dog_id == Ids.D_CARAMELO and dog_on:
 		var nearest: Vector3 = _world.get_nearest_boar_position(_player.global_position)
 		if nearest.is_finite():
 			_marks.append({"pos": nearest, "kind": &"boar"})
 	_minimap.dog_position = dog_pos
+	_minimap.dog_target = dog_target
 	_minimap.marked = _marked_points
 	_revealed.resize(0)
 	if _reveal_left > 0.0:
@@ -913,13 +915,11 @@ func _on_dog_state(state: StringName) -> void:
 	_quickbar.set_dog_state(state)
 	_touch.set_dog_state(state)
 	_dog_panel.visible = true
-	var name_text: String = String(DOG_STATE_TEXT.get(String(state), String(state)))
-	_dog_label.text = "Cão: " + name_text
+	_dog_card.set_state(state)
 
 
 func _on_dog_health(pct: float) -> void:
-	_dog_bar.value = pct
-	_dog_bar.modulate = COLOR_GOOD if pct > 50.0 else (COLOR_WARN if pct > 30.0 else COLOR_DANGER)
+	_dog_card.set_health_pct(pct)
 
 
 func _on_dog_marked(position: Vector3, duration_s: float) -> void:

@@ -23,10 +23,16 @@ const ALLY_FALLEN_ALPHA: float = 0.7
 const ALLY_EDGE_MARGIN_PX: float = 9.0
 const ALLY_EDGE_ARROW_PX: float = 8.0
 const ALLY_EDGE_OUTLINE_PX: float = 2.0
+const TARGET_RING_RADIUS_PX: float = 8.0
+const TARGET_RING_WIDTH_PX: float = 2.0
+const TARGET_RING_OUTLINE_PX: float = 1.5
+const TARGET_RING_POINTS: int = 24
 
 var map_rect: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0)
 var crop_rects: Array[Rect2] = []
 var dog_position: Vector3 = Vector3.INF
+## What the dog is after (docs §8.4): a ring in the dog colour; Vector3.INF = nothing (the dog follows).
+var dog_target: Vector3 = Vector3.INF
 var marked: PackedVector3Array = PackedVector3Array()
 var revealed: PackedVector3Array = PackedVector3Array()
 var baits: PackedVector3Array = PackedVector3Array()
@@ -84,6 +90,8 @@ func _draw() -> void:
 		_dot(p, COLOR_BOAR, 4.5)
 	for p: Vector3 in revealed:
 		_dot(p, COLOR_BOAR, 4.5)
+	if dog_target.is_finite():
+		_ring(dog_target, COLOR_DOG)
 	if dog_position.is_finite():
 		_dot(dog_position, COLOR_DOG, 4.5)
 	for i: int in allies.size():
@@ -111,6 +119,16 @@ func _dot(world: Vector3, color: Color, radius: float) -> void:
 	p = Vector2(clampf(p.x, margin, size.x - margin), clampf(p.y, margin, size.y - margin))
 	draw_circle(p, radius + 1.5, Color.BLACK)
 	draw_circle(p, radius, color)
+
+
+## Hollow ring that sticks to the frame when out of view, like _dot.
+func _ring(world: Vector3, color: Color) -> void:
+	var p: Vector2 = _to_map(world.x, world.z)
+	var margin: float = TARGET_RING_RADIUS_PX + TARGET_RING_OUTLINE_PX + 1.0
+	p = Vector2(clampf(p.x, margin, size.x - margin), clampf(p.y, margin, size.y - margin))
+	draw_arc(p, TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, Color.BLACK,
+		TARGET_RING_WIDTH_PX + TARGET_RING_OUTLINE_PX * 2.0)
+	draw_arc(p, TARGET_RING_RADIUS_PX, 0.0, TAU, TARGET_RING_POINTS, color, TARGET_RING_WIDTH_PX)
 
 
 ## True when the world point falls inside the frame (outside it an ally is drawn as an edge arrow).

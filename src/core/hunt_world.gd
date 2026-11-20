@@ -86,6 +86,10 @@ func get_dog_health_pct() -> float:
 	return 0.0
 
 
+func get_dog_target_position() -> Vector3:    # the living boar the local dog is after; INF = none (also on a network client)
+	return Vector3.INF
+
+
 func get_player() -> PlayerBase:
 	return null
 

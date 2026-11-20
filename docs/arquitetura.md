@@ -148,6 +148,7 @@ hunt-javali/
 │   │   ├── quickbar.gd           class Quickbar (barra de itens, §8.4)
 │   │   ├── hint_director.gd      class HintDirector (gatilhos das dicas, sem UI, §8.4)
 │   │   ├── hint_banner.gd        class HintBanner (faixa da dica, §8.4)
+│   │   ├── dog_card.gd           class DogCard (cartão do cão, §8.4)
 │   │   ├── debug/                (sandboxes do HUD; hud_hints_test.tscn|.gd, §14)
 │   │   └── touch/
 │   ├── hunt/                     game-developer Pacote B
@@ -595,6 +596,7 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `Quickbar` | `src/hud/quickbar.gd` | HBoxContainer | barra de itens do desktop (§8.4). `const DOG_SLOT: StringName = &"dog_command"`; `bind(items: ItemBelt) -> void` (cria `Slot_<item_id>` para cada `items.get_usable_ids()`, na ordem; conecta `counts_changed`, `binoculars_changed`, `use_started`, `use_finished`); `set_dog_present(present: bool) -> void` (cria/remove `Slot_dog_command`, sempre o último); `set_dog_state(state: StringName) -> void` (espaço do cão apagado em `Ids.DS_RETREAT`); `flash(slot_id: StringName, on: bool) -> void` (pisca a borda até `flash(id, false)`; id inexistente = nada); `get_slot_ids() -> Array[StringName]` (ordem da tela) |
 | `HintDirector` | `src/hud/hint_director.gd` | Node | lógica das dicas, **sem nenhum `Control`** (§8.4). `signal hint_shown(hint_id: StringName, text: String, slot_id: StringName)` (`slot_id` = `&""` na abertura); `signal hint_hidden(hint_id: StringName)`; `const OPENING: StringName = &"opening"`; `setup(player: PlayerBase, items: ItemBelt, world: HuntWorld) -> void` (lê `Profile.is_onboarding_active()` e `game.onboarding` uma vez; inativo = não conecta nada e `set_process(false)`); `is_active() -> bool`; `get_current_hint() -> StringName` (`&""` = nenhuma); `get_queue() -> Array[StringName]` (cópia, tests); `get_shown_this_hunt() -> Array[StringName]` (cópia, tests) |
 | `HintBanner` | `src/hud/hint_banner.gd` | PanelContainer | faixa da dica (§8.4). `show_hint(text: String) -> void`, `hide_hint() -> void`, `is_showing() -> bool`, `get_text() -> String`. Não tem relógio: quem decide quando some é o `HintDirector` |
+| `DogCard` | `src/hud/dog_card.gd` | HBoxContainer | cartão do cão do HUD (§8.4, 1.3, jogo 0.8.1); só vista, quem o alimenta é o `Hud`. `set_breed(dog_id: StringName) -> void` (retrato `ScenePaths.icon(dog_id)` e nome de `Data.get_dog(dog_id).name`; id vazio/desconhecido = cartão genérico "Cão" sem retrato), `set_state(state: StringName) -> void`, `set_health_pct(pct: float) -> void`, `set_touch(touch: bool) -> void`, `get_state_text() -> String`, `get_action_text() -> String`, `get_breed_text() -> String` (os três últimos para tests). Filhos: `Portrait`, `Info/Name`, `Info/State`, `Info/HealthBar`, `Info/Action` |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
 | `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
@@ -636,7 +638,7 @@ O `Player` instancia `ScenePaths.HUD` como filho em `setup()` e chama `hud.bind(
 | `Steering` | `src/boars/steering.gd` | RefCounted (static) | seek/flee/separação/evitação |
 | `Boar` | `src/boars/boar.gd` (cena `src/boars/boar.tscn`) | Node3D | FSM do javali |
 | `BoarHerd` | `src/boars/boar_herd.gd` | RefCounted | líder, alerta compartilhado |
-| `Dog` | `src/dogs/dog.gd` (cena `src/dogs/dog.tscn`) | Node3D | FSM do cão; `setup(p_breed_id: StringName, world: HuntWorld, spawn_position: Vector3, p_owner_slot: int = 0)`, `command()` público |
+| `Dog` | `src/dogs/dog.gd` (cena `src/dogs/dog.tscn`) | Node3D | FSM do cão; `setup(p_breed_id: StringName, world: HuntWorld, spawn_position: Vector3, p_owner_slot: int = 0)`, `command()` público; `get_target_position() -> Vector3` (1.3, jogo 0.8.1: onde está o javali vivo que o cão persegue; `Vector3.INF` sem alvo vivo, isto é, em `follow`, `retreat` e `return`) |
 
 Alterações de assinatura existentes por causa da rede: `MapRoot.build_flora(density: float, sync_layout: bool
 = false)`; `CropManager` ganha `apply_eaten(indices: PackedInt32Array)`, `set_replicated_health(pct: float)` e
@@ -1179,9 +1181,9 @@ Queda de dano: `d ≤ falloff_start_m` → 1; `d ≥ falloff_end_m` → `min_dam
   `ItemBelt` (§8.11), sem polling, exceto o preenchimento do uso em andamento (`get_busy_progress`, só enquanto
   `is_busy()`).
 - Do mundo via `HuntWorld` (polling a 10 Hz, sem alocar por frame além de um `PackedVector3Array`):
-  minimapa (`get_map_rect`, `get_crop_rects`, `get_dog_position`, `get_alive_boar_ids` +
+  minimapa (`get_map_rect`, `get_crop_rects`, `get_dog_position`, `get_dog_target_position`, `get_alive_boar_ids` +
   `get_boar_position` **só** durante revelação do drone), bússola (`get_nearest_boar_position` quando o cão
-  é `caramelo`, marcações do cão).
+  é `caramelo`, marcações do cão, `get_dog_position` e `get_dog_target_position`).
 - Por eventos (§5): contagem, lavoura, aviso de lavoura, abates, hitmarker, estado/vida do cão, mensagens.
 - Ao `bind`, o HUD lê o estado inicial de `world` (`get_crop_health_pct`, `get_boars_killed`,
   `get_boars_total`, `has_dog`) para não depender da ordem dos sinais.
@@ -1192,8 +1194,8 @@ do cão e do javali marcado) com barra "Lavoura 87%" abaixo e aviso "Javalis na 
 minimapa 180×180 e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
 R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita munição "5 | 30" e nome da arma (a linha de item
 "Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro a barra de itens (só
-desktop, abaixo); faixa de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); estado do cão
-abaixo do minimapa.
+desktop, abaixo); faixa de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); cartão do cão
+abaixo do minimapa (abaixo).
 Toque (CanvasLayer 11, visível só em modo toque): joystick fixo à esquerda, arrastar fora dos botões para olhar
 (por índice de toque), botões desenhados pelo `TouchControls` que apertam a ação: Tiro, Mira, Recarregar,
 Trocar, Agachar, Pausa (posições de hoje, `TouchControls.BUTTONS`), o botão do cão e um botão por item
@@ -1244,6 +1246,29 @@ dos botões de item daí, em vez de constantes. Na Web, `?hints=0` na URL (lido 
 `?probe=1`) deixa o `HintDirector` inativo: o `mobile_probe.py` abre com `?probe=1&hints=0` para que nenhuma dica
 apareça no meio dos diffs de pixel (a faixa da dica cruza a área do diff da mira). A lógica das dicas é testada
 pelo sandbox `hud_hints` (§12), não pelo probe.
+
+**Cartão do cão (1.3, jogo 0.8.1)** — `DogCard` (§6.8) dentro de um `HudPanel` (`Hud/Root/TopRight`), no lugar do
+antigo "Cão: <estado>", abaixo da contagem de javalis; `visible` só enquanto `world.has_dog()` (o `Hud` liga no
+polling de 10 Hz, como antes). Conteúdo, ao lado do retrato de 40 px (`assets/ui/icons/<dog_id>.svg`, `dog_id` do
+`HuntRequest`): nome da raça (`data/dogs.json`, 16 px), estado em cor (18 px), barra de vida (a de antes: verde > 50%,
+âmbar > 30%, vermelha abaixo) e a linha da próxima ação (16 px):
+
+| Estado (`Ids.DS_*`) | Texto do estado | Cor do estado | Linha de ação |
+|---|---|---|---|
+| `follow` | "Seguindo" | neutra `#F4EFE6` | "E: Pega!" |
+| `seek` | "Procurando" | neutra | "E: Volta!" |
+| `point` / `bay` / `hold` | "Apontando" / "Acuando" / "Segurando" | destaque `#F2C12E` | "E: Volta!" |
+| `return` | "Voltando" | neutra | "E: Volta!" |
+| `retreat` | "Ferido" | perigo `#D9452B` | "Ferido: voltando" (sem tecla, alfa 0,55) |
+
+A tecla vem de `InputSetup.get_key_label(&"dog_command")` (hoje "E"). Em modo toque (`InputSetup.is_touch_mode()`,
+`touch_mode_changed`) "E:" vira "Botão Cão:" e a linha do nome da raça some, para o cartão terminar acima do botão
+Cão do toque. Textos e cores são constantes de `dog_card.gd`.
+**Alvo do cão** (só quando o estado não é `follow`): a cada polling o `Hud` lê `world.get_dog_target_position()`; se
+finito, empurra a marca `{pos, kind: &"dog_target"}` na bússola (anel de raio 10 px na cor do cão `#F2C12E`, com
+contorno preto; circunda o triângulo do javali quando ele está marcado; preso à borda a 60% de alfa quando fora da
+faixa, como as outras marcas) e escreve `minimap.dog_target` (anel de raio 8 px na cor do cão; preso à borda do
+minimapa fora da vista). Sem alvo, `Vector3.INF` e nada é desenhado.
 
 **Dicas das primeiras caçadas (Fase 2)** — lógica em `HintDirector`, texto em `HintBanner`, piscar na
 `Quickbar` / `TouchControls`. O `Hud` cria os três em `_ready`, chama `director.setup(player, items, world)` em
@@ -1410,6 +1435,12 @@ caso contrário → `return` + `CMD_RECALL` + "Volta!". Caramelo também aliment
 HUD (1.3, A): o espaço do cão na barra e o botão Cão do toque existem enquanto `has_dog()` (o `Hud` chama
 `set_dog_present` no polling de 10 Hz) e repassam `dog_state_changed` a `set_dog_state` (apagado em `retreat`).
 A tecla E (`dog_command`) aparece na barra; nada muda no B.
+Cartão e alvo do cão (1.3, jogo 0.8.1): `Dog.get_target_position() -> Vector3` devolve onde está o javali que o cão
+persegue (`Vector3.INF` sem alvo vivo). `HuntWorld.get_dog_target_position() -> Vector3` (virtual, `Vector3.INF`
+por padrão) repassa o do cão local no `HuntController`; o `Hud` o usa na bússola e no minimapa (§8.4) enquanto o
+estado do cão não é `follow`. **Limitação:** o cliente de rede só tem o `DogPuppet`, que não conhece o alvo, então
+`get_dog_target_position()` devolve `Vector3.INF` e o anel não aparece nele (o cartão funciona igual: estado e vida
+já viajam no snapshot). Replicar o alvo exigiria um campo novo no registro `DOG` do snapshot e fica fora desta fase.
 
 **Em rede (F7; detalhe em `docs/multiplayer.md` §6.5).** O anfitrião simula um `Dog` por slot com cão
 (`owner_slot`; raça do roster, `NetPeerInfo.dog_id`); o cliente só tem `DogPuppet` (réplica interpolada, seção
@@ -2460,6 +2491,8 @@ própria tarefa atualiza nos testes).
 | HF1-S2 — teclas na tela de equipamento | game-systems | `src/ui/common/loadout_panel.gd` | HF1-A (`InputSetup.get_item_action`/`get_key_label`) |
 | HF1-QA | qa-tester | `tests/check_scripts.gd`, `tests/lib/contract_sigs.gd`, `tests/unit/test_onboarding.gd` (novo; parte de dados/save/Profile), `tests/unit_tests.gd` (registrar), `tests/web/mobile_probe.py` | HF1-A, HF1-S, HF1-S2 |
 | HF2-A — dicas | game-developer (A) | `src/hud/hint_director.gd`, `hint_banner.gd` (novos), `src/hud/hud.gd` (criação, ligações, `?hints=0`, campo `hint` do probe), `src/hud/debug/hud_hints_test.tscn|.gd` (novos; mundo falso estendendo `HuntWorld` só no `debug/`) | HF1-A, HF1-S |
+| HF3-A — cartão do cão e alvo do cão (1.3, jogo 0.8.1) | game-developer (A) | `src/hud/dog_card.gd` (novo), `src/hud/hud.gd` (`_dog_panel`, polling), `src/hud/compass.gd` (marca `dog_target`), `src/hud/minimap.gd` (`dog_target`); `src/core/hunt_world.gd` (só `get_dog_target_position`, e a cópia do Apêndice A); `src/dogs/dog.gd` (só `get_target_position`); `src/hunt/hunt_controller.gd` (só `get_dog_target_position`); `src/player/debug/sandbox_world.gd` (cão falso: `dog_position`, `dog_target_position`, `dog_health_pct`, args `--dog_state`, `--dog_hp`, `--dog_breed`) | HF2-A |
+| HF3-QA | qa-tester | `tests/lib/contract_sigs.gd` (`DogCard`; `Dog.get_target_position`; `HuntWorld.get_dog_target_position`; `HuntController.get_dog_target_position`), teste de unidade/sandbox do cartão (texto, cor e ação por estado, toque, sem cão, alvo na bússola/minimapa) | HF3-A |
 | HF2-QA | qa-tester | `tests/net_unit.gd` (sandbox `hud_hints`, `limit_s` 60), `tests/lib/contract_sigs.gd` (`HintDirector`, `HintBanner`) | HF2-A |
 
 O A lê `short_name` com fallback para `name` (`def.get("short_name", def.get("name", ""))`), então HF1-A não
@@ -2492,6 +2525,14 @@ Critérios de aceite:
   na hora e chama `mark_hint_learned`; id aprendido nunca aparece; `hunts_played = 3` → `is_active() == false`
   e nenhum sinal; texto de toque com `set_touch_override("on")`; morte e `hunt_ended` limpam tudo; em horda a
   dica da ceva fala em celeiro. Screenshot com janela da dica do kit com o espaço piscando.
+- **HF3-A:** `check_scripts`, `unit_tests`, `flow_test` e `playthrough` verdes. No sandbox (`player_sandbox.tscn --dog`,
+  `--dog_state=<estado>`): em `follow` o cartão mostra retrato, nome da raça, "Seguindo", barra e "E: Pega!"; nos
+  demais estados (menos `retreat`) "E: Volta!"; em `retreat` "Ferido" em `#D9452B` e "Ferido: voltando" apagado; com
+  `--touch=on` "Botão Cão: ..." no lugar de "E: ..." e o cartão não encobre o botão Cão. Sem cão o cartão fica
+  invisível. Com alvo finito e estado diferente de `follow` aparece o anel na bússola (marca `dog_target`) e no
+  minimapa (`dog_target`, preso à borda fora da vista); em `follow` nenhum dos dois. `Dog.get_target_position()`
+  é finito de `point`/`bay`/`hold` e `INF` depois de `Volta!`; `HuntWorld.get_dog_target_position()` é `INF` por
+  padrão. Screenshots com janela do cartão no teclado e no toque.
 - **HF1-QA / HF2-QA:** §12 (cobertura 1.3); `mobile_probe.py` verde com a build nova.
 
 ---
@@ -3207,6 +3248,10 @@ func get_dog_state() -> StringName:
 
 func get_dog_health_pct() -> float:
 	return 0.0
+
+
+func get_dog_target_position() -> Vector3:    # the living boar the local dog is after; INF = none (also on a network client)
+	return Vector3.INF
 
 
 func get_player() -> PlayerBase:   # the hunter of THIS machine

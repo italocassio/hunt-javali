@@ -3,6 +3,20 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.8.1 — 20/11/2026
+
+**Cartão do cão: quem é, o que está fazendo e o que a tecla faz agora.**
+
+- O painel do cão virou um cartão com o retrato da raça, o nome, o estado em cores (seguindo, procurando,
+  apontando, acuando, segurando, ferido, voltando) e a vida.
+- Uma linha mostra a próxima ação: "E: Pega!" quando o cão está do seu lado, "E: Volta!" quando está atrás de
+  um javali, e "Ferido: voltando" quando ele não obedece. No celular aparece "Botão Cão:".
+- O javali que o cão está perseguindo ganha um anel na bússola e no minimapa.
+- Limitação: em rede, só o anfitrião vê o anel do alvo do cão.
+
+Detalhes técnicos: contrato 1.3 (jogo 0.8.1) em `docs/arquitetura.md` §6.8, §8.4, §8.10 e §14 (HF3); classe
+nova `DogCard` (`src/hud/dog_card.gd`); `Dog.get_target_position()` e `HuntWorld.get_dog_target_position()`.
+
 ## 0.8.0 — 20/11/2026
 
 **Barra de equipamento e dicas para quem está começando.**

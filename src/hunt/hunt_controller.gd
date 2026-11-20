@@ -1385,6 +1385,11 @@ func get_dog_health_pct() -> float:
 	return puppet.get_health_pct() if puppet != null else 0.0
 
 
+## A network client has only the puppet, which knows no target: INF there (docs §8.10).
+func get_dog_target_position() -> Vector3:
+	return _dog.get_target_position() if _dog != null else Vector3.INF
+
+
 func _local_dog_puppet() -> DogPuppet:
 	return _replica.get_local_dog() if _replica != null else null
 

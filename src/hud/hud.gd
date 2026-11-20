@@ -7,6 +7,8 @@ const POLL_INTERVAL_S: float = 0.1
 const MARGIN_PX: int = 24
 const TOUCH_TOPLEFT_MARGIN_PX: int = 100      # leaves room for the touch pause button
 const TOUCH_BOTTOM_RIGHT_MARGIN_PX: int = 530 # leaves room for the touch buttons
+const OBJECTIVES_TOP_PX: int = 132            # below the health panel and the crop bar of the compass column
+const TOUCH_OBJECTIVES_LEFT_PX: int = 128     # right of the touch zoom slider (x 32..116)
 const ALARM_REPEAT_S: float = 3.0
 const PROBE_INTERVAL_S: float = 0.1
 const PROBE_ROLES: Array[String] = ["offline", "host", "client"]   # Net.Role order
@@ -105,6 +107,8 @@ var _wave_remaining: int = 0
 var _banner_left_s: float = 0.0
 var _crop_pct: float = 100.0
 var _objective_icon: Texture2D = null
+var _onboarding_ui: bool = false      # objectives, legend and touch labels wanted: hints on and one of the first hunts
+var _player_down: bool = false        # the local hunter fell: nothing of the onboarding UI is shown any more
 
 var _root: Control = Control.new()
 var _scope: ScopeOverlay = ScopeOverlay.new()
@@ -130,6 +134,11 @@ var _wave_label: Label = null
 var _wave_banner: Label = null
 var _dog_panel: PanelContainer = null
 var _dog_card: DogCard = DogCard.new()
+var _left_margin: MarginContainer = null
+var _objectives: ObjectivesPanel = ObjectivesPanel.new()
+var _objectives_panel: PanelContainer = null
+var _legend: ControlsLegend = ControlsLegend.new()
+var _legend_panel: PanelContainer = null
 var _dog_breed: StringName = &""      # breed the card shows (from the hunt request)
 var _weapon_label: Label = null
 var _ammo_label: Label = null
@@ -160,6 +169,7 @@ func _ready() -> void:
 	_crosshair.name = "Crosshair"
 	_root.add_child(_crosshair)
 	_build_top_left()
+	_build_objectives()
 	_build_top_center()
 	_build_top_right()
 	_build_bottom_right()
@@ -215,6 +225,7 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 		_sync_dog_slots()
 	if _hints_enabled:
 		_director.setup(_player, items, _world)   # before hunt_started: the controller binds the HUD first
+	_setup_onboarding_ui(items)
 	_update_health()
 	_poll_world()
 
@@ -227,6 +238,7 @@ func open_pause() -> void:
 
 func on_hunt_ended() -> void:
 	_ended = true
+	_refresh_onboarding_ui()
 	_touch.end_hunt()
 	_pause.set_enabled(false)
 
@@ -364,6 +376,25 @@ func _build_top_right() -> void:
 	_dog_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_dog_panel.visible = false
 	box.add_child(_dog_panel)
+	_legend.name = "ControlsLegend"
+	_legend_panel = _panel(_legend, 8)
+	_legend_panel.name = "LegendPanel"
+	_legend_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_legend_panel.visible = false
+	box.add_child(_legend_panel)
+
+
+## Objectives of the first hunts (docs §8.4), left column under the health panel. Hidden until bind() decides.
+func _build_objectives() -> void:
+	var parts: Array = _corner("Objectives", Control.SIZE_SHRINK_BEGIN, Control.SIZE_SHRINK_BEGIN)
+	_left_margin = parts[0]
+	_left_margin.add_theme_constant_override("margin_top", OBJECTIVES_TOP_PX)
+	var box: VBoxContainer = parts[1]
+	_objectives.name = "ObjectivesPanel"
+	_objectives_panel = _panel(_objectives, 8)
+	_objectives_panel.name = "ObjectivesFrame"
+	_objectives_panel.visible = false
+	box.add_child(_objectives_panel)
 
 
 func _build_bottom_right() -> void:
@@ -494,6 +525,9 @@ func _apply_touch_layout(is_touch: bool) -> void:
 		_bottomright_margin.add_theme_constant_override("margin_right",
 			TOUCH_BOTTOM_RIGHT_MARGIN_PX if is_touch else MARGIN_PX)
 	_dog_card.set_touch(is_touch)
+	if _left_margin != null:
+		_left_margin.add_theme_constant_override("margin_left", TOUCH_OBJECTIVES_LEFT_PX if is_touch else MARGIN_PX)
+		_refresh_onboarding_ui()
 	if _spectate_hint != null:
 		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS % InputSetup.get_key_label(&"spectate_next")
 
@@ -748,7 +782,8 @@ func _poll_allies() -> void:
 	_spectate_hint.visible = spectating and not _ended and standing > 0
 
 
-## The dog slot of the Quickbar and the dog button of the touch layer exist only while the hunt has a dog.
+## The dog slot of the Quickbar, the dog button of the touch layer and the dog rows of the objectives and of the
+## legend exist only while the hunt has a dog.
 func _sync_dog_slots() -> void:
 	var present: bool = _world != null and _world.has_dog()
 	if present == _dog_slots_on:
@@ -756,6 +791,37 @@ func _sync_dog_slots() -> void:
 	_dog_slots_on = present
 	_quickbar.set_dog_present(present)
 	_touch.set_dog_present(present)
+	_objectives.set_dog_present(present)
+	_legend.set_dog_present(present)
+
+
+## Objectives, key legend and touch button names (docs §8.4): only in the first hunts (the same switch as the hints,
+## so ?hints=0 turns them off too). Decided once per hunt, here; _refresh_onboarding_ui applies it.
+func _setup_onboarding_ui(items: ItemBelt) -> void:
+	_onboarding_ui = _hints_enabled and Profile.is_onboarding_active()
+	if _onboarding_ui:
+		var item_ids: Array[StringName] = items.get_usable_ids() if items != null else ([] as Array[StringName])
+		_legend.set_items(item_ids)
+		_objectives.set_drone_present(item_ids.has(Ids.I_SCOUT_DRONE))
+	_refresh_onboarding_ui()
+
+
+## Shows or hides what _setup_onboarding_ui allowed: gone with the hunt, with the fall and in the spectator view; the
+## objectives also skip the horde (no fixed boar total, no crop); the legend skips touch (the buttons carry the names).
+func _refresh_onboarding_ui() -> void:
+	var show: bool = _onboarding_ui and not _ended and not _player_down and _spectate_slot == NO_SLOT
+	var touch: bool = InputSetup.is_touch_mode()
+	_objectives.set_touch(touch)
+	_objectives_panel.visible = show and not _horde
+	_legend_panel.visible = show and not touch
+	_touch.set_action_labels(show)
+
+
+## The help key opens and closes the legend (it is in the HUD because the tree pauses everything under it).
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"help") and not event.is_echo() and _legend_panel != null and _legend_panel.visible:
+		_legend.toggle()
+		get_viewport().set_input_as_handled()
 
 
 # ---------------------------------------------------------------------------
@@ -811,10 +877,12 @@ func _show_ctx(text: String, duration_s: float, color: Color = COLOR_TEXT) -> vo
 
 func _on_counts(killed: int, total: int) -> void:
 	_count_label.text = "Javalis %d/%d" % [killed, total]
+	_objectives.set_kills(killed, total)
 
 
 func _on_crop_health(pct: float) -> void:
 	_crop_pct = pct
+	_objectives.set_crop_pct(pct)
 	_crop_bar.value = pct
 	_crop_label.text = (HORDE_CROP_TEXT if _horde else "Lavoura %d%%") % int(round(pct))
 	_crop_bar.modulate = COLOR_GOOD if pct > CROP_WARN_PCT else (COLOR_WARN if pct > CROP_DANGER_PCT else COLOR_DANGER)
@@ -836,6 +904,7 @@ func _enter_horde_layout() -> void:
 	if _horde:
 		return
 	_horde = true
+	_refresh_onboarding_ui()
 	_count_label.visible = false
 	_wave_label.visible = true
 	_crop_alert.text = HORDE_ALERT_TEXT
@@ -928,6 +997,8 @@ func _on_dog_marked(position: Vector3, duration_s: float) -> void:
 
 func _on_dog_command(command: StringName) -> void:
 	_dog_msg.show_text("Pega!" if command == Ids.CMD_ATTACK else "Volta!", DOG_MSG_S)
+	if command == Ids.CMD_ATTACK:
+		_objectives.mark_dog_ordered()
 
 
 func _on_message(text: String, duration_s: float) -> void:
@@ -937,6 +1008,7 @@ func _on_message(text: String, duration_s: float) -> void:
 func _on_item_used(item_id: StringName, _position: Vector3) -> void:
 	if item_id == Ids.I_SCOUT_DRONE:
 		_reveal_left = float(Data.get_equipment(item_id).get("effect", {}).get("reveal_s", 0.0))
+		_objectives.mark_drone_used()
 
 
 func _on_thermal(active: bool) -> void:
@@ -998,6 +1070,8 @@ func _on_hunter_died(slot: int) -> void:
 
 ## Local hunter fell. Online with an ally still up, the hunt goes on without input: say so until it ends.
 func _on_player_died() -> void:
+	_player_down = true
+	_refresh_onboarding_ui()
 	if _ended or _world == null:
 		return   # solo has no allies, so the loop below never shows the banner there
 	for hunter: PlayerBase in _world.get_hunters():
@@ -1011,6 +1085,7 @@ func _on_player_died() -> void:
 ## panel and the crosshair step aside, the banner names who is being watched and the map moves to that hunter.
 func _on_spectate_changed(slot: int) -> void:
 	_spectate_slot = slot
+	_refresh_onboarding_ui()
 	var on: bool = slot != NO_SLOT and not _ended
 	_spectate_banner.visible = on
 	if on:
@@ -1058,6 +1133,7 @@ func _on_hunter_away_changed(slot: int, away: bool) -> void:
 
 func _on_hunt_ended(result: HuntResult) -> void:
 	_ended = true   # whichever of this and on_hunt_ended() runs first, the net banners and messages stop here
+	_refresh_onboarding_ui()
 	if _ctx_msg.get_text() == RECONNECTED_TEXT:
 		_ctx_msg.clear()   # giving up must not read "connection restored" right before "connection lost"
 	var text: String = ""

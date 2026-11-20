@@ -3,7 +3,8 @@ extends HuntWorld
 ## Package A sandbox: flat 200x200 ground (layer 1), three shootable targets with HitZones and a
 ## kill counter. Stands in for the hunt so the player, weapons and HUD run without Package B.
 ## Command line (after "--"): --touch=on|off, --weapons=a,b, --items=a,b, --aim, --demo, --horde, --dog,
-## --dog_state=<Ids.DS_*>, --dog_hp=<0-100>, --dog_breed=<Ids.D_*>
+## --dog_state=<Ids.DS_*>, --dog_hp=<0-100>, --dog_breed=<Ids.D_*>, --onboarding (or --hunts=N: throwaway profile that
+## has played N hunts, so the first-hunts HUD shows)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 
@@ -15,6 +16,7 @@ const HORDE_WAVE_COUNT: int = 3
 const HORDE_FIRST_DELAY_S: float = 12.0
 const HORDE_INTERMISSION_S: float = 6.0
 const HORDE_OBJECTIVE: Vector3 = Vector3(0.0, 0.0, -40.0)
+const SANDBOX_SAVE_PATH: String = "user://sandbox_save.json"
 const DEMO_DOG_POSITION: Vector3 = Vector3(-4.0, 0.0, -6.0)
 const ZONE_BOXES: Dictionary = {
 	"head": [Vector3(0.0, 0.75, -0.55), Vector3(0.3, 0.3, 0.3)],
@@ -59,6 +61,8 @@ func _ready() -> void:
 	if _args.has("horde"):
 		horde_mode = true
 	_multipliers = Data.get_boar_rules().get("zone_multipliers", {})
+	if _args.has("onboarding") or _args.has("hunts"):
+		_use_throwaway_profile(int(_args.get("hunts", "0")))
 	if _args.has("dog_state"):
 		dog_state = StringName(String(_args["dog_state"]))
 		dog_position = DEMO_DOG_POSITION
@@ -80,6 +84,17 @@ func _ready() -> void:
 		horde_phase = Ids.HP_INTERMISSION
 		horde_countdown_s = HORDE_FIRST_DELAY_S
 		GameEvents.horde_wave_changed.emit(horde_wave, horde_wave_count, horde_phase, horde_countdown_s)
+
+
+## --onboarding (or --hunts=N): a fresh profile with N hunts played (default 0 = in the onboarding), in a save file of
+## its own so the real save is never touched. The HUD shows the objectives, the legend and the touch labels only then.
+func _use_throwaway_profile(hunts_played: int) -> void:
+	Profile.set_save_path(SANDBOX_SAVE_PATH)
+	Profile.reset_progress()
+	for i: int in hunts_played:
+		var result: HuntResult = HuntResult.new()
+		result.outcome = HuntResult.Outcome.DEFEAT_DEATH
+		Profile.apply_hunt_result(result)
 
 
 func _process(delta: float) -> void:
@@ -232,6 +247,17 @@ func _spawn_player() -> void:
 		_run_demo.call_deferred()
 	if _args.has("stick"):
 		_run_stick_demo.call_deferred()
+	if _args.has("help_key"):
+		_run_help_key.call_deferred()
+
+
+## Screenshot helper (--help_key): presses H as a real key event, so the legend folds into its "H: Ajuda" tab.
+func _run_help_key() -> void:
+	await get_tree().create_timer(0.5).timeout
+	var press: InputEventKey = InputEventKey.new()
+	press.physical_keycode = KEY_H
+	press.pressed = true
+	Input.parse_input_event(press)
 
 
 ## Screenshot helper (--stick or --stick=lock): holds the fixed stick pushed, optionally past the lock ring.

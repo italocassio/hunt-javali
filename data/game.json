@@ -82,7 +82,9 @@
     "medkit_health_below_pct": 50.0,
     "boar_sighted_range_m": 60.0,
     "boar_sighted_half_angle_deg": 35.0,
-    "drone_no_sighting_s": 60.0
+    "drone_no_sighting_s": 60.0,
+    "objective_kills": 3,
+    "objective_crop_min_pct": 50.0
   },
   "coop": {
     "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],

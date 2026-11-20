@@ -2,7 +2,8 @@
 
 Versão do contrato: **1.3** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
 HUD/onboarding, fases 1 e 2: teclas fixas por item, barra de itens, botões de item no toque, dicas das primeiras
-caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14) · Godot **4.7.2** ·
+caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14; fase 4, jogo 0.8.2: ação `help`, objetivos e
+legenda de teclas, nomes nos botões de toque; §4, §6.8, §8.4, §9.1, §14) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
@@ -149,6 +150,8 @@ hunt-javali/
 │   │   ├── hint_director.gd      class HintDirector (gatilhos das dicas, sem UI, §8.4)
 │   │   ├── hint_banner.gd        class HintBanner (faixa da dica, §8.4)
 │   │   ├── dog_card.gd           class DogCard (cartão do cão, §8.4)
+│   │   ├── objectives_panel.gd   class ObjectivesPanel (objetivos das primeiras caçadas, §8.4)
+│   │   ├── controls_legend.gd    class ControlsLegend (legenda de teclas das primeiras caçadas, §8.4)
 │   │   ├── debug/                (sandboxes do HUD; hud_hints_test.tscn|.gd, §14)
 │   │   └── touch/
 │   ├── hunt/                     game-developer Pacote B
@@ -324,6 +327,7 @@ Registradas por **`InputSetup`** (`res://src/input/input_setup.gd`, Pacote A) em
 | `use_binoculars` | B | — | botão do binóculo (só se equipado; liga/desliga) |
 | `spectate_next` | F | — | — (no toque o espectador troca com Tiro ou Trocar) |
 | `pause` | Esc, P | — | botão Pausa |
+| `help` (jogo 0.8.2) | H | — | — (no toque não há legenda; os botões trazem os nomes, §8.4) |
 
 O olhar (mouse e arrasto na metade direita) **não é ação**: é tratado pelo `Player` diretamente.
 
@@ -332,6 +336,10 @@ O olhar (mouse e arrasto na metade direita) **não é ação**: é tratado pelo 
 `ACTIONS`, do `Player`, do `TouchControls` e dos testes). F ficou só para o espectador (`spectate_next`, §11).
 Apertar a tecla de um item que não veio na caçada mostra "Você não trouxe este item: <nome>." (ver
 `ItemBelt.use_item`, §8.11). G, V e B não colidem com nenhuma tecla anterior.
+
+**Ajuda (jogo 0.8.2).** `help` (H) abre e recolhe a legenda de teclas das primeiras caçadas (`ControlsLegend`,
+§8.4). Quem trata a tecla é o `Hud` (`_unhandled_input`, ignora eco, só com a legenda visível); fora das primeiras
+caçadas, no toque, com `?hints=0` ou com a árvore pausada, H não faz nada. Nenhuma outra tecla mudou.
 
 **Mouse injetado.** Com `emulate_mouse_from_touch=true`, todo toque gera um clique de mouse falso
 (`event.device == InputEvent.DEVICE_ID_EMULATION`); se o botão esquerdo estivesse no InputMap, tocar para
@@ -352,7 +360,7 @@ API de `InputSetup` (sem `class_name`):
 const ACTIONS: PackedStringArray = ["move_forward","move_back","move_left","move_right","fire","aim",
 	"zoom_in","zoom_out","reload","sprint","crouch","weapon_1","weapon_2","weapon_3","weapon_4","weapon_5",
 	"weapon_swap","dog_command","use_medkit","use_corn_bait","use_scout_drone","use_binoculars",
-	"spectate_next","pause"]
+	"spectate_next","pause","help"]
 ## Usable item id -> its action. The insertion order is THE order of the item slots (quickbar, touch row).
 const ITEM_ACTIONS: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
 	&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
@@ -597,8 +605,10 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `HintDirector` | `src/hud/hint_director.gd` | Node | lógica das dicas, **sem nenhum `Control`** (§8.4). `signal hint_shown(hint_id: StringName, text: String, slot_id: StringName)` (`slot_id` = `&""` na abertura); `signal hint_hidden(hint_id: StringName)`; `const OPENING: StringName = &"opening"`; `setup(player: PlayerBase, items: ItemBelt, world: HuntWorld) -> void` (lê `Profile.is_onboarding_active()` e `game.onboarding` uma vez; inativo = não conecta nada e `set_process(false)`); `is_active() -> bool`; `get_current_hint() -> StringName` (`&""` = nenhuma); `get_queue() -> Array[StringName]` (cópia, tests); `get_shown_this_hunt() -> Array[StringName]` (cópia, tests) |
 | `HintBanner` | `src/hud/hint_banner.gd` | PanelContainer | faixa da dica (§8.4). `show_hint(text: String) -> void`, `hide_hint() -> void`, `is_showing() -> bool`, `get_text() -> String`. Não tem relógio: quem decide quando some é o `HintDirector` |
 | `DogCard` | `src/hud/dog_card.gd` | HBoxContainer | cartão do cão do HUD (§8.4, 1.3, jogo 0.8.1); só vista, quem o alimenta é o `Hud`. `set_breed(dog_id: StringName) -> void` (retrato `ScenePaths.icon(dog_id)` e nome de `Data.get_dog(dog_id).name`; id vazio/desconhecido = cartão genérico "Cão" sem retrato), `set_state(state: StringName) -> void`, `set_health_pct(pct: float) -> void`, `set_touch(touch: bool) -> void`, `get_state_text() -> String`, `get_action_text() -> String`, `get_breed_text() -> String` (os três últimos para tests). Filhos: `Portrait`, `Info/Name`, `Info/State`, `Info/HealthBar`, `Info/Action` |
+| `ObjectivesPanel` | `src/hud/objectives_panel.gd` | VBoxContainer | objetivos das primeiras caçadas (§8.4, jogo 0.8.2); só vista, quem a alimenta é o `Hud`. `enum State { PENDING, OK, DONE, FAIL }`; `const ROW_DOG/ROW_DRONE/ROW_KILLS/ROW_CROP: StringName` (`&"dog"`, `&"drone"`, `&"kills"`, `&"crop"`); `set_dog_present(present: bool) -> void`, `set_drone_present(present: bool) -> void` (a linha só existe com cão / drone); `set_kills(killed: int, total: int) -> void`; `set_crop_pct(pct: float) -> void`; `mark_dog_ordered() -> void`, `mark_drone_used() -> void`; `set_touch(touch: bool) -> void` ("(E)" vira "(botão Cão)"); para tests: `get_row_ids() -> Array[StringName]` (linhas visíveis, em ordem), `get_row_text(row_id: StringName) -> String`, `get_row_state(row_id: StringName) -> int` (um `State`), `get_kills_goal() -> int`, `get_crop_min_pct() -> float`. Filhos: `Row_dog`, `Row_drone`, `Row_kills`, `Row_crop` (cada um com `Mark` e `Text`). Lê `game.onboarding.objective_kills` e `objective_crop_min_pct` no `_init` (fallbacks 3 e 50.0) |
+| `ControlsLegend` | `src/hud/controls_legend.gd` | VBoxContainer | legenda de teclas das primeiras caçadas, só teclado/mouse (§8.4, jogo 0.8.2); só vista. `set_items(item_ids: Array[StringName]) -> void` (uma linha por item usável, na ordem de `get_usable_ids()`), `set_dog_present(present: bool) -> void`, `set_open(open: bool) -> void`, `toggle() -> void`, `is_open() -> bool` (começa aberta); para tests: `get_row_ids() -> Array[StringName]`, `get_key_text(row_id: StringName) -> String`, `get_row_text(row_id: StringName) -> String`, `get_tab_text() -> String`. Ids de linha: `move`, `mouse_buttons`, `reload`, `sprint`, `crouch`, `weapons`, o id de cada item, `dog_command`, `help`. Filhos: `Tab` (visível só recolhida) e `Rows` (grade; cada linha é uma etiqueta de tecla `Key_<id>` e uma de texto `Text_<id>`) |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
-| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
+| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `set_action_labels(on: bool) -> void` / `has_action_labels() -> bool` (jogo 0.8.2: com `true`, Tiro, Mira, Recarga, Troca e Agachar mostram o nome abaixo do círculo, como os botões de item e o do cão já mostram; o botão Pausa nunca; padrão `false`, quem liga é o `Hud`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
 | `RemoteHunter` | `src/player/remote_hunter.gd` (cena `src/player/remote_hunter.tscn`, `ScenePaths.REMOTE_HUNTER`) | PlayerBase | caçador de outro jogador; API de `PlayerBase` (`setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld)`, `net_apply_state`…); `net_write_state` devolve os últimos 14 bytes recebidos (`NetCodec.HUNTER_STATE_BYTES`), então o anfitrião reenvia todos os caçadores sem caso especial; sem corpo e sem forma de colisão |
 | `SpectatorCamera` | `src/player/spectator_camera.gd` | Node3D | interna |
@@ -1243,8 +1253,9 @@ Gancho de QA da build Web (`?probe=1`, `Hud._publish_probe`), campos novos em 1.
 `hint` (id da dica atual, `""` = nenhuma) e `touch_buttons` (objeto `{ação: [x, y, raio]}` em px do viewport,
 para todo botão que existe agora, inclusive `use_*` e `dog_command`). O `mobile_probe.py` passa a ler a posição
 dos botões de item daí, em vez de constantes. Na Web, `?hints=0` na URL (lido pelo `Hud` do mesmo jeito que
-`?probe=1`) deixa o `HintDirector` inativo: o `mobile_probe.py` abre com `?probe=1&hints=0` para que nenhuma dica
-apareça no meio dos diffs de pixel (a faixa da dica cruza a área do diff da mira). A lógica das dicas é testada
+`?probe=1`) deixa o `HintDirector` inativo e, desde o jogo 0.8.2, também esconde os objetivos, a legenda e os nomes dos
+botões de toque (a mesma chave): o `mobile_probe.py` abre com `?probe=1&hints=0` para que nada disso apareça no meio dos
+diffs de pixel (a faixa da dica cruza a área do diff da mira). A lógica das dicas é testada
 pelo sandbox `hud_hints` (§12), não pelo probe.
 
 **Cartão do cão (1.3, jogo 0.8.1)** — `DogCard` (§6.8) dentro de um `HudPanel` (`Hud/Root/TopRight`), no lugar do
@@ -1325,6 +1336,50 @@ nada de rede novo; em rede cada caçador vê as suas. Números em `game.onboardi
   livre durante o jogo vivo: abaixo da mensagem de contexto (0,22–0,30) e acima da mira; as faixas que também a
   usam (derrubado/espectador, 0,30–0,44) só aparecem com o caçador caído, quando as dicas já foram encerradas.
   Aparece e some com fade de 0,2 s (constante de desenho).
+
+**Objetivos e legenda de teclas (Fase 4, jogo 0.8.2)** — `ObjectivesPanel` e `ControlsLegend` (§6.8), mais nomes
+nos botões de toque. Só vistas: o `Hud` as cria em `_ready`, decide quando aparecem e as alimenta com o que já ouve.
+- **Quando.** `Hud.bind` decide uma vez: `hints ligados (sem ?hints=0) e Profile.is_onboarding_active()` (as
+  `onboarding.max_hunts` primeiras caçadas). Desligado: os dois ficam invisíveis e o `TouchControls` não mostra nomes.
+  Ligado, o `Hud` aplica `_refresh_onboarding_ui()` toda vez que algo muda: tudo some com o caçador local caído
+  (`player_died`), no espectador (`spectate_changed(slot >= 0)`) e no fim da caçada (`hunt_ended`). Na **horda** só a
+  legenda aparece (os objetivos falam de lavoura e de total de javalis, que a horda não tem; o painel de ondas já
+  dá o objetivo). No toque a legenda não existe e os objetivos e os nomes dos botões aparecem.
+- **Objetivos** (`Hud/Root/Objectives`, coluna à esquerda: `margin_top` 132 px, abaixo da vida e da faixa da lavoura
+  da bússola, e `margin_left` 24 px no teclado / 128 px no toque, à direita do slider de zoom; dentro de um `HudPanel`,
+  fonte 17 px). Uma linha por objetivo, com marca redonda desenhada (anel = pendente, bolinha verde = mantendo,
+  disco verde com visto = feito, disco vermelho com cruz = falhando) e texto:
+
+| Linha | Existe quando | Texto (teclado / toque) | Feita quando |
+|---|---|---|---|
+| `dog` | `world.has_dog()` | "Mande o cão atacar (E)" / "…(botão Cão)" | `dog_command_executed(Ids.CMD_ATTACK)`; "Volta!" não conta |
+| `drone` | `scout_drone` em `get_usable_ids()` | "Use o drone (V)" / "…(botão Drone)" | `item_used(Ids.I_SCOUT_DRONE, …)` |
+| `kills` | sempre | "Abata N javalis (k/N)" ("javali" se N = 1) | `k >= N`; fica feita |
+| `crop` | sempre | "Mantenha a lavoura acima de P%" | nunca "feita": verde enquanto `pct >= P`, vermelha (texto e marca) se `pct < P`, volta a verde se a lavoura subir |
+
+  `N = min(onboarding.objective_kills, total de javalis da caçada)` (enquanto o total é desconhecido, 0, vale
+  `objective_kills`); `k` é o `boar_counts_changed` do time, não só os abates do jogador. `P =
+  onboarding.objective_crop_min_pct`. A tecla vem de `InputSetup.get_key_label`; o nome do botão do drone é o
+  `short_name` do item. Linha concluída continua na tela. Entradas: `_on_counts`, `_on_crop_health`,
+  `_on_dog_command`, `_on_item_used` do `Hud` (todos já existiam) e `_sync_dog_slots` para a linha do cão; nenhum
+  sinal novo no `GameEvents`. Os estados valem por caçada (não usam `Profile.is_hint_learned`).
+- **Legenda** (`Hud/Root/TopRight/LegendPanel`, na coluna do minimapa, abaixo do cartão do cão; só teclado/mouse).
+  Começa **aberta**: grade de 2 pares tecla/texto por linha (fonte 16 px; a coluna da direita fica a 1280×720 entre
+  y 354 e 497 com cão, acima do painel da arma). Linhas, em ordem: "WASD Mover", "Mouse Atirar / Mirar", "R
+  Recarregar", "Shift Correr", "Ctrl Agachar", "1–5 Armas", uma por item usável da caçada (tecla da ação de
+  `ITEM_ACTIONS`, texto = `short_name`: "Q Kit", "G Ceva", "V Drone", "B Binóculo"), "E Mandar o cão" (só com
+  cão) e "H Recolher". **H** (`help`) recolhe a legenda para a aba "H: Ajuda" e reabre. Todo rótulo de tecla vem de
+  `InputSetup.get_key_label`; só o rótulo "Mouse" é texto fixo (o mouse não tem ação de teclado). A legenda não tem
+  relógio: continua aberta até o jogador apertar H.
+- **Botões de toque.** Com `TouchControls.set_action_labels(true)` (o `Hud` liga junto com os objetivos), Tiro, Mira,
+  Recarga, Troca e Agachar mostram o nome (16 px, mesma posição dos nomes dos botões de item: 20 px abaixo da
+  borda do círculo); o Pausa nunca. Os botões de item e o do cão já mostram o nome sempre. Fora das primeiras caçadas
+  ou com `?hints=0` os botões ficam como antes.
+- **Sandbox** (`src/player/debug/player_sandbox.tscn`): `--onboarding` (ou `--hunts=N`) troca o perfil por um novo, com N
+  caçadas jogadas (padrão 0), em `user://sandbox_save.json` (o save real não é tocado); sem isso o perfil do
+  desenvolvedor costuma estar fora das primeiras caçadas e nada aparece. `--help_key` aperta H meio segundo depois
+  de abrir (screenshot da legenda recolhida). Screenshots precisam de `--frames=600`: a janela do `screenshot.gd`
+  roda sem limite de fps e 240 quadros passam antes dos 0,5 s.
 
 ### 8.5 Mundo exposto: estrutura obrigatória de uma cena de mapa
 Caminho: `ScenePaths.map_scene(map_id)` = `res://src/world/maps/<map_id>/<map_id>_map.tscn` (B).
@@ -1621,7 +1676,7 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
 | `shop.max_consumable_owned` | int | — | loja |
 | `coop.*` | número/lista | m, s | modo cooperativo (B, A) |
 | `music.*` | obj | dB, s | música de fundo: `track` (id do `Sfx`), `scenes` (caminhos `res://` das cenas em que toca: as telas de menu, exceto BOOT e RESULT; nunca HUNT), `volume_db`, `fade_in_s`, `fade_out_s`; lida só pelo Router |
-| `onboarding.*` | obj | caçadas, s, %, m, graus | dicas das primeiras caçadas (1.3, §8.4): lido por `Profile.is_onboarding_active` (`max_hunts`) e pelo `HintDirector` (o resto) |
+| `onboarding.*` | obj | caçadas, s, %, m, graus, javalis | dicas, objetivos e legenda das primeiras caçadas (1.3, §8.4): lido por `Profile.is_onboarding_active` (`max_hunts`), pelo `HintDirector` (os gatilhos) e pelo `ObjectivesPanel` (`objective_kills`, `objective_crop_min_pct`) |
 | `quality_presets.<low|medium|high>` | obj | — | B, ambiente |
 ```json
 {
@@ -1691,7 +1746,9 @@ dono e pode rebalancear **valores** (não nomes de campos nem ids).
     "medkit_health_below_pct": 50.0,
     "boar_sighted_range_m": 60.0,
     "boar_sighted_half_angle_deg": 35.0,
-    "drone_no_sighting_s": 60.0
+    "drone_no_sighting_s": 60.0,
+    "objective_kills": 3,
+    "objective_crop_min_pct": 50.0
   },
   "coop": {
     "boar_count_mult_by_players": [1.0, 1.5, 2.0, 2.5],
@@ -1717,8 +1774,11 @@ em §8.12.
 `opening_duration_s` / `hint_duration_s` (quanto cada dica fica na tela), `hint_gap_s` (intervalo sem dica entre
 duas), `queue_max` (int; dicas esperando), `medkit_health_below_pct` (0–100, vida em % da máxima),
 `boar_sighted_range_m` e `boar_sighted_half_angle_deg` (critério de "avistado", meio-ângulo do cone em graus),
-`drone_no_sighting_s` (tempo sem avistamento para sugerir o drone). Validação do `Data`: todos presentes, números
-> 0, `max_hunts` e `queue_max` inteiros ≥ 1, `boar_sighted_half_angle_deg` ≤ 90, `medkit_health_below_pct` ≤ 100.
+`drone_no_sighting_s` (tempo sem avistamento para sugerir o drone). Jogo 0.8.2: `objective_kills` (int; alvo da linha
+"Abata N javalis" do `ObjectivesPanel`, limitado ao total de javalis da caçada) e `objective_crop_min_pct` (0–100; piso
+da linha "Mantenha a lavoura acima de P%"). Validação do `Data`: todos presentes, números > 0, `max_hunts`, `queue_max`
+e `objective_kills` inteiros ≥ 1, `boar_sighted_half_angle_deg` ≤ 90, `medkit_health_below_pct` ≤ 100,
+`objective_crop_min_pct` ≤ 100. O painel lê os dois com fallback 3 e 50.0 se faltarem.
 
 ### 9.2 `data/weapons.json`
 | Campo | Tipo | Unid. | Significado |
@@ -2275,6 +2335,15 @@ de itens e passa a abrir a build com `?probe=1&hints=0` (lê `touch_buttons`/`it
 `items.scout_drone` em 1; tocar o kit com vida cheia não gasta; nenhum botão de item a menos de 60 px CSS de
 `LOOK_A`; os testes de Tiro, Mira e Recarregar continuam passando).
 
+Cobertura da Fase 4 (jogo 0.8.2): `check_scripts` ganha `help` no fim da lista de ações de `InputSetup.ACTIONS` (§4);
+`tests/lib/contract_sigs.gd` ganha `ObjectivesPanel`, `ControlsLegend` e `TouchControls.set_action_labels` /
+`has_action_labels`; `unit_tests` ganha um teste dos painéis (linhas por presença de cão/drone, textos de teclado e de
+toque, progresso de abates e piso `min(objective_kills, total)`, lavoura em `OK`/`FAIL` com borda em `P`, "Volta!" não
+conta, abertura e recolhimento da legenda, rótulos de tecla vindos de `get_key_label`) e do `Hud` no sandbox com
+`--onboarding` (painéis visíveis nas primeiras caçadas e escondidos com `hunts_played = 3`, legenda escondida no toque e
+nomes nos botões, escondidos no espectador, na queda e na horda salvo a legenda). O `mobile_probe.py` não muda (abre com
+`hints=0`).
+
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
 `is_world_ready`/`world_ready`, `is_hunt_over`, `get_result`, `debug_kill_boar`, `debug_set_crop_health`,
@@ -2478,7 +2547,7 @@ de resultado e é publicável (a entrada do menu é visível para todos desde a 
 | F7 — cães em rede (concluída em 2026-11-14) | cada jogador leva o seu cão e manda "Pega!"/"Volta!" | B, qa (Sonnet) | N6: comando do cliente muda o estado só do cão dele; sinais de cão só no HUD do dono; marcação aparece para os dois; solo sem mudança |
 | F8 — robustez móvel (contrato em `docs/multiplayer.md` §4.7; implementação pendente) | cair e voltar na mesma página sem perder a caçada | coordenação (servidor, `src/core`) e systems (`data/net.json`) primeiro; N e B (Fable) e A (Sonnet) em paralelo; qa (Sonnet) | `Net.debug_cut(5.0)` no cliente: ele volta no mesmo slot com os mesmos javalis vivos, os mesmos canteiros e o mesmo placar parcial, e a caçada termina `VICTORY` nos dois; token errado e carência estourada terminam `DISCONNECTED`; `bun test` com a reentrada; relatório de fps e banda em celular intermediário como anfitrião de 4 (lista completa em §4.7.10 de lá) |
 
-### Frente HUD/onboarding — fases 1 e 2 (contrato 1.3)
+### Frente HUD/onboarding — fases 1 a 4 (contrato 1.3)
 Nada muda em `src/core/`, `project.godot`, `export_presets.cfg` nem no Pacote B ou N. Todos em Sonnet. Toda tarefa
 termina com `check_scripts`, `unit_tests`, `flow_test` e `playthrough` sem mudança de resultado (exceto o que a
 própria tarefa atualiza nos testes).
@@ -2494,6 +2563,9 @@ própria tarefa atualiza nos testes).
 | HF3-A — cartão do cão e alvo do cão (1.3, jogo 0.8.1) | game-developer (A) | `src/hud/dog_card.gd` (novo), `src/hud/hud.gd` (`_dog_panel`, polling), `src/hud/compass.gd` (marca `dog_target`), `src/hud/minimap.gd` (`dog_target`); `src/core/hunt_world.gd` (só `get_dog_target_position`, e a cópia do Apêndice A); `src/dogs/dog.gd` (só `get_target_position`); `src/hunt/hunt_controller.gd` (só `get_dog_target_position`); `src/player/debug/sandbox_world.gd` (cão falso: `dog_position`, `dog_target_position`, `dog_health_pct`, args `--dog_state`, `--dog_hp`, `--dog_breed`) | HF2-A |
 | HF3-QA | qa-tester | `tests/lib/contract_sigs.gd` (`DogCard`; `Dog.get_target_position`; `HuntWorld.get_dog_target_position`; `HuntController.get_dog_target_position`), teste de unidade/sandbox do cartão (texto, cor e ação por estado, toque, sem cão, alvo na bússola/minimapa) | HF3-A |
 | HF2-QA | qa-tester | `tests/net_unit.gd` (sandbox `hud_hints`, `limit_s` 60), `tests/lib/contract_sigs.gd` (`HintDirector`, `HintBanner`) | HF2-A |
+| HF4-A — objetivos, legenda e nomes nos botões (jogo 0.8.2) | game-developer (A) | `src/hud/objectives_panel.gd`, `src/hud/controls_legend.gd` (novos), `src/hud/hud.gd` (criação, ligações, `_unhandled_input` do `help`, `_setup_onboarding_ui`/`_refresh_onboarding_ui`), `src/hud/touch/touch_controls.gd` (`set_action_labels`), `src/input/input_setup.gd` (ação `help`, tecla H), `src/player/debug/sandbox_world.gd` (`--onboarding`, `--hunts=N`, `--help_key`) | HF2-A, HF3-A, HF4-S |
+| HF4-S — dados e validação | game-systems | `data/game.json` (`onboarding.objective_kills` = 3, `onboarding.objective_crop_min_pct` = 50.0), `src/systems/data_registry.gd` (`ONBOARDING_FIELDS` ganha os dois; `objective_kills` inteiro; `objective_crop_min_pct` ≤ 100) | — (paralela à HF4-A: o painel tem fallback) |
+| HF4-QA | qa-tester | `tests/check_scripts.gd` (`help` no fim de `expected` das ações), `tests/lib/contract_sigs.gd` (`ObjectivesPanel`, `ControlsLegend`, `TouchControls.set_action_labels`/`has_action_labels`), teste de unidade dos painéis e do `Hud` com `--onboarding` (§12), teste de dados (`Data.get_load_errors()` vazio com as chaves; erro com `objective_kills` 2.5 e com `objective_crop_min_pct` 120) | HF4-A, HF4-S |
 
 O A lê `short_name` com fallback para `name` (`def.get("short_name", def.get("name", ""))`), então HF1-A não
 espera HF1-S. Ordem: {HF1-A, HF1-S, HF1-AR} em paralelo → HF1-S2 → HF1-QA → HF2-A → HF2-QA → coordenação
@@ -2533,7 +2605,19 @@ Critérios de aceite:
   minimapa (`dog_target`, preso à borda fora da vista); em `follow` nenhum dos dois. `Dog.get_target_position()`
   é finito de `point`/`bay`/`hold` e `INF` depois de `Volta!`; `HuntWorld.get_dog_target_position()` é `INF` por
   padrão. Screenshots com janela do cartão no teclado e no toque.
-- **HF1-QA / HF2-QA:** §12 (cobertura 1.3); `mobile_probe.py` verde com a build nova.
+- **HF4-A:** `--import` e depois `check_scripts` (única falha esperada até a HF4-QA: a lista de ações em
+  `tests/check_scripts.gd`), `unit_tests`, `flow_test` e `playthrough` verdes. No sandbox
+  (`player_sandbox.tscn --items=medkit,scout_drone --dog --onboarding`, `--frames=600`): à esquerda quatro linhas
+  ("Mande o cão atacar (E)", "Use o drone (V)", "Abata 3 javalis (0/3)", "Mantenha a lavoura acima de 50%"); à direita,
+  abaixo do cartão do cão, a legenda com as teclas de §8.4, ao fim da coluna acima do painel da arma; com `--help_key` a
+  legenda vira só "H: Ajuda"; com `--touch=on` (1558×720 e 960×720) a legenda some, os objetivos ficam à direita do
+  slider e os botões Tiro, Mira, Recarga, Troca e Agachar mostram o nome sem encostar um no outro. Abater 3 alvos marca
+  "Abata 3 javalis (3/3)" como feito; lavoura abaixo de 50% deixa a linha vermelha; `Ids.CMD_ATTACK` marca a linha do cão
+  e `Ids.CMD_RECALL` não; a morte, o espectador e `hunts_played = 3` escondem tudo. Screenshots com janela do teclado
+  (aberta e recolhida) e do toque.
+- **HF4-S:** `Data.get_load_errors()` vazio com as duas chaves; sem elas, ou com `objective_kills` não inteiro ou
+  `objective_crop_min_pct` > 100, o `Data` aponta o erro.
+- **HF1-QA / HF2-QA / HF4-QA:** §12 (cobertura 1.3 e Fase 4); `mobile_probe.py` verde com a build nova.
 
 ---
 

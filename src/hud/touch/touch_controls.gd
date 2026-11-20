@@ -78,6 +78,7 @@ var _dog_present: bool = false
 var _dog_retreating: bool = false
 var _flashing: Dictionary = {}        # slot id -> true
 var _ended: bool = false
+var _action_labels: bool = false      # onboarding: every action button shows its name under the circle
 
 
 func _ready() -> void:
@@ -125,6 +126,19 @@ func flash_slot(slot_id: StringName, on: bool) -> void:
 		_flashing[slot_id] = true
 	else:
 		_flashing.erase(slot_id)
+
+
+## During the first hunts (docs §8.4) the action buttons (Tiro, Mira, Recarga, Troca, Agachar) show their name under
+## the circle, like the item and dog buttons always do. Off: the buttons look as before. The Hud decides.
+func set_action_labels(on: bool) -> void:
+	if on == _action_labels:
+		return
+	_action_labels = on
+	_surface.queue_redraw()
+
+
+func has_action_labels() -> bool:
+	return _action_labels
 
 
 func end_hunt() -> void:
@@ -441,7 +455,7 @@ func _draw_surface() -> void:
 			var icon_size: float = r * 1.2
 			var tint: Color = Color(COLOR_ON.r, COLOR_ON.g, COLOR_ON.b, alpha) if lit else Color(1.0, 1.0, 1.0, alpha)
 			_surface.draw_texture_rect(tex, Rect2(c - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, tint)
-			if is_slot:
+			if is_slot or (_action_labels and action_name != &"pause"):
 				_draw_text(font, label, c + Vector2(0.0, r + 20.0), ITEM_NAME_FONT_PX)
 		else:
 			_draw_text(font, label, c + Vector2(0.0, 7.0), FONT_SIZE if label.length() < 8 else 15)

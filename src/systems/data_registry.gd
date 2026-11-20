@@ -22,6 +22,7 @@ const SHORT_NAME_MAX_CHARS: int = 9
 const ONBOARDING_FIELDS: Array[String] = [
 	"max_hunts", "eval_interval_s", "opening_delay_s", "opening_duration_s", "hint_duration_s", "hint_gap_s",
 	"queue_max", "medkit_health_below_pct", "boar_sighted_range_m", "boar_sighted_half_angle_deg", "drone_no_sighting_s",
+	"objective_kills", "objective_crop_min_pct",
 ]
 
 var _raw: Dictionary = {}
@@ -279,7 +280,7 @@ func _validate_onboarding() -> void:
 		var v: Variant = ob.get(f)
 		if not (v is int or v is float) or not is_finite(float(v)) or float(v) <= 0.0:
 			_errors.append("Data: game.onboarding.%s must be a number > 0" % f)
-	for f: String in ["max_hunts", "queue_max"]:
+	for f: String in ["max_hunts", "queue_max", "objective_kills"]:
 		var v: Variant = ob.get(f)
 		if (v is int or v is float) and float(v) != floorf(float(v)):
 			_errors.append("Data: game.onboarding.%s must be an integer" % f)
@@ -287,6 +288,8 @@ func _validate_onboarding() -> void:
 		_errors.append("Data: game.onboarding.boar_sighted_half_angle_deg must be <= 90")
 	if float(ob.get("medkit_health_below_pct", 0.0)) > 100.0:
 		_errors.append("Data: game.onboarding.medkit_health_below_pct must be <= 100")
+	if float(ob.get("objective_crop_min_pct", 0.0)) > 100.0:
+		_errors.append("Data: game.onboarding.objective_crop_min_pct must be <= 100")
 
 
 # Horde mode rules (docs/horda.md §3.1). Skipped when the file could not be read (error already recorded).

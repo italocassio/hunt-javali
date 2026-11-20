@@ -3,6 +3,22 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.8.2 — 20/11/2026
+
+**Objetivos e legenda de teclas nas primeiras caçadas.**
+
+- À esquerda, uma lista de objetivos: mandar o cão atacar, usar o drone (só quando você tem cão ou drone),
+  abater 3 javalis com o progresso e manter a lavoura acima de 50%. Cada objetivo cumprido fica marcado.
+- À direita, abaixo do cartão do cão, a legenda das teclas (mover, atirar, recarregar, correr, agachar, armas,
+  os seus itens e o cão). A tecla H recolhe a legenda em "H: Ajuda" e abre de novo.
+- No celular não há legenda de teclas: todo botão de ação mostra o nome embaixo.
+- Tudo isso aparece só nas 3 primeiras caçadas e some quando você cai ou vira espectador. Na horda, só a
+  legenda aparece.
+
+Detalhes técnicos: contrato em `docs/arquitetura.md` §4, §6.8, §8.4, §9.1 e §14 (HF4); classes novas
+`ObjectivesPanel` e `ControlsLegend` (`src/hud/`); ação `help` (H); `onboarding.objective_kills` e
+`objective_crop_min_pct` em `data/game.json`.
+
 ## 0.8.1 — 20/11/2026
 
 **Cartão do cão: quem é, o que está fazendo e o que a tecla faz agora.**

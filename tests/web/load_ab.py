@@ -95,6 +95,9 @@ def shot_small(c):
 def is_boot_screen(im):
     """Boot screen: dark brown background (UiKit.BG_COLOR ~ 30,26,22) over most of the top half."""
     w, h = im.size
+    # Since 0.7.x the boot screen is a painted picture: many distinct colours, unlike the flat page/splash before it.
+    if len(set((r // 16, g // 16, b // 16) for r, g, b in im.get_flattened_data())) > 100:
+        return True
     n = ok = 0
     for y in range(2, int(h * 0.55), 2):
         for x in range(2, w, 3):
@@ -196,7 +199,7 @@ def session(tag, build, throttle):
             time.sleep(0.05)
         res["boot_tap_to_menu_ms"] = None if t_menu is None else round((t_menu - t_tap) * 1000)
         time.sleep(3.0)
-        tap(216, 133); time.sleep(4.0)      # Jogar
+        tap(150, 197); time.sleep(4.0)      # Jogar (poster menu, 0.7.3+)
         tap(400, 95); time.sleep(4.0)       # Mato Grosso
         tap(200, 110); time.sleep(1.5)      # contract 1
         n_before = len(console_events(c))

@@ -110,13 +110,28 @@ def enter_hunt(p, first=False):
         raise RuntimeError("game did not load")
     time.sleep(6 if first else 3)
     p.tap(422, 195); time.sleep(3.0)          # boot: "Toque para comecar"
-    p.tap(216, 133); time.sleep(3.0)          # menu: Jogar
-    p.tap(400, 95); time.sleep(3.0)           # maps: Mato Grosso
-    p.tap(200, 110); time.sleep(1.0)          # contract 1
+    p.tap(150, 197); time.sleep(3.0)          # menu (poster style, 0.7.3+): JOGAR, opens the map list directly
+    p.tap(400, 110); time.sleep(3.0)          # maps: Mato Grosso card
+    p.tap(200, 110); time.sleep(1.0)          # preparation: contract 1 (already selected)
     p.tap(730, 352); time.sleep(12.0)         # Iniciar cacada
     p.shot("hunt_entered")
     if p.fresh_probe(timeout=6.0) is None:
         raise RuntimeError("did not reach the hunt (no window.huntProbe)")
+    settle_frames(p)
+
+
+def settle_frames(p, timeout=40.0):
+    """The first seconds of a hunt stall the (software-rendered) page: publishes arrive seconds apart, so a read
+    right after a touch can predate it.  Wait until 3 consecutive publishes are < 400 ms apart."""
+    end = time.time() + timeout
+    last_t, smooth = None, 0
+    while time.time() < end and smooth < 3:
+        s = p.fresh_probe(timeout=5.0)
+        if s is None:
+            continue
+        smooth = smooth + 1 if last_t is not None and 0 < s["t_ms"] - last_t < 400 else 0
+        last_t = s["t_ms"]
+        time.sleep(0.05)
 
 
 def drag_by(p, fid, x0, y0, dx, dy, step_css=4.0, dt=0.03):

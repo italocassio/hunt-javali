@@ -23,9 +23,12 @@ const ALLY_FALLEN_ALPHA: float = 0.7
 const ALLY_EDGE_MARGIN_PX: float = 9.0
 const ALLY_EDGE_ARROW_PX: float = 8.0
 const ALLY_EDGE_OUTLINE_PX: float = 2.0
+const AMMO_HALF_PX: float = 3.0               # ammo crate dot: 6 px wide (horde level 2)
+const ALLY_DOWNED_HALF_PX: float = 4.0        # downed (revivable) ally: red dot under the cross
+const ALLY_DOWN_DOWNED: int = 2               # ally_down values: 0 standing, 1 dead, 2 downed (can still be revived)
 ## Half width (radius) of each kind on the minimap (docs §8.4, table "Marcadores").
 const HALF_PX: Dictionary = {
-	&"crop": 5.0, &"bait": 5.0, &"revealed": 3.5, &"boar": 6.0, &"dog_target": 8.0, &"dog": 4.5,
+	&"crop": 5.0, &"bait": 5.0, &"revealed": 3.5, &"boar": 6.0, &"dog_target": 8.0, &"dog": 4.5, &"ammo": AMMO_HALF_PX,
 }
 
 var map_rect: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0):
@@ -53,7 +56,9 @@ var objective_icon: Texture2D = null
 var allies: PackedVector3Array = PackedVector3Array()
 var ally_colors: PackedColorArray = PackedColorArray()
 var ally_yaws: PackedFloat32Array = PackedFloat32Array()   # world yaw in radians, same convention as update_player
-var ally_down: PackedByteArray = PackedByteArray()          # 1 = fallen
+var ally_down: PackedByteArray = PackedByteArray()          # 0 standing, 1 dead, 2 downed (revivable, red dot)
+## Ammo crates on the ground (horde level 2), world positions: a 6 px dot in MapMarkers.COLOR_AMMO.
+var ammo_crates: PackedVector3Array = PackedVector3Array()
 ## Colour of the centre arrow: the hunter's own colour in a networked hunt, the neutral one otherwise.
 var center_color: Color = COLOR_PLAYER
 
@@ -132,6 +137,8 @@ func _draw() -> void:
 				draw_rect(clipped, COLOR_CROP)
 	if objective.is_finite():
 		_draw_objective()
+	for p: Vector3 in ammo_crates:
+		_marker(p, MapMarkers.KIND_AMMO)
 	for kind: StringName in MapMarkers.DRAW_ORDER:
 		match kind:
 			MapMarkers.KIND_CROP:
@@ -203,11 +210,16 @@ func _draw_ally(index: int) -> void:
 	var world: Vector3 = allies[index]
 	var color: Color = ally_colors[index] if index < ally_colors.size() else COLOR_PLAYER
 	var down: bool = index < ally_down.size() and ally_down[index] != 0
+	var downed: bool = index < ally_down.size() and ally_down[index] == ALLY_DOWN_DOWNED
 	var yaw: float = ally_yaws[index] if index < ally_yaws.size() else 0.0
 	var p: Vector2 = _to_map(world.x, world.z)
+	if downed:
+		color = MapMarkers.COLOR_DOWNED   # a revivable ally always reads red, in view or at the frame
 	if not is_in_view(world):
 		_draw_edge_arrow(p, color, down)
 	elif down:
+		if downed:
+			MapMarkers.draw(self, MapMarkers.KIND_DOG, p, MapMarkers.COLOR_DOWNED, ALLY_DOWNED_HALF_PX)
 		_draw_fallen(p, color)
 	else:
 		_draw_arrow(p, yaw, color, ALLY_ARROW_TIP_PX, ALLY_ARROW_BACK_PX)

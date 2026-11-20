@@ -109,6 +109,7 @@ var rejoin_refusal: StringName = &""   # error the room server answered the last
 var _map_id: StringName = &""
 var _contract_index: int = 0
 var _mode: StringName = Ids.MODE_CONTRACT   # game mode of the room (docs/horda.md 9.1); wire: index in NetCodec.MODES
+var _horde_level: int = 1                   # horde level of the room, 1..Data.get_horde_level_count(); wire: u8 after mode
 var _rng_seed: int = 0
 var _local_ready: bool = false
 
@@ -203,6 +204,10 @@ func get_selected_mode() -> StringName:
 	return _mode
 
 
+func get_selected_horde_level() -> int:
+	return _horde_level
+
+
 func get_rng_seed() -> int:
 	return _rng_seed
 
@@ -252,6 +257,7 @@ func get_signaling() -> NetSignaling:  # tests and diagnostics
 func create() -> void:
 	_role = ROLE_HOST
 	_mode = Ids.MODE_CONTRACT
+	_horde_level = 1
 	_create_attempts = 0
 	_set_state(STATE_CONNECTING)
 	if _state == STATE_CONNECTING:
@@ -261,6 +267,7 @@ func create() -> void:
 func join(code: String) -> void:
 	_role = ROLE_CLIENT
 	_mode = Ids.MODE_CONTRACT
+	_horde_level = 1
 	_code = code.strip_edges().to_upper()
 	_set_state(STATE_CONNECTING)
 	if _state != STATE_CONNECTING:
@@ -356,6 +363,7 @@ func _teardown() -> void:
 	_map_id = &""
 	_contract_index = 0
 	_mode = Ids.MODE_CONTRACT
+	_horde_level = 1
 	_rng_seed = 0
 
 
@@ -821,6 +829,18 @@ func host_select_mode(mode: StringName) -> bool:
 	return true
 
 
+## Host, LOBBY only. level in 1..Data.get_horde_level_count(). Does not touch mode, map or contract.
+func host_select_horde_level(level: int) -> bool:
+	if _role != ROLE_HOST or _state != STATE_LOBBY or level < 1 or level > Data.get_horde_level_count():
+		return false
+	if level == _horde_level:
+		return true
+	_horde_level = level
+	_broadcast_lobby()
+	roster_changed.emit()
+	return true
+
+
 func _horde_available() -> bool:
 	var horde: Dictionary = Data.get_horde()
 	if horde.is_empty():
@@ -842,6 +862,13 @@ func _mode_to_wire() -> int:
 	return maxi(NetCodec.MODES.find(_mode), 0)
 
 
+## horde_level u8 of L_LOBBY / L_START, after mode: absent (old layout), 0 or above the level count = 1.
+func _horde_level_from_wire(body: PackedByteArray, at: int) -> int:
+	if at < 0 or at >= body.size() or body[at] < 1 or body[at] > Data.get_horde_level_count():
+		return 1
+	return body[at]
+
+
 ## What must be equal on every peer, written into the HuntRequest of LOADING (docs/horda.md 9.1).
 func _fill_request(request: HuntRequest) -> void:
 	request.map_id = _map_id
@@ -849,6 +876,7 @@ func _fill_request(request: HuntRequest) -> void:
 	request.rng_seed = _rng_seed
 	request.player_count = _peers.size()
 	request.mode = Ids.MODE_CONTRACT
+	request.horde_level = _horde_level   # only read in horde mode
 	if _mode != Ids.MODE_HORDE:
 		return
 	var horde: Dictionary = Data.get_horde()
@@ -886,6 +914,7 @@ func host_start_hunt() -> bool:
 		var info: NetPeerInfo = _peers.get(slot) as NetPeerInfo
 		body.put_u8(_index_of(Data.get_dog_ids(), info.dog_id) if info != null else NO_INDEX)
 	body.put_u8(_mode_to_wire())
+	body.put_u8(_horde_level)
 	var record: PackedByteArray = _record(NetCodec.L_START, body.data_array)
 	for id: int in _links:
 		var link: NetLink = _links[id]
@@ -1566,7 +1595,7 @@ func _on_ready(from_slot: int, body: PackedByteArray) -> void:
 	roster_changed.emit()
 
 
-## Host -> clients: state u8, map u8, contract u8, n u8, n x { slot u8, flags u8, weapon0 u8, dog u8 }, mode u8.
+## Host -> clients: state u8, map u8, contract u8, n u8, n x { slot u8, flags u8, weapon0 u8, dog u8 }, mode u8, horde_level u8.
 func _broadcast_lobby() -> void:
 	if _role != ROLE_HOST or _links.is_empty():
 		return
@@ -1595,6 +1624,7 @@ func _broadcast_lobby() -> void:
 		body.put_u8(_index_of(weapons, info.weapon_id))
 		body.put_u8(_index_of(dogs, info.dog_id))
 	body.put_u8(_mode_to_wire())
+	body.put_u8(_horde_level)
 	_send_events_to_all(_record(NetCodec.L_LOBBY, body.data_array))
 
 
@@ -1609,7 +1639,9 @@ func _on_lobby(body: PackedByteArray) -> void:
 	var dogs: Array = Data.get_dog_ids()
 	var count: int = body[3]
 	if not _in_hunt_states():
-		_mode = _mode_from_wire(body, L_LOBBY_HEADER_BYTES + count * L_LOBBY_ENTRY_BYTES)
+		var mode_at: int = L_LOBBY_HEADER_BYTES + count * L_LOBBY_ENTRY_BYTES
+		_mode = _mode_from_wire(body, mode_at)
+		_horde_level = _horde_level_from_wire(body, mode_at + 1)
 	var listed: Dictionary = {}
 	for i: int in count:
 		var at: int = L_LOBBY_HEADER_BYTES + i * L_LOBBY_ENTRY_BYTES
@@ -1643,7 +1675,7 @@ func _on_lobby(body: PackedByteArray) -> void:
 
 
 ## Host -> clients: map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[max_players] u8,
-## mode u8 (absent in the old 12-byte layout = contract).
+## mode u8 (absent in the old 12-byte layout = contract), horde_level u8 (absent in the 13-byte layout = 1).
 func _on_start(body: PackedByteArray) -> void:
 	if body.size() < L_START_HEADER_BYTES or _state != STATE_LOBBY:
 		return
@@ -1652,7 +1684,9 @@ func _on_start(body: PackedByteArray) -> void:
 		return
 	_map_id = map_id
 	_contract_index = body[1]
-	_mode = _mode_from_wire(body, L_START_HEADER_BYTES + int(_cfg["max_players"]))
+	var mode_at: int = L_START_HEADER_BYTES + int(_cfg["max_players"])
+	_mode = _mode_from_wire(body, mode_at)
+	_horde_level = _horde_level_from_wire(body, mode_at + 1)
 	_rng_seed = body.decode_u32(2)
 	# The host's slots_mask is the hunt roster: drop peers whose peer_left is still on the way and add
 	# any peer this machine has not heard of yet, so every machine assembles the same hunters.

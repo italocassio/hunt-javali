@@ -51,10 +51,48 @@ const HORDE_BANNER_CLEARED: String = "Onda %d vencida!"
 const HORDE_WON_TEXT: String = "Celeiro defendido!"
 const HORDE_LOST_TEXT: String = "O celeiro foi devorado!"
 const HORDE_BANNER_S: float = 3.0
-const HORDE_BANNER_TOP_FRAC: float = 0.18
+## The wave banner hangs below the crop panel (its real bottom edge, read at runtime): gap and height in pixels at the
+## 720 px reference height. It must end above the context message text (band starts at CONTEXT_TOP_FRAC).
+const HORDE_BANNER_GAP_PX: float = 8.0
+const HORDE_BANNER_HEIGHT_PX: float = 40.0
 const SOUND_WAVE_START: StringName = &"horde_wave_start"
 const SOUND_WAVE_CLEAR: StringName = &"horde_wave_clear"
 const ALLY_MSG_S: float = 3.0
+## Horde level 2 (docs/plano_horda_nivel2.md section 5): counted ammo, crates, downed and revive.
+const AMMO_EMPTY_TEXT: String = "Sem munição: pegue cartuchos no celeiro."
+const AMMO_LAST_TEXT: String = "Última carga: pegue cartuchos no celeiro."
+const AMMO_PICKUP_TEXT: String = "+%d cartuchos"
+const AMMO_WARN_S: float = 3.0
+const AMMO_PICKUP_S: float = 1.5
+const AMMO_OK: int = 0
+const AMMO_LAST: int = 1
+const AMMO_EMPTY: int = 2
+const REVIVE_PROMPT_KEYS: String = "Segure %s para levantar %s"
+const REVIVE_PROMPT_TOUCH: String = "Segure Levantar para ajudar %s"
+const REVIVE_BAR_TEXT: String = "Levantando %s…"
+const REVIVE_PROMPT_FONT_PX: int = 24
+## Ammo crate in reach (owner's Q4: taken with a press of interact): same place and style as the RevivePrompt, never
+## at the same time (a revive target wins). Touch: the key is the "Pegar" button of TouchControls.
+const AMMO_PROMPT_TEXT: String = "Aperte %s para pegar munição"
+const AMMO_PROMPT_TOUCH_TEXT: String = "Toque em %s para pegar munição"
+const REVIVE_PROMPT_TOP_FRAC: float = 0.54
+const REVIVE_BAR_LABEL_TOP_FRAC: float = 0.565
+const REVIVE_BAR_TOP_FRAC: float = 0.62
+const REVIVE_BAR_W_PX: float = 280.0
+const REVIVE_BAR_H_PX: float = 14.0
+const DOWNED_TITLE_TEXT: String = "Você caiu!"
+const DOWNED_HINT_TEXT: String = "Um companheiro pode te levantar."
+const DOWNED_BLEED_TEXT: String = "Sangrando: %d s"
+const DOWNED_TOP_FRAC: float = 0.34          # below the context message band, clear of the alerts above
+const DOWNED_HINT_FONT_PX: int = 22
+const DOWNED_HINT_HEIGHT_FRAC: float = 0.11
+const HUNTER_DOWNED_KEYS_TEXT: String = "%s caiu! Vá até lá e segure %s."
+const HUNTER_DOWNED_TOUCH_TEXT: String = "%s caiu! Vá até lá e segure Levantar."
+const REVIVED_LOCAL_TEXT: String = "%s te levantou!"
+const REVIVED_BY_LOCAL_TEXT: String = "Você levantou %s."
+const REVIVED_OTHERS_TEXT: String = "%s levantou %s."
+const REVIVE_MSG_S: float = 4.0
+const COLOR_DOWNED_TINT: Color = Color("#7A0000", 0.35)
 const STALL_TOP_FRAC: float = 0.16
 const LOCAL_DOWN_TOP_FRAC: float = 0.30
 ## Context message band: starts below the "Javalis na lavoura!" alert (which ends near 0.27 of a 720 px height since the
@@ -117,6 +155,11 @@ var _crop_pct: float = 100.0
 var _objective_icon: Texture2D = null
 var _onboarding_ui: bool = false      # objectives, legend and touch labels wanted: hints on and one of the first hunts
 var _player_down: bool = false        # the local hunter fell: nothing of the onboarding UI is shown any more
+var _downed: bool = false             # horde level 2: the local hunter is down and bleeding (player_downed .. revived/died)
+var _bleed_limited: bool = false      # the fall came with a bleed-out time (bleed_out_s > 0)
+var _ammo_state: Dictionary = {}      # weapon slot -> AMMO_OK / AMMO_LAST / AMMO_EMPTY seen last frame
+var _ammo_warned: Dictionary = {}     # weapon slot -> true once "Última carga" was shown, until the reserve is refilled
+var _ammo_warn_slot: int = NO_SLOT    # weapon slot the ammo warnings looked at last frame
 
 var _root: Control = Control.new()
 var _scope: ScopeOverlay = ScopeOverlay.new()
@@ -136,6 +179,14 @@ var _crop_alert: Label = null
 var _count_label: Label = null
 var _wave_label: Label = null
 var _wave_banner: Label = null
+var _crop_panel: PanelContainer = null
+var _downed_overlay: ColorRect = null
+var _downed_label: Label = null
+var _downed_hint: Label = null
+var _revive_prompt: Label = null
+var _ammo_prompt: Label = null
+var _revive_bar: ProgressBar = null
+var _revive_bar_label: Label = null
 var _dog_panel: PanelContainer = null
 var _dog_card: DogCard = DogCard.new()
 var _left_margin: MarginContainer = null
@@ -170,6 +221,7 @@ func _ready() -> void:
 	_damage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage.duration_s = float(Data.get_game().get("player", {}).get("damage_indicator_s", 1.2))
 	_root.add_child(_damage)
+	_build_downed_overlay()
 	_crosshair.name = "Crosshair"
 	_root.add_child(_crosshair)
 	_build_top_left()
@@ -343,9 +395,9 @@ func _build_top_center() -> void:
 	_style_bar(_crop_bar, &"CropBar", 14.0, 300.0)
 	_crop_bar.name = "CropBar"
 	inner.add_child(_crop_bar)
-	var panel: PanelContainer = _panel(inner, 8)
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	box.add_child(panel)
+	_crop_panel = _panel(inner, 8)
+	_crop_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	box.add_child(_crop_panel)
 	_crop_alert = _label("Javalis na lavoura!", 26, COLOR_DANGER, &"HudBigLabel")
 	_crop_alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_crop_alert.visible = false
@@ -453,7 +505,73 @@ func _build_messages() -> void:
 	_spectate_banner = _make_banner("SpectateBanner", "", LOCAL_DOWN_TOP_FRAC, COLOR_TEXT)
 	_spectate_hint = _make_banner("SpectateHint", SPECTATE_HINT_KEYS, LOCAL_DOWN_TOP_FRAC + BANNER_HEIGHT_FRAC, COLOR_TEXT)
 	_spectate_hint.add_theme_font_size_override("font_size", SPECTATE_HINT_FONT_PX)
-	_wave_banner = _make_banner("WaveBanner", "", HORDE_BANNER_TOP_FRAC, COLOR_TEXT)
+	_wave_banner = _make_banner("WaveBanner", "", 0.0, COLOR_TEXT)
+	_wave_banner.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_build_revive_ui()
+
+
+## Red veil of the fallen hunter (horde level 2), under every other element of the HUD.
+func _build_downed_overlay() -> void:
+	_downed_overlay = ColorRect.new()
+	_downed_overlay.name = "DownedOverlay"
+	_downed_overlay.color = COLOR_DOWNED_TINT
+	_downed_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_downed_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_downed_overlay.visible = false
+	_root.add_child(_downed_overlay)
+
+
+## Revive prompt, hold bar and the "you fell" texts (horde level 2); all hidden until a state turns them on.
+func _build_revive_ui() -> void:
+	_downed_label = _make_banner("DownedLabel", DOWNED_TITLE_TEXT, DOWNED_TOP_FRAC, COLOR_DANGER)
+	_downed_hint = _make_banner("DownedHint", DOWNED_HINT_TEXT, DOWNED_TOP_FRAC + BANNER_HEIGHT_FRAC, COLOR_TEXT)
+	_downed_hint.add_theme_font_size_override("font_size", DOWNED_HINT_FONT_PX)
+	_downed_hint.anchor_bottom = DOWNED_TOP_FRAC + BANNER_HEIGHT_FRAC + DOWNED_HINT_HEIGHT_FRAC
+	_revive_prompt = _label("", REVIVE_PROMPT_FONT_PX)
+	_revive_prompt.name = "RevivePrompt"
+	_place_centered(_revive_prompt, REVIVE_PROMPT_TOP_FRAC, REVIVE_PROMPT_TOP_FRAC + BANNER_HEIGHT_FRAC)
+	_revive_prompt.visible = false
+	_root.add_child(_revive_prompt)
+	_ammo_prompt = _label("", REVIVE_PROMPT_FONT_PX)
+	_ammo_prompt.name = "AmmoPrompt"
+	_place_centered(_ammo_prompt, REVIVE_PROMPT_TOP_FRAC, REVIVE_PROMPT_TOP_FRAC + BANNER_HEIGHT_FRAC)
+	_ammo_prompt.visible = false
+	_root.add_child(_ammo_prompt)
+	_revive_bar_label = _label("", REVIVE_PROMPT_FONT_PX)
+	_revive_bar_label.name = "ReviveBarLabel"
+	_place_centered(_revive_bar_label, REVIVE_BAR_LABEL_TOP_FRAC, REVIVE_BAR_TOP_FRAC)
+	_revive_bar_label.visible = false
+	_root.add_child(_revive_bar_label)
+	_revive_bar = ProgressBar.new()
+	_revive_bar.name = "ReviveBar"
+	_style_bar(_revive_bar, &"CropBar", REVIVE_BAR_H_PX, REVIVE_BAR_W_PX)
+	_revive_bar.max_value = 1.0
+	_revive_bar.step = 0.0
+	_revive_bar.modulate = COLOR_WARN
+	_revive_bar.anchor_left = 0.5
+	_revive_bar.anchor_right = 0.5
+	_revive_bar.anchor_top = REVIVE_BAR_TOP_FRAC
+	_revive_bar.anchor_bottom = REVIVE_BAR_TOP_FRAC
+	_revive_bar.offset_left = -REVIVE_BAR_W_PX * 0.5
+	_revive_bar.offset_right = REVIVE_BAR_W_PX * 0.5
+	_revive_bar.offset_top = 0.0
+	_revive_bar.offset_bottom = REVIVE_BAR_H_PX
+	_revive_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_revive_bar.visible = false
+	_root.add_child(_revive_bar)
+
+
+func _place_centered(l: Label, top_frac: float, bottom_frac: float) -> void:
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.anchor_left = 0.2
+	l.anchor_right = 0.8
+	l.anchor_top = top_frac
+	l.anchor_bottom = bottom_frac
+	l.offset_left = 0.0
+	l.offset_right = 0.0
+	l.offset_top = 0.0
+	l.offset_bottom = 0.0
 
 
 ## Persistent (non-fading) centered text, hidden until a state turns it on.
@@ -518,6 +636,11 @@ func _connect_events() -> void:
 	GameEvents.spectate_changed.connect(_on_spectate_changed)
 	GameEvents.horde_wave_changed.connect(_on_horde_wave_changed)
 	GameEvents.horde_wave_progress.connect(_on_horde_wave_progress)
+	GameEvents.player_downed.connect(_on_player_downed)
+	GameEvents.player_revived.connect(_on_player_revived)
+	GameEvents.hunter_downed.connect(_on_hunter_downed)
+	GameEvents.hunter_revived.connect(_on_hunter_revived)
+	GameEvents.ammo_picked_up.connect(_on_ammo_picked_up)
 
 
 func _apply_touch_layout(is_touch: bool) -> void:
@@ -571,6 +694,7 @@ func _process(delta: float) -> void:
 		return
 	_update_health()
 	_update_weapon()
+	_update_revive()
 	_update_scope_and_crosshair()
 	var origin: Vector3 = _player.global_position
 	var yaw: float = _player.rotation.y
@@ -595,6 +719,7 @@ func _process(delta: float) -> void:
 			_publish_probe()
 	if _banner_left_s > 0.0:
 		_banner_left_s -= delta
+		_place_wave_banner()   # the panel may still be laid out when the banner first shows
 		if _banner_left_s <= 0.0:
 			_wave_banner.visible = false
 	_poll_t -= delta
@@ -680,6 +805,62 @@ func _update_weapon() -> void:
 		_weapon_panel.set_active(slot)
 	_weapon_panel.set_ammo(w.ammo_in_mag, w.ammo_reserve, _player.has_infinite_reserve(), int(w.def.get("mag_size", 1)))
 	_weapon_panel.set_reload(w.is_reloading(), w.get_reload_progress())
+	_update_ammo_warning(w, slot)
+
+
+## Counted ammo (horde level 2 only): one message when the weapon in hand has only the magazine left ("Última carga",
+## once per weapon until the reserve is refilled) and one when it has nothing at all ("Sem munição").
+func _update_ammo_warning(w: Weapon, slot: int) -> void:
+	if not _horde or _ended or _player.has_infinite_reserve() or not _player.is_alive():
+		return
+	var state: int = AMMO_OK
+	if w.ammo_reserve <= 0:
+		state = AMMO_EMPTY if w.ammo_in_mag <= 0 else AMMO_LAST
+	var previous: int = int(_ammo_state.get(slot, AMMO_OK))
+	var slot_changed: bool = slot != _ammo_warn_slot
+	_ammo_warn_slot = slot
+	_ammo_state[slot] = state
+	match state:
+		AMMO_OK:
+			_ammo_warned.erase(slot)
+		AMMO_LAST:
+			if not _ammo_warned.has(slot):
+				_ammo_warned[slot] = true
+				_show_ctx(AMMO_LAST_TEXT, AMMO_WARN_S, COLOR_WARN)
+		AMMO_EMPTY:
+			if previous != AMMO_EMPTY or slot_changed:
+				_show_ctx(AMMO_EMPTY_TEXT, AMMO_WARN_S, COLOR_DANGER)
+
+
+## RevivePrompt and ReviveBar (horde level 2): the downed ally in reach and the hold progress, read from the player.
+## Without a revive target, AmmoPrompt: the ammo crate a press of interact takes (get_ammo_crate_target).
+func _update_revive() -> void:
+	var target: int = _player.get_revive_target_slot() if _horde and not _ended and not _downed else NO_SLOT
+	var crate: bool = target < 0 and _horde and not _ended and not _downed and _player.get_ammo_crate_target() >= 0
+	if crate:
+		if InputSetup.is_touch_mode():
+			_ammo_prompt.text = AMMO_PROMPT_TOUCH_TEXT % TouchControls.INTERACT_LABEL_CRATE
+		else:
+			_ammo_prompt.text = AMMO_PROMPT_TEXT % InputSetup.get_key_label(&"interact")
+	_ammo_prompt.visible = crate
+	if target < 0:
+		_revive_prompt.visible = false
+		_revive_bar.visible = false
+		_revive_bar_label.visible = false
+		return
+	var who: String = _hunter_name(target)
+	var progress: float = _player.get_revive_progress()
+	var holding: bool = progress > 0.0
+	if holding:
+		_revive_bar.value = progress
+		_revive_bar_label.text = REVIVE_BAR_TEXT % who
+	elif InputSetup.is_touch_mode():
+		_revive_prompt.text = REVIVE_PROMPT_TOUCH % who
+	else:
+		_revive_prompt.text = REVIVE_PROMPT_KEYS % [InputSetup.get_key_label(&"interact"), who]
+	_revive_prompt.visible = not holding
+	_revive_bar.visible = holding
+	_revive_bar_label.visible = holding
 
 
 func _update_scope_and_crosshair() -> void:
@@ -797,14 +978,15 @@ func _poll_allies() -> void:
 		if spectating and hunter.slot == _spectate_slot:
 			continue   # the ally in the centre of the map
 		var down: bool = not hunter.is_alive()
+		var downed: bool = hunter.is_downed()
 		var color: Color = HunterVisualBase.slot_color(hunter.slot)
 		if not hunter.is_local() and not down:
 			standing += 1
 		_ally_points.append(hunter.global_position)
 		_ally_colors.append(color)
 		_ally_yaws.append(hunter.rotation.y)
-		_ally_down.append(1 if down else 0)
-		_marks.append({"pos": hunter.global_position, "kind": &"ally", "color": color, "down": down})
+		_ally_down.append(Minimap.ALLY_DOWN_DOWNED if downed else (1 if down else 0))
+		_marks.append({"pos": hunter.global_position, "kind": &"ally", "color": color, "down": down, "downed": downed})
 	_minimap.allies = _ally_points
 	_minimap.ally_colors = _ally_colors
 	_minimap.ally_yaws = _ally_yaws
@@ -950,6 +1132,8 @@ func _enter_horde_layout() -> void:
 
 
 func _poll_horde() -> void:
+	_minimap.ammo_crates = _world.get_ammo_crate_positions()
+	_refresh_downed_hint()
 	var objective: Vector3 = _world.get_objective_position()
 	_minimap.objective = objective
 	_compass.objective = objective
@@ -973,6 +1157,16 @@ func _show_wave_banner(text: String) -> void:
 	_wave_banner.text = text
 	_wave_banner.visible = not _ended
 	_banner_left_s = HORDE_BANNER_S
+	_place_wave_banner()
+
+
+## Anchors the wave banner under the crop panel, HORDE_BANNER_GAP_PX below its real bottom edge.
+func _place_wave_banner() -> void:
+	var panel_bottom: float = _crop_panel.global_position.y + _crop_panel.size.y - _root.global_position.y
+	_wave_banner.anchor_top = 0.0
+	_wave_banner.anchor_bottom = 0.0
+	_wave_banner.offset_top = panel_bottom + HORDE_BANNER_GAP_PX
+	_wave_banner.offset_bottom = _wave_banner.offset_top + HORDE_BANNER_HEIGHT_PX
 
 
 func _play_wave_sound(id: StringName) -> void:
@@ -1102,6 +1296,7 @@ func _on_hunter_died(slot: int) -> void:
 
 ## Local hunter fell. Online with an ally still up, the hunt goes on without input: say so until it ends.
 func _on_player_died() -> void:
+	_set_downed(false)   # bled out: the fall banner below replaces the "you fell" texts
 	_player_down = true
 	_refresh_onboarding_ui()
 	if _ended or _world == null:
@@ -1196,6 +1391,82 @@ func _on_hunt_ended(result: HuntResult) -> void:
 	_crop_attack = false
 	_wave_banner.visible = false
 	_banner_left_s = 0.0
+	_set_downed(false)
+	_revive_prompt.visible = false
+	_ammo_prompt.visible = false
+	_revive_bar.visible = false
+	_revive_bar_label.visible = false
+
+
+# ---------------------------------------------------------------------------
+# Horde level 2: downed, revive and ammo events
+# ---------------------------------------------------------------------------
+
+## The local hunter went down (not dead yet): red veil, "Você caiu!" and the bleed-out countdown.
+func _on_player_downed(bleed_out_s: float) -> void:
+	_bleed_limited = bleed_out_s > 0.0
+	_player_down = true
+	_refresh_onboarding_ui()
+	_set_downed(true)
+
+
+func _on_player_revived(_health: float) -> void:
+	_set_downed(false)
+	_player_down = false
+	_refresh_onboarding_ui()
+
+
+func _set_downed(on: bool) -> void:
+	_downed = on and not _ended
+	if _downed_overlay == null:
+		return
+	_downed_overlay.visible = _downed
+	_downed_label.visible = _downed
+	_downed_hint.visible = _downed
+	_crosshair.visible = not _downed and _spectate_slot == NO_SLOT   # nothing to aim at from the ground
+	_refresh_downed_hint()
+
+
+## Second line "Sangrando: N s" only when the fall has a time limit; refreshed by the 10 Hz poll.
+func _refresh_downed_hint() -> void:
+	if not _downed:
+		return
+	var text: String = DOWNED_HINT_TEXT
+	if _bleed_limited and _player != null:
+		text += "\n" + DOWNED_BLEED_TEXT % ceili(_player.get_bleed_out_left_s())
+	_downed_hint.text = text
+
+
+## An ally (any slot but ours) went down: where to go and what to hold.
+func _on_hunter_downed(slot: int) -> void:
+	if _ended or slot == Net.get_local_slot():
+		return
+	var text: String
+	if InputSetup.is_touch_mode():
+		text = HUNTER_DOWNED_TOUCH_TEXT % _hunter_name(slot)
+	else:
+		text = HUNTER_DOWNED_KEYS_TEXT % [_hunter_name(slot), InputSetup.get_key_label(&"interact")]
+	_show_ctx(text, REVIVE_MSG_S, HunterVisualBase.slot_color(slot))
+
+
+func _on_hunter_revived(slot: int, by_slot: int) -> void:
+	if _ended:
+		return
+	var local: int = Net.get_local_slot()
+	if slot == local:
+		_show_ctx(REVIVED_LOCAL_TEXT % _hunter_name(by_slot), REVIVE_MSG_S, HunterVisualBase.slot_color(by_slot))
+	elif by_slot == local:
+		_show_ctx(REVIVED_BY_LOCAL_TEXT % _hunter_name(slot), REVIVE_MSG_S, HunterVisualBase.slot_color(slot))
+	else:
+		_show_ctx(REVIVED_OTHERS_TEXT % [_hunter_name(by_slot), _hunter_name(slot)], REVIVE_MSG_S,
+			HunterVisualBase.slot_color(by_slot))
+
+
+## Cartridges taken from a crate: the "last magazine" warnings may fire again once the reserve runs out again.
+func _on_ammo_picked_up(rounds: int) -> void:
+	_ammo_warned.clear()
+	if not _ended:
+		_show_ctx(AMMO_PICKUP_TEXT % rounds, AMMO_PICKUP_S, MapMarkers.COLOR_AMMO)
 
 
 static func _money(amount: int) -> String:

@@ -27,8 +27,24 @@ const ONBOARDING_FIELDS: Array[String] = [
 	"queue_max", "medkit_health_below_pct", "boar_sighted_range_m", "boar_sighted_half_angle_deg", "drone_no_sighting_s",
 	"objective_kills", "objective_crop_min_pct",
 ]
+const HORDE_VERSION: int = 2
+const HORDE_MAX_CRATES: int = 8
+const HORDE_ROUTE_NUMBERS: Array[String] = ["route_crop_margin_m", "route_corner_out_m", "route_waypoint_arrive_m"]
+const HORDE_OVERRIDE_KEYS: Array[String] = [
+	"first_wave_delay_s", "intermission_s", "barn_drain_mult", "to_barn_speed_frac", "player_count_mult",
+	"extra_group_delay_s", "kill_reward_mult", "victory_bonus_money", "waves",
+]
+const HORDE_LEVEL_KEYS: Array[String] = [
+	"level", "name", "description", "ammo", "ammo_crates", "confine", "player_spawn", "revive", "boar_overrides",
+]
+const HORDE_BOAR_FIELDS: Array[String] = [
+	"aggression", "aggro_radius_m", "max_charges", "charge_damage", "charge_speed_mps", "charge_telegraph_s",
+	"recover_s", "run_speed_mps", "vision_range_m", "alert_time_s",
+]
+const HORDE_AGGRESSIONS: Array[String] = ["never", "defend_in_herd", "provoked", "always"]
 
 var _raw: Dictionary = {}
+var _horde_levels: Array[Dictionary] = []   # resolved levels, built lazily, cleared on reload()
 var _index: Dictionary = {}   # file key -> { id String -> Dictionary }
 var _errors: PackedStringArray = PackedStringArray()
 
@@ -41,6 +57,7 @@ func reload() -> void:
 	_raw.clear()
 	_index.clear()
 	_errors.clear()
+	_horde_levels.clear()
 	for key: String in FILES:
 		var path: String = FILES[key]
 		var text: String = FileAccess.get_file_as_string(path)
@@ -76,6 +93,38 @@ func get_net() -> Dictionary:
 ## data/horde.json as loaded ({} if missing; the cause is then in get_load_errors()).
 func get_horde() -> Dictionary:
 	return _raw.get("horde", {})
+
+
+func get_horde_level_count() -> int:
+	var levels: Variant = _raw.get("horde", {}).get("levels")
+	return (levels as Array).size() if levels is Array else 0
+
+
+## Resolved level (top-level fields without "levels" + "overrides" + the level's own keys); {} outside 1..count.
+## Shared cached dictionary: treat as read-only.
+func get_horde_level(level: int) -> Dictionary:
+	var count: int = get_horde_level_count()
+	if level < 1 or level > count:
+		return {}
+	if _horde_levels.size() != count:
+		_horde_levels.clear()
+		var h: Dictionary = _raw["horde"]
+		for def: Variant in h["levels"]:
+			_horde_levels.append(_resolve_horde_level(h, def) if def is Dictionary else {})
+	return _horde_levels[level - 1]
+
+
+## get_boar_type(type_id) with the level's boar_overrides applied (copy). Level 0 or out of range = plain type.
+func get_horde_boar_type(type_id: StringName, level: int) -> Dictionary:
+	var base: Dictionary = get_boar_type(type_id)
+	var cfg: Dictionary = get_horde_level(level)
+	var ov: Variant = cfg.get("boar_overrides", {}).get(String(type_id))
+	if base.is_empty() or not (ov is Dictionary) or (ov as Dictionary).is_empty():
+		return base
+	var out: Dictionary = base.duplicate(true)
+	for k: Variant in ov:
+		out[k] = (ov as Dictionary)[k]
+	return out
 
 
 func get_weapon(id: StringName) -> Dictionary:
@@ -191,7 +240,8 @@ func _validate() -> void:
 	for key: String in FILES:
 		if _raw[key].is_empty():
 			continue
-		if int(_raw[key].get("version", 0)) != 1:
+		var expected: int = HORDE_VERSION if key == "horde" else 1
+		if int(_raw[key].get("version", 0)) != expected:
 			_errors.append("Data: %s has unsupported version" % FILES[key])
 	for key: String in LISTS:
 		var seen: Dictionary = {}
@@ -376,11 +426,199 @@ func _validate_onboarding() -> void:
 		_errors.append("Data: game.onboarding.objective_crop_min_pct must be <= 100")
 
 
-# Horde mode rules (docs/horda.md §3.1). Skipped when the file could not be read (error already recorded).
+# Horde mode rules (docs/horda.md §3.1, docs/plano_horda_nivel2.md §3). Skipped when the file could not be read
+# (error already recorded). Rules 1-4 run on the top level and on every level resolved with its "overrides".
 func _validate_horde() -> void:
 	var h: Dictionary = _raw.get("horde", {})
 	if h.is_empty():
 		return
+	if not _is_whole(h.get("version")) or int(h["version"]) != HORDE_VERSION:
+		_errors.append("Data: horde.version must be %d" % HORDE_VERSION)
+	_validate_horde_config(h)
+	_validate_horde_route(h)
+	var levels: Variant = h.get("levels")
+	if not (levels is Array) or (levels as Array).is_empty():
+		_errors.append("Data: horde.levels must have at least one level")
+		return
+	var count: int = (levels as Array).size()
+	for i: int in count:
+		_validate_horde_level(h, (levels as Array)[i], i + 1)
+
+
+static func _is_num(v: Variant) -> bool:
+	return typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT
+
+
+static func _is_whole(v: Variant) -> bool:
+	return _is_num(v) and float(v) == floorf(float(v))
+
+
+func _validate_horde_route(h: Dictionary) -> void:
+	var crops: Variant = h.get("route_avoid_crops")
+	if not (crops is Array):
+		_errors.append("Data: horde.route_avoid_crops must be an array")
+	else:
+		for c: Variant in crops:
+			if typeof(c) != TYPE_STRING:
+				_errors.append("Data: horde.route_avoid_crops has a non-string entry")
+	for f: String in HORDE_ROUTE_NUMBERS:
+		var v: Variant = h.get(f)
+		if not _is_num(v):
+			_errors.append("Data: horde.%s lacks a number" % f)
+		elif float(v) < 0.0 or (float(v) == 0.0 and f != "route_crop_margin_m"):
+			_errors.append("Data: horde.%s must be %s" % [f, ">= 0" if f == "route_crop_margin_m" else "> 0"])
+
+
+## Resolved level: top-level fields (without "levels") + "overrides" + the level's own keys. Cached per reload.
+func _resolve_horde_level(h: Dictionary, level_def: Dictionary) -> Dictionary:
+	var out: Dictionary = h.duplicate(true)
+	out.erase("levels")
+	var ov: Variant = level_def.get("overrides", {})
+	if ov is Dictionary:
+		for k: Variant in ov:
+			out[k] = (ov as Dictionary)[k]
+	for k: String in HORDE_LEVEL_KEYS:
+		if level_def.has(k):
+			out[k] = level_def[k]
+	return out
+
+
+func _validate_horde_level(h: Dictionary, level_def: Variant, level: int) -> void:
+	var label: String = "horde level %d" % level
+	if not (level_def is Dictionary):
+		_errors.append("Data: %s is not an object" % label)
+		return
+	var d: Dictionary = level_def
+	if not _is_whole(d.get("level")) or int(d["level"]) != level:
+		_errors.append("Data: %s: 'level' must be %d" % [label, level])
+	for f: String in ["name", "description"]:
+		if typeof(d.get(f)) != TYPE_STRING:
+			_errors.append("Data: %s: '%s' must be a string" % [label, f])
+	for f: String in ["overrides", "ammo", "ammo_crates", "confine", "revive", "boar_overrides"]:
+		if not (d.get(f) is Dictionary):
+			_errors.append("Data: %s: '%s' must be an object" % [label, f])
+	if not (d.get("player_spawn") is Array):
+		_errors.append("Data: %s: 'player_spawn' must be an array" % label)
+	elif not (d["player_spawn"] as Array).is_empty():
+		var ps: Array = d["player_spawn"]
+		var ps_ok: bool = ps.size() == 3
+		for v: Variant in ps:
+			ps_ok = ps_ok and _is_num(v)
+		if not ps_ok:
+			_errors.append("Data: %s: 'player_spawn' must be [] or [x, z, yaw_deg]" % label)
+	var ov: Variant = d.get("overrides")
+	if ov is Dictionary:
+		for k: Variant in ov:
+			if not HORDE_OVERRIDE_KEYS.has(str(k)):
+				_errors.append("Data: %s: override '%s' is not allowed" % [label, k])
+		if not (ov as Dictionary).is_empty():
+			var before: int = _errors.size()
+			_validate_horde_config(_resolve_horde_level(h, d))
+			for i: int in range(before, _errors.size()):
+				var msg: String = _errors[i]
+				var at: int = msg.find("horde")
+				if at >= 0:
+					_errors[i] = msg.substr(0, at) + label + msg.substr(at + 5)
+	if d.get("ammo") is Dictionary:
+		_validate_horde_ammo(d["ammo"], label)
+	if d.get("ammo_crates") is Dictionary:
+		_validate_horde_crates(d["ammo_crates"], label)
+	if d.get("confine") is Dictionary:
+		var c: Dictionary = d["confine"]
+		if typeof(c.get("enabled")) != TYPE_BOOL:
+			_errors.append("Data: %s: confine.enabled must be a bool" % label)
+		if not _is_num(c.get("inset_m")) or float(c["inset_m"]) < 0.0:
+			_errors.append("Data: %s: confine.inset_m must be >= 0" % label)
+		for f: String in ["hint_s", "hint_interval_s"]:
+			if not _is_num(c.get(f)) or float(c[f]) <= 0.0:
+				_errors.append("Data: %s: confine.%s must be > 0" % [label, f])
+	if d.get("revive") is Dictionary:
+		_validate_horde_revive(d["revive"], label)
+	if d.get("boar_overrides") is Dictionary:
+		_validate_horde_boar_overrides(d["boar_overrides"], label)
+
+
+func _validate_horde_ammo(a: Dictionary, label: String) -> void:
+	if typeof(a.get("infinite")) != TYPE_BOOL:
+		_errors.append("Data: %s: ammo.infinite must be a bool" % label)
+	var ok: bool = true
+	for f: String in ["start_reserve_mags", "reserve_cap_mags"]:
+		if not _is_whole(a.get(f)) or int(a[f]) < 0:
+			_errors.append("Data: %s: ammo.%s must be an integer >= 0" % [label, f])
+			ok = false
+	if ok and typeof(a.get("infinite")) == TYPE_BOOL and not bool(a["infinite"]):
+		if int(a["reserve_cap_mags"]) < maxi(1, int(a["start_reserve_mags"])):
+			_errors.append("Data: %s: ammo.reserve_cap_mags must be >= max(1, start_reserve_mags) when not infinite" % label)
+
+
+func _validate_horde_crates(c: Dictionary, label: String) -> void:
+	var positions: Variant = c.get("positions")
+	var has_positions: bool = false
+	if not (positions is Array):
+		_errors.append("Data: %s: ammo_crates.positions must be an array" % label)
+	else:
+		var pa: Array = positions
+		has_positions = not pa.is_empty()
+		if pa.size() > HORDE_MAX_CRATES:
+			_errors.append("Data: %s: ammo_crates.positions has more than %d entries" % [label, HORDE_MAX_CRATES])
+		for p: Variant in pa:
+			if not (p is Array) or (p as Array).size() != 2 or not _is_num((p as Array)[0]) or not _is_num((p as Array)[1]):
+				_errors.append("Data: %s: ammo_crates.positions entries must be [x, z]" % label)
+	if not _is_whole(c.get("mags_per_crate")) or int(c["mags_per_crate"]) < 0:
+		_errors.append("Data: %s: ammo_crates.mags_per_crate must be an integer >= 0" % label)
+	elif has_positions and int(c["mags_per_crate"]) < 1:
+		_errors.append("Data: %s: ammo_crates.mags_per_crate must be >= 1 with crates" % label)
+	for f: String in ["respawn_s", "pickup_radius_m", "claim_tolerance_m", "claim_retry_s"]:
+		var v: Variant = c.get(f)
+		if not _is_num(v) or float(v) < 0.0:
+			_errors.append("Data: %s: ammo_crates.%s must be >= 0" % [label, f])
+		elif has_positions and float(v) == 0.0 and (f == "pickup_radius_m" or f == "claim_retry_s"):
+			_errors.append("Data: %s: ammo_crates.%s must be > 0 with crates" % [label, f])
+
+
+func _validate_horde_revive(r: Dictionary, label: String) -> void:
+	if typeof(r.get("enabled")) != TYPE_BOOL:
+		_errors.append("Data: %s: revive.enabled must be a bool" % label)
+	for f: String in ["health", "hold_s", "radius_m", "bleed_out_s", "claim_tolerance_m", "retry_s"]:
+		if not _is_num(r.get(f)):
+			_errors.append("Data: %s: revive.%s must be a number" % [label, f])
+			return
+	if float(r["bleed_out_s"]) < 0.0:
+		_errors.append("Data: %s: revive.bleed_out_s must be >= 0" % label)
+	if float(r["claim_tolerance_m"]) < 0.0:
+		_errors.append("Data: %s: revive.claim_tolerance_m must be >= 0" % label)
+	if float(r["retry_s"]) < 0.0:
+		_errors.append("Data: %s: revive.retry_s must be >= 0" % label)
+	if typeof(r.get("enabled")) == TYPE_BOOL and bool(r["enabled"]):
+		var max_health: float = float(_raw.get("game", {}).get("player", {}).get("max_health", 0.0))
+		if float(r["health"]) <= 0.0 or float(r["health"]) > max_health:
+			_errors.append("Data: %s: revive.health must be in (0, player.max_health]" % label)
+		for f: String in ["hold_s", "radius_m", "retry_s"]:
+			if float(r[f]) <= 0.0:
+				_errors.append("Data: %s: revive.%s must be > 0 when enabled" % [label, f])
+
+
+func _validate_horde_boar_overrides(bo: Dictionary, label: String) -> void:
+	var boar_types: Dictionary = _index.get("boars", {})
+	for type_id: Variant in bo:
+		if not boar_types.has(str(type_id)):
+			_errors.append("Data: %s: boar_overrides references unknown boar type '%s'" % [label, type_id])
+		var fields: Variant = bo[type_id]
+		if not (fields is Dictionary):
+			_errors.append("Data: %s: boar_overrides.%s must be an object" % [label, type_id])
+			continue
+		for f: Variant in fields:
+			var v: Variant = (fields as Dictionary)[f]
+			if not HORDE_BOAR_FIELDS.has(str(f)):
+				_errors.append("Data: %s: boar_overrides.%s.%s is not an allowed field" % [label, type_id, f])
+			elif str(f) == "aggression":
+				if typeof(v) != TYPE_STRING or not HORDE_AGGRESSIONS.has(str(v)):
+					_errors.append("Data: %s: boar_overrides.%s.aggression is invalid" % [label, type_id])
+			elif not _is_num(v) or float(v) < 0.0:
+				_errors.append("Data: %s: boar_overrides.%s.%s must be a number >= 0" % [label, type_id, f])
+
+
+func _validate_horde_config(h: Dictionary) -> void:
 	var typed: Dictionary = {
 		"name": TYPE_STRING, "description": TYPE_STRING, "map_id": TYPE_STRING, "objective_prop_id": TYPE_STRING,
 		"first_wave_delay_s": TYPE_FLOAT, "intermission_s": TYPE_FLOAT, "barn_drain_mult": TYPE_FLOAT,

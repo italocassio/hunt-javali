@@ -55,6 +55,7 @@ var _block_water: Array[Vector3] = []     # x, z, radius
 var _flora_placements: Dictionary = {}    # StringName id -> PackedVector2Array (last build_flora)
 var _minimap_image: Image = null
 var _minimap_texture: ImageTexture = null
+var _horde_layout: bool = false
 
 
 func get_map_rect() -> Rect2:
@@ -195,10 +196,13 @@ func build_props_and_water() -> void:
 				visual = FallbackMeshes.box(_fallback_size(p), FALLBACK_PROP_COLORS.get(p.prop_id, FALLBACK_PROP_COLOR) as Color)
 			visual.name = "Visual"
 			p.add_child(visual)
-		if p.collision_size != Vector3.ZERO and _shapes_used < STATIC_SHAPE_BUDGET:
+		if _horde_layout and not p.horde_collision_boxes.is_empty():
+			_build_horde_body(p)
+		elif p.collision_size != Vector3.ZERO and _shapes_used < STATIC_SHAPE_BUDGET:
 			var body: StaticBody3D = StaticBody3D.new()
 			body.name = "Body"
-			body.collision_layer = Layers.STATIC
+			# Horde (docs/plano_horda_nivel2.md C1): the fence blocks the hunter only, never a bullet or a gaze.
+			body.collision_layer = Layers.FENCE if _horde_layout and FENCE_IDS.has(p.prop_id) else Layers.STATIC
 			body.collision_mask = 0
 			var cs: CollisionShape3D = CollisionShape3D.new()
 			var box: BoxShape3D = BoxShape3D.new()
@@ -208,8 +212,13 @@ func build_props_and_water() -> void:
 			body.add_child(cs)
 			p.add_child(body)
 			_shapes_used += 1
-		if p.footprint_radius_m > 0.0:
+		if _horde_layout and not p.horde_obstacle_circles.is_empty():
+			for circle: Vector3 in p.horde_obstacle_circles:
+				var at: Vector3 = p.global_transform * Vector3(circle.x, 0.0, circle.y)
+				obstacles.add_circle(at.x, at.z, circle.z)
+		elif p.footprint_radius_m > 0.0:
 			obstacles.add_circle(gx, gz, p.footprint_radius_m)
+		if p.footprint_radius_m > 0.0:
 			_prop_circles.append(Vector3(gx, gz, p.footprint_radius_m))
 		if FENCE_IDS.has(p.prop_id):
 			var pt: Rect2 = Rect2(Vector2(gx, gz), Vector2.ZERO)
@@ -218,6 +227,70 @@ func build_props_and_water() -> void:
 	for key: String in groups.keys():
 		_build_prop_group(key, templates[key] as Dictionary, groups[key] as Array[Transform3D])
 
+
+## Horde layout: one StaticBody3D "Body" (layer static) with one box shape per horde_collision_boxes entry, each
+## counted in the static shape budget (boxes past the budget are left out).
+func _build_horde_body(p: PropSpawn) -> void:
+	var body: StaticBody3D = StaticBody3D.new()
+	body.name = "Body"
+	body.collision_layer = Layers.STATIC
+	body.collision_mask = 0
+	for b: AABB in p.horde_collision_boxes:
+		if _shapes_used >= STATIC_SHAPE_BUDGET:
+			break
+		var cs: CollisionShape3D = CollisionShape3D.new()
+		var box: BoxShape3D = BoxShape3D.new()
+		box.size = b.size
+		cs.shape = box
+		cs.position = b.get_center()
+		body.add_child(cs)
+		_shapes_used += 1
+	p.add_child(body)
+
+
+# --- Horde layout (docs/plano_horda_nivel2.md section 4.3) ----------------------------------------
+
+## Call before build_props_and_water. true: fence bodies on Layers.FENCE, horde_collision_boxes and
+## horde_obstacle_circles replace collision_size / footprint_radius_m. false = the layout of always.
+func set_horde_layout(on: bool) -> void:
+	_horde_layout = on
+
+
+## XZ rect through the centers of the fence segments and gates; Rect2() if the map has no fence. Valid after
+## build_props_and_water.
+func get_farm_rect() -> Rect2:
+	return _farm_rect if _has_farm_rect else Rect2()
+
+
+## Rectangles the horde route goes around (HordeRoute.plan): every crop field whose crop is in avoid_crops (grown
+## crop_margin_m, no exit) and every PropSpawn with horde_collision_boxes (XZ bounds of its boxes; exit in front
+## of the open side, at -Z local, collision_size.z / 2 + corner_out_m from the marker). Valid after
+## build_props_and_water.
+func get_horde_route_obstacles(avoid_crops: Array, crop_margin_m: float, corner_out_m: float) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for f: CropField in get_crop_fields():
+		if avoid_crops.has(String(f.crop)) or avoid_crops.has(f.crop):
+			out.append({"rect": f.get_rect().grow(crop_margin_m), "exit": Vector2.INF})
+	var holder: Node = get_node_or_null(^"PropSpawns")
+	if holder == null:
+		return out
+	for c: Node in holder.get_children():
+		var p: PropSpawn = c as PropSpawn
+		if p == null or p.horde_collision_boxes.is_empty():
+			continue
+		var xf: Transform3D = p.global_transform
+		var rect: Rect2 = Rect2()
+		var first: bool = true
+		for b: AABB in p.horde_collision_boxes:
+			for corner: Vector2 in [Vector2(b.position.x, b.position.z), Vector2(b.end.x, b.position.z),
+					Vector2(b.end.x, b.end.z), Vector2(b.position.x, b.end.z)]:
+				var g: Vector3 = xf * Vector3(corner.x, 0.0, corner.y)
+				var pt: Rect2 = Rect2(Vector2(g.x, g.z), Vector2.ZERO)
+				rect = pt if first else rect.merge(pt)
+				first = false
+		var exit3: Vector3 = xf.origin + xf.basis * Vector3(0.0, 0.0, -(p.collision_size.z * 0.5 + corner_out_m))
+		out.append({"rect": rect, "exit": Vector2(exit3.x, exit3.z)})
+	return out
 
 
 func _fallback_size(p: PropSpawn) -> Vector3:

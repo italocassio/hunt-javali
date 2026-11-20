@@ -126,6 +126,12 @@ func get_selected_mode() -> StringName:
 	return _session.get_selected_mode() if _session != null else Ids.MODE_CONTRACT
 
 
+## (1) Horde level of the room, equal on every peer; 1..Data.get_horde_level_count(). Back to 1 in
+## create_room / join_room / leave_room. Only read when the mode is &"horde".
+func get_selected_horde_level() -> int:
+	return _session.get_selected_horde_level() if _session != null else 1
+
+
 func get_link_path(slot: int) -> int:
 	return _session.get_link_path(slot) if _session != null else Path.NONE
 
@@ -203,6 +209,12 @@ func host_select_contract(map_id: StringName, contract_index: int) -> bool:
 ## Changed: L_LOBBY to everyone + roster_changed. Does not touch the selected map / contract.
 func host_select_mode(mode: StringName) -> bool:
 	return _session != null and _session.host_select_mode(mode)
+
+
+## Host, LOBBY only; level in 1..Data.get_horde_level_count(). Changed: L_LOBBY to everyone + roster_changed.
+## Does not touch the mode, map or contract.
+func host_select_horde_level(level: int) -> bool:
+	return _session != null and _session.host_select_horde_level(level)
 
 
 func host_start_hunt() -> bool:

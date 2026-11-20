@@ -48,7 +48,7 @@ var objective_icon: Texture2D = null
 
 var _yaw: float = 0.0
 var _origin: Vector3 = Vector3.ZERO
-var _marks: Array[Dictionary] = []   # {pos: Vector3, kind: StringName}; kind &"ally" also has color: Color, down: bool
+var _marks: Array[Dictionary] = []   # {pos: Vector3, kind: StringName}; kind &"ally" also has color: Color, down: bool, downed: bool
 
 
 func _init() -> void:
@@ -176,10 +176,13 @@ func _draw_marker(mark: Dictionary, heading_deg: float, w: float) -> void:
 	var at: Vector2 = Vector2(w * 0.5 + rel / VISIBLE_SPAN_DEG * w, BAND_H_PX - MARKER_OFFSET_PX)
 	var kind: StringName = mark["kind"]
 	var color: Color = mark.get("color", COLOR_TEXT) if kind == MapMarkers.KIND_ALLY else MapMarkers.color_of(kind)
-	if at_edge:
+	var downed: bool = kind == MapMarkers.KIND_ALLY and bool(mark.get("downed", false))
+	if downed:
+		color = MapMarkers.COLOR_DOWNED   # a revivable ally is always fully visible, even behind the hunter
+	elif at_edge:
 		color.a = EDGE_ALPHA
 	if kind == MapMarkers.KIND_ALLY:
-		_draw_ally_marker(at, color, bool(mark.get("down", false)))
+		_draw_ally_marker(at, color, bool(mark.get("down", false)) and not downed)
 	else:
 		MapMarkers.draw(self, kind, at, color, float(HALF_PX.get(kind, 6.0)))
 

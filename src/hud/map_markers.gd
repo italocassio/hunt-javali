@@ -11,12 +11,17 @@ const KIND_BOAR: StringName = &"boar"
 const KIND_DOG_TARGET: StringName = &"dog_target"
 const KIND_DOG: StringName = &"dog"
 const KIND_ALLY: StringName = &"ally"
+## Horde level 2 only, drawn by the minimap outside DRAW_ORDER (an ammo crate dot).
+const KIND_AMMO: StringName = &"ammo"
 
 const COLOR_CROP: Color = Color("#3FAF5A")
 const COLOR_BAIT: Color = Color("#3CC7B4")
 const COLOR_REVEALED: Color = Color("#FF8A65")
 const COLOR_BOAR: Color = Color("#D9452B")
 const COLOR_DOG: Color = Color("#F2C12E")
+const COLOR_AMMO: Color = Color("#8FB339")
+## A downed ally who can still be revived (horde level 2): the same red on the minimap and on the compass.
+const COLOR_DOWNED: Color = Color("#E04A3A")
 
 ## Black outline around every filled shape.
 const OUTLINE_PX: float = 1.5
@@ -45,6 +50,8 @@ static func color_of(kind: StringName) -> Color:
 			return COLOR_REVEALED
 		KIND_BOAR:
 			return COLOR_BOAR
+		KIND_AMMO:
+			return COLOR_AMMO
 		_:
 			return COLOR_DOG
 

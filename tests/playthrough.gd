@@ -78,6 +78,8 @@ func _run() -> void:
 	await _case("horde_wave_cleared_same_frame_once", _scn_horde_wave_cleared_same_frame)
 	await _case("horde_debug_skip_guards_and_natural_countdown", _scn_horde_skip_guards)
 	await _case("horde_death_and_abandon", _scn_horde_death_and_abandon)
+	await _case("horde_h5_level2_counted_ammo_crate_and_victory", _scn_horde2_victory)
+	await _case("horde_h6_level2_reserve_falls_and_rises_on_the_crate", _scn_horde2_ammo_loop)
 	await _case("contract_after_horde_has_no_leftovers", _scn_contract_after_horde)
 	_t.call("cleanup_test_files")
 	if not _finished:
@@ -103,7 +105,7 @@ func _connect(sig: Signal, handler: Callable) -> void:
 	_conns.append([sig, handler])
 
 
-func _open(contract_index: int = 0, weapon_id: StringName = &"", mode: StringName = Ids.MODE_CONTRACT) -> bool:
+func _open(contract_index: int = 0, weapon_id: StringName = &"", mode: StringName = Ids.MODE_CONTRACT, horde_level: int = 1) -> bool:
 	_t.call("fresh_profile")
 	if weapon_id != &"":
 		Profile.add_money(50000)
@@ -134,7 +136,7 @@ func _open(contract_index: int = 0, weapon_id: StringName = &"", mode: StringNam
 	_connect(GameEvents.boar_hit, func(_id: int, _z: StringName, _d: float, _p: Vector3, _s: int) -> void: _hits += 1)
 	var req: HuntRequest = Profile.build_hunt_request(&"mato_grosso", contract_index)
 	if mode == Ids.MODE_HORDE:
-		req = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE)   # all weapons, loadout ignored
+		req = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE, horde_level)   # all weapons, loadout ignored
 	req.rng_seed = SEED
 	req.quality = Ids.Q_LOW
 	Router.set_pending_request(req)
@@ -664,6 +666,193 @@ func _scn_horde_reserve_constant() -> void:
 			_t.call("eq", p.get_ammo_reserve(), reserve0, "H4: %s: reserva igual depois da recarga %d" % [ids[slot], n + 1])
 			_t.call("eq", p.get_ammo_in_mag(), int(Data.get_weapon(ids[slot]).get("mag_size", 0)), "H4: %s: pente cheio" % ids[slot])
 	_t.call("eq", _ended.size(), 0, "a caçada seguiu viva durante o teste de municao")
+
+
+# --------------------------------------------------------------------------------------------
+# Horde level 2 (docs/plano_horda_nivel2.md): H5 a whole level-2 hunt with counted ammo, H6 the ammo loop.
+# --------------------------------------------------------------------------------------------
+
+## Teleports the (bot) player onto a crate, checks that standing there takes nothing (the owner's Q4: crates are taken
+## with a button), then presses interact once (one frame) and waits for the take.
+func _stand_on_crate(p: PlayerBase, crate_pos: Vector3, label: String, wait_s: float = 0.8) -> void:
+	p.bot_teleport(Vector3(crate_pos.x, crate_pos.y + 0.1, crate_pos.z))
+	var available: int = _hunt.get_ammo_crate_positions().size()
+	var reserve: int = p.get_ammo_reserve()
+	await _sleep(wait_s)
+	_t.call("ok", _hunt.get_ammo_crate_positions().size() == available and p.get_ammo_reserve() == reserve,
+		"%s: so chegar perto nao pega a caixa" % label)
+	p.bot_set_interact(true)
+	await get_tree().process_frame
+	p.bot_set_interact(false)
+	await _sleep(wait_s)
+
+
+func _scn_horde2_victory() -> void:
+	## H5: level 2 solo. Counted ammo, 3 crates, confine, spawn; the bot wins wave 1 with real shots, takes a crate,
+	## the other waves fall to debug kills; the result carries horde_level 2 and the level-2 prizes.
+	if not await _open(0, &"", Ids.MODE_HORDE, 2):
+		return
+	var p: PlayerBase = _hunt.get_player()
+	var total: int = _hunt.get_boars_total()
+	_t.call("eq", _hunt.get_horde_level(), 2, "H5: get_horde_level() == 2")
+	_t.call("eq", total, 85, "H5: boars_total = 85 (os mesmos dados de ondas)")
+	_t.call("ok", not p.has_infinite_reserve(), "H5: reserva contada (nao infinita)")
+	var weapon_id: StringName = p.get_current_weapon_id()
+	var mag_size: int = int(Data.get_weapon(weapon_id).get("mag_size", 0))
+	var cfg: Dictionary = Data.get_horde_level(2)
+	var start_mags: int = int(cfg["ammo"]["start_reserve_mags"])
+	var cap_mags: int = int(cfg["ammo"]["reserve_cap_mags"])
+	_t.call("eq", p.get_ammo_reserve(), mag_size * start_mags, "H5: reserva inicial = %d pentes de %d" % [start_mags, mag_size])
+	_t.call("eq", p.get_ammo_in_mag(), mag_size, "H5: pente cheio")
+	_t.call("ok", p.needs_ammo(), "H5: precisa de municao (abaixo do teto)")
+	var spawn: Vector3 = p.global_position
+	_t.call("ok", Vector2(spawn.x, spawn.z).distance_to(Vector2(30.0, -74.0)) <= 4.0, "H5: nasce a <= 4 m de (30, -74): %s" % str(spawn))
+	var bounds: Rect2 = _hunt.get_player_bounds()
+	_t.call("ok", bounds.has_area() and bounds.has_point(Vector2(spawn.x, spawn.z)), "H5: bounds definido e com o jogador dentro (%s)" % str(bounds))
+	var crates: PackedVector3Array = _hunt.get_ammo_crate_positions().duplicate()   # the world returns a shared buffer
+	_t.call("eq", crates.size(), 3, "H5: 3 caixas disponiveis")
+	if crates.size() != 3:
+		return
+	# the picked-up signal
+	var picked: Array[int] = []
+	_connect(GameEvents.ammo_picked_up, func(rounds: int) -> void: picked.append(rounds))
+	# wave 1 with real shots: the reserve is spent
+	_hunt.debug_horde_start_next_wave()
+	await _sleep(0.2)
+	var bot: RefCounted = HuntBot.new()
+	bot.call("setup", self, _hunt)
+	var stop: Callable = func() -> bool: return _hunt.get_horde_waves_cleared() >= 1
+	await bot.call("kill_all", 600.0, stop)
+	var shots: int = int(bot.get("shots_fired"))
+	print("INFO horde H5 onda 1: bot_shots=%d reloads=%d reserva=%d t=%.1f s" % [shots, int(bot.get("reloads")), p.get_ammo_reserve(), _hunt.get_elapsed_s()])
+	_t.call("ok", shots >= 1, "H5: ao menos 1 abate por tiro real do bot (%d tiros)" % shots)
+	_t.call("ok", not _hunt.is_hunt_over(), "H5: o jogador sobreviveu a onda 1")
+	_t.call("eq", _hunt.get_horde_waves_cleared(), 1, "H5: 1 onda vencida")
+	_t.call("eq", p.get_ammo_in_mag() + p.get_ammo_reserve(), mag_size * (1 + start_mags) - shots, "H5: cada tiro gastou 1 cartucho e a recarga so move do estoque para o pente (%d tiros)" % shots)
+	_t.call("ok", _hits >= 1, "H5: ao menos 1 acerto real (%d)" % _hits)
+	var reserve_before: int = p.get_ammo_reserve()
+	_t.call("ok", reserve_before <= mag_size * start_mags, "H5: a reserva nao subiu sem caixa (%d <= %d)" % [reserve_before, mag_size * start_mags])
+	# a crate: the reserve rises by mags_per_crate pentes (up to the cap), the crate disappears, the HUD signal fires
+	if _hunt.is_hunt_over():
+		return
+	await _stand_on_crate(p, crates[0], "H5")
+	var expected: int = mini(reserve_before + int(cfg["ammo_crates"]["mags_per_crate"]) * mag_size, mag_size * cap_mags)
+	_t.call("eq", p.get_ammo_reserve(), expected, "H5: a caixa soma %d pentes (%d -> %d)" % [int(cfg["ammo_crates"]["mags_per_crate"]), reserve_before, expected])
+	_t.call("eq", _hunt.get_ammo_crate_positions().size(), 2, "H5: a caixa pega some (2 disponiveis)")
+	_t.call("eq", picked.size(), 1, "H5: ammo_picked_up 1x")
+	if picked.size() == 1:
+		_t.call("ok", picked[0] >= expected - reserve_before, "H5: ammo_picked_up(%d) >= o ganho da arma atual" % picked[0])
+	# waves 2..8 with debug kills; the last one with the stock at 87% to price the bonus
+	bot.call("park_far")
+	for w: int in range(2, 9):
+		if _hunt.is_hunt_over():
+			break
+		if w == 8:
+			_hunt.debug_set_crop_health(87.0)
+		_hunt.debug_horde_start_next_wave()
+		await get_tree().process_frame
+		await get_tree().process_frame
+		var cleared: bool = await _clear_wave_debug(w, 200.0)
+		_t.call("ok", cleared, "H5: onda %d vencida (killed %d/%d)" % [w, _hunt.get_boars_killed(), total])
+	await _sleep(2.0)
+	_t.call("ok", _hunt.is_hunt_over(), "H5: terminou depois da ultima onda")
+	_t.call("eq", _started, 1, "H5: hunt_started 1x")
+	_t.call("eq", _ended.size(), 1, "H5: hunt_ended exatamente 1x")
+	if _ended.is_empty():
+		return
+	var r: HuntResult = _ended[0]
+	_t.call("eq", r.outcome, HuntResult.Outcome.VICTORY, "H5: VICTORY")
+	_t.call("eq", r.horde_level, 2, "H5: result.horde_level == 2")
+	_t.call("eq", r.horde_waves_cleared, 8, "H5: 8 ondas vencidas")
+	_t.call("eq", r.kills.size(), total, "H5: kills == total")
+	_t.call("eq", r.contract_bonus, Profile.horde_bonus(r.crop_health_pct, 2), "H5: bonus = Profile.horde_bonus(pct, 2)")
+	_t.call("ok", r.contract_bonus > 0 and r.contract_bonus <= 5000, "H5: bonus de defesa em (0, 5000] (%d)" % r.contract_bonus)
+	var differs: bool = false
+	for k: KillInfo in r.kills:
+		_t.call("eq", k.reward_money, Profile.horde_kill_reward(k.type_id, k.weight_kg, k.killing_zone, k.one_shot, 2), "H5: premio do javali %d no nivel 2" % k.boar_id)
+		differs = differs or k.reward_money != Profile.horde_kill_reward(k.type_id, k.weight_kg, k.killing_zone, k.one_shot, 1)
+	_t.call("ok", differs, "H5: os premios usam kill_reward_mult do nivel 2, nao o do 1")
+	_t.call("eq", r.total_money, r.money_from_kills + r.contract_bonus, "H5: total = abates + bonus")
+	_t.call("ok", not r.counts_for_progression, "H5: horda nao conta para progressao")
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(r)
+	_t.call("eq", Profile.get_money(), money0 + r.total_money, "H5: apply_hunt_result paga total_money 1x")
+
+
+func _scn_horde2_ammo_loop() -> void:
+	## H6: the reserve falls on a reload, rises on a crate up to the cap, a full hunter does not eat the crate,
+	## the crate comes back after respawn_s.
+	if not await _open(0, &"", Ids.MODE_HORDE, 2):
+		return
+	var p: PlayerBase = _hunt.get_player()
+	p.bot_set_enabled(true)
+	var cfg: Dictionary = Data.get_horde_level(2)
+	var crates_cfg: Dictionary = cfg["ammo_crates"]
+	var cap_mags: int = int(cfg["ammo"]["reserve_cap_mags"])
+	var ids: Array[StringName] = Data.get_weapon_ids()
+	var crates: PackedVector3Array = _hunt.get_ammo_crate_positions().duplicate()   # the world returns a shared buffer
+	if not _t.call("eq", crates.size(), 3, "H6: 3 caixas"):
+		return
+	# every weapon starts at start_reserve_mags x mag_size (.22: 20, the rest: 10 with the seed data)
+	for slot: int in ids.size():
+		p.bot_select_weapon(slot)
+		await _sleep(0.8)
+		var mag: int = int(Data.get_weapon(ids[slot]).get("mag_size", 0))
+		_t.call("eq", p.get_current_weapon_id(), ids[slot], "H6: slot %d = %s" % [slot, ids[slot]])
+		_t.call("eq", p.get_ammo_reserve(), mag * int(cfg["ammo"]["start_reserve_mags"]), "H6: %s comeca com %d pentes de reserva" % [ids[slot], int(cfg["ammo"]["start_reserve_mags"])])
+	p.bot_select_weapon(0)
+	await _sleep(0.8)
+	var mag0: int = int(Data.get_weapon(ids[0]).get("mag_size", 0))
+	var reserve0: int = p.get_ammo_reserve()
+	# empty the magazine and reload: the reserve falls by one magazine
+	var tries: int = 0
+	while p.get_ammo_in_mag() > 0 and tries < 400 and not _hunt.is_hunt_over():
+		p.bot_fire()
+		tries += 1
+		await get_tree().process_frame
+	_t.call("eq", p.get_ammo_in_mag(), 0, "H6: pente esvaziado")
+	p.bot_reload()
+	var done: bool = await _wait_until(func() -> bool: return not p.is_reloading() and p.get_ammo_in_mag() > 0, 30.0)
+	_t.call("ok", done, "H6: recarga terminou")
+	_t.call("eq", p.get_ammo_reserve(), reserve0 - mag0, "H6: a recarga gastou um pente da reserva (%d -> %d)" % [reserve0, p.get_ammo_reserve()])
+	_t.call("eq", p.get_ammo_in_mag(), mag0, "H6: pente cheio")
+	# crate 0: +mags_per_crate pentes
+	var picked: Array[int] = []
+	_connect(GameEvents.ammo_picked_up, func(rounds: int) -> void: picked.append(rounds))
+	var before: int = p.get_ammo_reserve()
+	await _stand_on_crate(p, crates[0], "H6 caixa 0")
+	var gain: int = int(crates_cfg["mags_per_crate"]) * mag0
+	_t.call("eq", p.get_ammo_reserve(), mini(before + gain, mag0 * cap_mags), "H6: a caixa 0 sobe a reserva (%d -> %d)" % [before, p.get_ammo_reserve()])
+	_t.call("eq", _hunt.get_ammo_crate_positions().size(), 2, "H6: caixa 0 sumiu")
+	# crates 1 and 2: the reserve of the .22 hits its cap and never passes it; the other weapons too
+	await _stand_on_crate(p, crates[1], "H6 caixa 1")
+	await _stand_on_crate(p, crates[2], "H6 caixa 2")
+	_t.call("eq", p.get_ammo_reserve(), mag0 * cap_mags, "H6: teto da arma 0 (%d pentes = %d)" % [cap_mags, mag0 * cap_mags])
+	_t.call("eq", _hunt.get_ammo_crate_positions().size(), 0, "H6: 3 caixas pegas, nenhuma disponivel")
+	_t.call("eq", picked.size(), 3, "H6: ammo_picked_up 3x")
+	for slot: int in ids.size():
+		p.bot_select_weapon(slot)
+		await _sleep(0.8)
+		var mag: int = int(Data.get_weapon(ids[slot]).get("mag_size", 0))
+		_t.call("eq", p.get_ammo_reserve(), mag * cap_mags, "H6: %s no teto (%d)" % [ids[slot], mag * cap_mags])
+	_t.call("ok", not p.needs_ammo(), "H6: com tudo no teto needs_ammo() e falso")
+	# respawn: the crates come back after respawn_s of hunt time; a hunter at the cap does not take them
+	var respawn_s: float = float(crates_cfg["respawn_s"])
+	p.bot_teleport(Vector3(crates[0].x, crates[0].y + 0.1, crates[0].z))
+	var limit: float = _hunt.get_elapsed_s() + respawn_s + 2.0
+	while _hunt.get_elapsed_s() < limit and not _hunt.is_hunt_over():
+		_kill_alive_all()   # the hunt goes on around the barn: keep the hunter safe while the crates respawn
+		await get_tree().process_frame
+	_t.call("ok", not _hunt.is_hunt_over(), "H6: o jogador sobreviveu a espera")
+	_t.call("eq", _hunt.get_ammo_crate_positions().size(), 3, "H6: as 3 caixas voltaram depois de %d s" % int(respawn_s))
+	await _sleep(1.0)
+	p.bot_set_interact(true)   # a press with the reserve at the cap takes nothing
+	await get_tree().process_frame
+	p.bot_set_interact(false)
+	await _sleep(1.0)
+	_t.call("eq", _hunt.get_ammo_crate_positions().size(), 3, "H6: com a reserva no teto o jogador em cima da caixa, mesmo apertando interact, nao a consome")
+	_t.call("eq", picked.size(), 3, "H6: nenhum ammo_picked_up a mais")
+
 
 
 func _scn_contract_reserve_still_spent() -> void:

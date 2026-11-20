@@ -81,6 +81,53 @@ func test_weapon_slot_keys_1_to_5() -> void:
 		ok(not Input.is_action_pressed(action_name), "%s solta apos release_all_actions" % action_name)
 
 
+func test_interact_action_is_f_after_help_and_shared_only_with_spectate_next() -> void:
+	## docs/plano_horda_nivel2.md 4.9 and risk R9: `interact` (revive) is the key F, right after `help` in ACTIONS.
+	var acts: PackedStringArray = InputSetup.ACTIONS
+	ok(acts.has("interact"), "interact em InputSetup.ACTIONS")
+	ok(InputMap.has_action("interact"), "interact registrada no InputMap")
+	eq(acts.find("interact"), acts.find("help") + 1, "interact logo depois de help")
+	eq(acts[acts.size() - 1], "interact", "interact e a ultima acao")
+	var keys: Array[int] = []
+	for ev: InputEvent in InputMap.action_get_events("interact"):
+		ok(ev is InputEventKey, "interact so tem teclas (o toque vem do InteractButton)")
+		if ev is InputEventKey:
+			keys.append(int((ev as InputEventKey).physical_keycode))
+	eq(keys, [int(KEY_F)] as Array[int], "interact: so a tecla F")
+	eq(InputSetup.get_key_label(&"interact"), "F", "legenda da tecla de interact")
+	# F is shared with spectate_next, and with nothing else (exactly this pair)
+	var owners: Array[String] = []
+	for action_name: String in acts:
+		for ev: InputEvent in InputMap.action_get_events(action_name):
+			if ev is InputEventKey and int((ev as InputEventKey).physical_keycode) == int(KEY_F):
+				owners.append(action_name)
+	owners.sort()
+	eq(owners, ["interact", "spectate_next"] as Array[String], "F so pertence a interact e spectate_next")
+	# a held key drives the action and release_all_actions lets go of it
+	_begin_input_test("off")
+	var press: InputEventKey = InputEventKey.new()
+	press.physical_keycode = KEY_F
+	press.pressed = true
+	Input.parse_input_event(press)
+	await frames(2)
+	ok(Input.is_action_pressed("interact"), "F aperta interact")
+	InputSetup.release_all_actions()
+	ok(not Input.is_action_pressed("interact"), "release_all_actions solta interact")
+	var up: InputEventKey = press.duplicate() as InputEventKey
+	up.pressed = false
+	Input.parse_input_event(up)
+	await frames(2)
+	_end_input_test()
+	ok(not Input.is_action_pressed("interact"), "interact solta ao fim")
+	ok(not Input.is_action_pressed("spectate_next"), "spectate_next solta ao fim")
+	# a real mouse button never presses interact
+	_begin_input_test("off")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
+	ok(not Input.is_action_pressed("interact"), "o mouse nao aperta interact")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	_end_input_test()
+
+
 func test_real_mouse_fires_in_mouse_mode() -> void:
 	_begin_input_test("off")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))

@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Caçada ao Javali"
 config/description="Controle de javalis invasores em fazendas do Brasil."
-config/version="0.8.4"
+config/version="0.9.0"
 run/main_scene="res://src/ui/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://assets/ui/icons/app_icon.svg"
@@ -45,6 +45,7 @@ theme/custom="res://assets/ui/theme.tres"
 3d_physics/layer_2="static"
 3d_physics/layer_3="player"
 3d_physics/layer_4="boar_hitzone"
+3d_physics/layer_5="fence"
 
 [physics]
 

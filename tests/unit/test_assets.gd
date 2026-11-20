@@ -37,8 +37,14 @@ const PROP_MAX_BURIAL_M: float = 0.15
 const PROP_BURIAL_EPS_M: float = 0.001
 ## Informative only (never asserted: it varies with the machine): cold build time of all props together.
 const PROP_BUILD_BUDGET_MS: float = 150.0
-const BARN_CORN_MAX_TRIS: int = 1800
-const BARN_CORN_MAX_MESHES: int = 8
+## docs/plano_horda_nivel2.md section 7: the wooden grain bin (tulha) is one more mesh (the 9th).
+const BARN_CORN_MAX_TRIS: int = 1000
+const BARN_CORN_MAX_MESHES: int = 9
+## docs/plano_horda_nivel2.md section 7: ammo_crate.tscn
+const AMMO_CRATE_MAX_TRIS: int = 300
+## Bin footprint in the barn frame (x [-6, 6], z [1.6, 4.7]); walls 1.2 m.
+const BIN_RECT: Rect2 = Rect2(-6.0, 1.6, 12.0, 3.1)
+const BIN_WALL_H: float = 1.2
 
 ## flora id -> max triangles
 const FLORA: Dictionary = {
@@ -437,9 +443,12 @@ func test_props_contract() -> void:
 
 ## Corn stock of the barn (docs/horda.md section 11.1): budget, geometry and API. The stage checks run off-tree,
 ## where the asset applies a stage instantly (the tween only exists inside the tree).
+## Volume of the visible corn meshes. The fixed wooden bin ("Bin") is not corn: it is always there.
 func _visible_volume(root: Node3D) -> float:
 	var total: float = 0.0
 	for mi: MeshInstance3D in _meshes(root):
+		if mi.name == &"Bin":
+			continue
 		if mi.visible and mi.mesh != null:
 			var b: AABB = mi.transform * mi.get_aabb()
 			total += b.size.x * b.size.y * b.size.z
@@ -449,6 +458,8 @@ func _visible_volume(root: Node3D) -> float:
 func _visible_meshes(root: Node3D) -> int:
 	var n: int = 0
 	for mi: MeshInstance3D in _meshes(root):
+		if mi.name == &"Bin":
+			continue
 		if mi.visible and mi.scale.y > 0.05:
 			n += 1
 	return n
@@ -487,7 +498,40 @@ func test_barn_corn_contract() -> void:
 	for mi: MeshInstance3D in meshes:
 		if mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
 			shadow_casters += 1
-	ok(shadow_casters <= 1, "so o monte de dentro projeta sombra (%d)" % shadow_casters)
+	ok(shadow_casters <= 2, "so a tulha e o monte de dentro projetam sombra (%d)" % shadow_casters)
+	for mi: MeshInstance3D in meshes:
+		if mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			ok(mi.name == &"Bin" or mi.name == &"InnerPile", "%s projeta sombra (so Bin e InnerPile podem)" % mi.name)
+	# the wooden bin (docs/plano_horda_nivel2.md section 7): fixed in the barn frame, walls 1.2 m, always visible
+	var bin_node: MeshInstance3D = stock.get_node_or_null("Bin") as MeshInstance3D
+	ok(bin_node != null and bin_node.mesh != null, "a tulha de madeira existe (no Bin)")
+	if bin_node != null and bin_node.mesh != null:
+		var bb: AABB = bin_node.transform * bin_node.get_aabb()
+		ok(bb.position.x >= BIN_RECT.position.x - 0.05 and bb.end.x <= BIN_RECT.end.x + 0.05, "tulha em x [-6, 6] (%.2f a %.2f)" % [bb.position.x, bb.end.x])
+		ok(bb.position.z >= BIN_RECT.position.y - 0.05 and bb.end.z <= BIN_RECT.end.y + 0.05, "tulha em z [1,6, 4,7] (%.2f a %.2f)" % [bb.position.z, bb.end.z])
+		ok(bb.size.x >= 11.0 and bb.size.z >= 2.9, "a tulha ocupa a pegada toda (%.1f x %.1f)" % [bb.size.x, bb.size.z])
+		ok(bb.end.y <= BIN_WALL_H + 0.3 and bb.end.y >= BIN_WALL_H - 0.1, "parede de ~1,2 m, esteios um pouco acima (%.2f)" % bb.end.y)
+		ok(bb.position.y >= -0.05, "a tulha nao afunda no chao (%.2f)" % bb.position.y)
+		for pct: float in [100.0, 60.0, 30.0, 10.0, 0.0]:
+			stock.set_stock_pct(pct)
+			ok(bin_node.visible, "a tulha aparece a %d%% (0 = tulha vazia com palha)" % int(pct))
+		stock.set_stock_pct(100.0)
+	# stages 4..1 only lower the corn (fixed footprint): same x/z extent of the inner pile, shrinking height
+	var pile_node: MeshInstance3D = stock.get_node_or_null("InnerPile") as MeshInstance3D
+	if pile_node != null and pile_node.mesh != null:
+		var widths: Array[float] = []
+		var heights: Array[float] = []
+		for pct: float in [100.0, 60.0, 30.0, 10.0]:
+			stock.set_stock_pct(pct)
+			var pb: AABB = pile_node.transform * pile_node.get_aabb()
+			widths.append(pb.size.x)
+			widths.append(pb.size.z)
+			heights.append(pb.size.y)
+		for i: int in range(2, widths.size()):
+			near(widths[i], widths[i % 2], 0.01, "estagio %d: pegada do milho igual a do cheio (%.2f)" % [4 - i / 2, widths[i]])
+		for i: int in range(1, heights.size()):
+			ok(heights[i] < heights[i - 1], "a altura do milho cai a cada estagio (%.2f -> %.2f)" % [heights[i - 1], heights[i]])
+		stock.set_stock_pct(100.0)
 	# API, off-tree: setup exactly once before add_child, then every stage.
 	var ring: float = float(Data.get_horde().get("eat_ring_m", 10.0))
 	stock.setup(ring)
@@ -501,7 +545,7 @@ func test_barn_corn_contract() -> void:
 		ok(volumes[i] <= volumes[i - 1] + 0.001, "volume visivel nao cresce quando o estoque cai (%.1f -> %.1f)" % [volumes[i - 1], volumes[i]])
 	ok(volumes[volumes.size() - 1] < volumes[0] * 0.5, "10%% mostra bem menos que cheio (%.1f vs %.1f)" % [volumes[volumes.size() - 1], volumes[0]])
 	stock.set_stock_pct(100.0)
-	eq(_visible_meshes(stock), 7, "cheio: monte de dentro + 6 de fora visiveis")
+	eq(_visible_meshes(stock), 7, "cheio: monte de dentro + 6 de fora visiveis (a tulha e fixa e fica de fora da conta)")
 	var gnawed_visible: bool = false
 	stock.set_stock_pct(0.0)
 	var heaps_shown: int = 0
@@ -577,6 +621,83 @@ func test_barn_corn_odd_percentages_and_attack_without_errors() -> void:
 	stock.set_under_attack(false)
 	await frames(2)
 	eq(errors_since(mark).size(), 0, "barn_corn sem erros com percentuais fora do normal: %s" % str(errors_since(mark)))
+
+
+func test_ammo_crate_contract() -> void:
+	## docs/plano_horda_nivel2.md section 7: Node3D root, no physics, no light, ~0.6 x 0.35 x 0.4 m, <= 300 tris,
+	## one MeshInstance3D, one material, shadow off, origin on the ground at the centre.
+	var scene: PackedScene = need_scene(ScenePaths.AMMO_CRATE)
+	if scene == null:
+		return
+	var root: Node3D = scene.instantiate() as Node3D
+	if root == null:
+		fail("%s: raiz nao e Node3D" % ScenePaths.AMMO_CRATE)
+		return
+	track(root)
+	await frames(2)   # the mesh is built in _ready
+	_forbidden(root, "ammo_crate")
+	var meshes: Array[MeshInstance3D] = _meshes(root)
+	var tris: int = _tree_tris(root)
+	print("INFO ammo_crate: %d MeshInstance3D, %d triangulos" % [meshes.size(), tris])
+	eq(meshes.size(), 1, "1 MeshInstance3D")
+	ok(tris > 0 and tris <= AMMO_CRATE_MAX_TRIS, "%d triangulos (1..%d)" % [tris, AMMO_CRATE_MAX_TRIS])
+	var materials: Dictionary = {}
+	for mi: MeshInstance3D in meshes:
+		eq(mi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "cast_shadow desligado")
+		if mi.mesh != null:
+			for si: int in mi.mesh.get_surface_count():
+				var m: Material = mi.material_override if mi.material_override != null else mi.mesh.surface_get_material(si)
+				if m != null:
+					materials[m.get_instance_id()] = true
+	eq(materials.size(), 1, "1 material")
+	var box: AABB = _aabb_in_root(root)
+	ok(box.size.x >= 0.5 and box.size.x <= 0.75, "largura ~0,6 m (%.2f)" % box.size.x)
+	ok(box.size.z >= 0.3 and box.size.z <= 0.5, "profundidade ~0,4 m (%.2f)" % box.size.z)
+	ok(box.size.y >= 0.2 and box.size.y <= 0.5, "altura ~0,35 m (%.2f)" % box.size.y)
+	ok(absf(box.position.y) <= 0.02, "origem no chao (y min %.3f)" % box.position.y)
+	ok(absf(box.get_center().x) <= 0.05 and absf(box.get_center().z) <= 0.05, "origem no centro (%.2f, %.2f)" % [box.get_center().x, box.get_center().z])
+	# the asset loader finds it (the HuntController uses AssetLoader.instantiate with a FallbackMeshes fallback)
+	var via_loader: Node = AssetLoader.instantiate(ScenePaths.AMMO_CRATE)
+	ok(via_loader != null, "AssetLoader.instantiate(AMMO_CRATE)")
+	if via_loader != null:
+		track(via_loader)
+	# the mesh is shared: two crates, one mesh resource
+	var other: Node3D = scene.instantiate() as Node3D
+	track(other)
+	await frames(2)
+	var m1: Array[MeshInstance3D] = _meshes(root)
+	var m2: Array[MeshInstance3D] = _meshes(other)
+	if m1.size() == 1 and m2.size() == 1:
+		ok(m1[0].mesh == m2[0].mesh, "a malha e construida uma vez e compartilhada")
+
+
+func test_horde_level2_sounds_exist_and_play() -> void:
+	## docs/plano_horda_nivel2.md section 7: ammo_pickup (~0.4 s) and revive_done (~0.8 s), procedural, has_sound true.
+	for id: StringName in [&"ammo_pickup", &"revive_done"]:
+		ok(Sfx.has_sound(id), "Sfx.has_sound(%s)" % id)
+	var mark: int = error_mark()
+	Sfx.play(&"ammo_pickup")
+	Sfx.play(&"revive_done")
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar os sons do nivel 2 nao gera erros: %s" % str(errors_since(mark)))
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	for pair: Array in [[&"ammo_pickup", 0.2, 1.0], [&"revive_done", 0.4, 1.6]]:
+		var id: StringName = pair[0]
+		ok(fb.call(&"has_sound", id), "fallback: has_sound(%s)" % id)
+		var stream: AudioStreamWAV = fb.call(&"_get_stream", id) as AudioStreamWAV
+		ok(stream != null, "fallback: %s sintetizado" % id)
+		if stream != null:
+			var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+			var channels: float = 2.0 if stream.stereo else 1.0
+			var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+			ok(seconds >= float(pair[1]) and seconds <= float(pair[2]), "%s dura %.2f s (esperado %.1f a %.1f)" % [id, seconds, float(pair[1]), float(pair[2])])
+	# the prompts file lists both ids (the MP3 may come later)
+	var prompts_text: String = FileAccess.get_file_as_string("res://assets/audio/sfx_prompts.json")
+	for id: String in ["ammo_pickup", "revive_done"]:
+		ok(prompts_text.contains("\"id\": \"%s\"" % id), "sfx_prompts.json tem a entrada %s" % id)
+	await frames(2)
 
 
 func test_horde_sounds_exist_and_play() -> void:

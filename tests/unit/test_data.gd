@@ -160,7 +160,7 @@ func test_horde_data_references_and_rules() -> void:
 	## docs/horda.md section 3: data/horde.json is consistent with the other files and with the map scene.
 	var h: Dictionary = Data.get_horde()
 	ok(not h.is_empty(), "data/horde.json carregado")
-	eq(int(h.get("version", 0)), 1, "version 1")
+	eq(int(h.get("version", 0)), 2, "version 2 (docs/plano_horda_nivel2.md section 3)")
 	ok(str(h.get("name", "")) != "" and str(h.get("description", "")) != "", "name e description (texto do lobby)")
 	var map_id: StringName = StringName(str(h.get("map_id", "")))
 	ok(Data.get_map_ids().has(map_id), "map_id %s existe em maps.json" % map_id)
@@ -212,6 +212,73 @@ func test_horde_data_references_and_rules() -> void:
 	print("INFO horda: maior onda solo %d javalis, max_alive_boars %d (o spawner segura o excedente)" % [wave_max, max_alive])
 	ok(float(h.get("kill_reward_mult", 0.0)) < 1.0, "abate de horda paga menos que o de contrato")
 	ok(int(h.get("max_carcasses", 0)) <= max_alive, "max_carcasses nao passa de max_alive_boars")
+
+
+func test_horde_levels_resolve_and_reference_the_data() -> void:
+	## docs/plano_horda_nivel2.md 3 and 3.1: two levels; level 1 = the old horde; level 2 = counted ammo, crates, confine, revive.
+	var h: Dictionary = Data.get_horde()
+	eq(Data.get_horde_level_count(), 2, "dois niveis no seed")
+	eq((h.get("levels", []) as Array).size(), Data.get_horde_level_count(), "count = levels.size()")
+	eq(str(h.get("route_avoid_crops", [])), str(["corn"]), "route_avoid_crops = [corn]")
+	near(float(h.get("route_crop_margin_m", -1.0)), 4.0, 0.0001, "route_crop_margin_m")
+	near(float(h.get("route_corner_out_m", -1.0)), 2.0, 0.0001, "route_corner_out_m")
+	near(float(h.get("route_waypoint_arrive_m", -1.0)), 3.0, 0.0001, "route_waypoint_arrive_m")
+	eq(Data.get_horde_level(0), {}, "nivel 0 = {}")
+	eq(Data.get_horde_level(3), {}, "nivel 3 = {}")
+	eq(Data.get_horde_level(-1), {}, "nivel negativo = {}")
+	var l1: Dictionary = Data.get_horde_level(1)
+	var l2: Dictionary = Data.get_horde_level(2)
+	for lv: int in [1, 2]:
+		var d: Dictionary = Data.get_horde_level(lv)
+		eq(int(d.get("level", 0)), lv, "nivel %d: level" % lv)
+		ok(not d.has("levels"), "nivel %d resolvido nao carrega 'levels'" % lv)
+		for k: String in ["name", "description", "ammo", "ammo_crates", "confine", "player_spawn", "revive", "boar_overrides", "waves", "eat_ring_m"]:
+			ok(d.has(k), "nivel %d resolvido tem '%s'" % [lv, k])
+		ok(str(d.get("name", "")) != "" and str(d.get("description", "")) != "", "nivel %d: name e description" % lv)
+	# level 1 = today's horde
+	near(float(l1["kill_reward_mult"]), float(h["kill_reward_mult"]), 0.0001, "nivel 1 herda kill_reward_mult do topo")
+	eq(int(l1["victory_bonus_money"]), int(h["victory_bonus_money"]), "nivel 1 herda victory_bonus_money")
+	ok(bool(l1["ammo"]["infinite"]), "nivel 1: municao infinita")
+	ok(not bool(l1["confine"]["enabled"]) and not bool(l1["revive"]["enabled"]), "nivel 1: sem cercado e sem levantar")
+	eq((l1["ammo_crates"]["positions"] as Array).size(), 0, "nivel 1: sem caixas")
+	eq((l1["player_spawn"] as Array).size(), 0, "nivel 1: spawn do mapa")
+	eq((l1["boar_overrides"] as Dictionary).size(), 0, "nivel 1: sem sobrescritas de javali")
+	# level 2
+	near(float(l2["kill_reward_mult"]), 0.5, 0.0001, "nivel 2: kill_reward_mult 0,5")
+	eq(int(l2["victory_bonus_money"]), 5000, "nivel 2: bonus 5000")
+	near(float(l2["to_barn_speed_frac"]), 0.9, 0.0001, "nivel 2: to_barn_speed_frac 0,9 (override)")
+	near(float(h["to_barn_speed_frac"]), 0.8, 0.0001, "topo continua 0,8 (override nao vaza)")
+	ok(not bool(l2["ammo"]["infinite"]), "nivel 2: municao contada")
+	eq(int(l2["ammo"]["start_reserve_mags"]), 2, "start_reserve_mags 2")
+	eq(int(l2["ammo"]["reserve_cap_mags"]), 6, "reserve_cap_mags 6")
+	eq((l2["ammo_crates"]["positions"] as Array).size(), 3, "nivel 2: 3 caixas")
+	eq(int(l2["ammo_crates"]["mags_per_crate"]), 2, "mags_per_crate 2")
+	ok(bool(l2["confine"]["enabled"]), "nivel 2: cercado")
+	ok(bool(l2["revive"]["enabled"]), "nivel 2: levantar")
+	near(float(l2["revive"]["health"]), 50.0, 0.0001, "revive.health 50")
+	near(float(l2["revive"]["bleed_out_s"]), 60.0, 0.0001, "bleed_out_s 60")
+	eq((l2["player_spawn"] as Array).size(), 3, "nivel 2: player_spawn [x, z, yaw]")
+	eq(str(Data.get_horde_boar_type(&"sow", 2).get("aggression", "")), "provoked", "porca provocada no nivel 2")
+	# the plain type is untouched by the overrides
+	eq(Data.get_horde_boar_type(&"sow", 1), Data.get_boar_type(&"sow"), "nivel 1 = tipo puro")
+	eq(Data.get_horde_boar_type(&"sow", 0), Data.get_boar_type(&"sow"), "nivel 0 = tipo puro")
+	eq(Data.get_horde_boar_type(&"sow", 9), Data.get_boar_type(&"sow"), "nivel fora do intervalo = tipo puro")
+	eq(str(Data.get_boar_type(&"sow").get("aggression", "")), "defend_in_herd", "boars.json intacto (cobertura da copia)")
+	eq(Data.get_horde_boar_type(&"piglet", 2), Data.get_boar_type(&"piglet"), "leitao sem sobrescrita")
+	var boar2: Dictionary = Data.get_horde_boar_type(&"boar", 2)
+	near(float(boar2["charge_damage"]), 30.0, 0.0001, "javali: charge_damage 30")
+	near(float(boar2["aggro_radius_m"]), 18.0, 0.0001, "javali: aggro_radius 18")
+	eq(int(boar2["max_charges"]), 4, "javali: max_charges 4")
+	expect_errors()   # Data.get_boar_type reports an unknown id with push_error
+	eq(Data.get_horde_boar_type(&"inexistente", 2), {}, "tipo inexistente = {}")
+	# every level-2 reference is real: weapons carried need the reserve cap to fit the weapon data
+	for wid: StringName in Data.get_weapon_ids():
+		ok(int(Data.get_weapon(wid).get("mag_size", 0)) > 0, "arma %s com mag_size > 0 (a municao contada multiplica por ele)" % wid)
+	var spawn: Array = l2["player_spawn"]
+	var rect: Rect2 = Rect2(-20.0, -110.0, 75.0, 48.0)   # farm fence rect of the Mato Grosso map
+	ok(rect.has_point(Vector2(float(spawn[0]), float(spawn[1]))), "player_spawn dentro do cercado da fazenda")
+	for pos: Variant in l2["ammo_crates"]["positions"]:
+		ok(absf(float((pos as Array)[0])) <= 6.0, "caixa x=%s dentro da tulha (|x| <= 6)" % str((pos as Array)[0]))
 
 
 func test_pix_config_has_placeholders_flagged() -> void:

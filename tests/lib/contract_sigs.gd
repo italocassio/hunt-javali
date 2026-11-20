@@ -45,6 +45,12 @@ const GAME_EVENTS_SIGNALS: Array[String] = [
 	# docs/horda.md section 4.1
 	"horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)",
 	"horde_wave_progress(remaining: int, wave_total: int)",
+	# docs/plano_horda_nivel2.md section 4.1 (horde level 2: downed / revive / ammo crates)
+	"player_downed(bleed_out_s: float)",
+	"player_revived(health: float)",
+	"hunter_downed(slot: int)",
+	"hunter_revived(slot: int, by_slot: int)",
+	"ammo_picked_up(rounds: int)",
 ]
 
 ## docs/multiplayer.md section 3.4: autoload Net.
@@ -84,6 +90,9 @@ const NET_METHODS: Array[String] = [
 	# docs/horda.md section 9.1
 	"host_select_mode(mode: StringName) -> bool",
 	"get_selected_mode() -> StringName",
+	# docs/plano_horda_nivel2.md section 4.8
+	"host_select_horde_level(level: int) -> bool",
+	"get_selected_horde_level() -> int",
 ]
 
 const NET_SIGNALS: Array[String] = [
@@ -124,6 +133,10 @@ const DATA_METHODS: Array[String] = [
 	"get_item_category(id: StringName) -> StringName",
 	# docs/horda.md section 10.1
 	"get_horde() -> Dictionary",
+	# docs/plano_horda_nivel2.md section 3.1
+	"get_horde_level_count() -> int",
+	"get_horde_level(level: int) -> Dictionary",
+	"get_horde_boar_type(type_id: StringName, level: int) -> Dictionary",
 ]
 
 const PROFILE_METHODS: Array[String] = [
@@ -158,8 +171,8 @@ const PROFILE_METHODS: Array[String] = [
 	"get_setting(key: String) -> Variant",
 	"set_setting(key: String, value: Variant) -> void",
 	# docs/horda.md section 10.1
-	"horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool) -> int",
-	"horde_bonus(stock_pct: float) -> int",
+	"horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool, level: int = 1) -> int",
+	"horde_bonus(stock_pct: float, level: int = 1) -> int",
 	# docs/arquitetura.md section 6.3 (1.3): onboarding hints
 	"is_onboarding_active() -> bool",
 	"is_hint_learned(hint_id: StringName) -> bool",
@@ -339,6 +352,9 @@ const CLASSES: Array[Dictionary] = [
 			"begin() -> void", "skip_intermission() -> void", "get_wave() -> int", "get_wave_count() -> int",
 			"get_phase() -> StringName", "get_countdown_s() -> float", "get_wave_total() -> int",
 			"get_wave_remaining() -> int", "get_waves_cleared() -> int", "get_killed_before() -> int"]},
+	# docs/plano_horda_nivel2.md section 4.4: the route around the corn and the barn (static, pure)
+	{"name": "HordeRoute", "path": "res://src/boars/horde_route.gd", "base": "RefCounted", "pkg": "B",
+		"methods": ["plan(from: Vector2, to: Vector2, obstacles: Array[Dictionary], corner_out_m: float) -> PackedVector2Array"]},
 	{"name": "BoarSpawner", "path": "res://src/hunt/boar_spawner.gd", "base": "Node", "pkg": "B",
 		"methods": ["scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array",
 			"notify_shot(origin: Vector3, noise_radius_m: float) -> void",
@@ -352,11 +368,17 @@ const CLASSES: Array[Dictionary] = [
 			"queue_death(boar: Boar, kill: KillInfo, killed: int, total: int) -> void",
 			"apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) -> void",
 			"queue_horde_wave(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void",
-			"write_horde_wave_replay(out: StreamPeerBuffer, wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void"]},
+			"write_horde_wave_replay(out: StreamPeerBuffer, wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void",
+			# docs/plano_horda_nivel2.md section 4.8
+			"queue_hunter_revived(target_slot: int, by_slot: int) -> void",
+			"queue_ammo_crate(crate: int, available: bool, taker_slot: int) -> void",
+			"write_ammo_crate_replay(out: StreamPeerBuffer, crate: int, available: bool) -> void"]},
 	{"name": "HuntReplica", "path": "res://src/hunt/hunt_replica.gd", "base": "Node3D", "pkg": "B",
 		"signals": ["kill_confirmed(kill: KillInfo, killed: int, total: int)", "bait_received(at: Vector3, duration_s: float)",
 			"message_received(msg: int)", "hunt_end_received(outcome: int, crop_pct: float, killed: int, total: int, entries: Array)",
-			"horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int)"],
+			"horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int)",
+			# docs/plano_horda_nivel2.md section 4.8
+			"hunter_revived_received(target_slot: int, by_slot: int)", "ammo_crate_received(crate: int, available: bool, taker_slot: int)"],
 		"methods": ["setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void",
 			"render_time_ms() -> float", "apply_snapshot_boars(inp: StreamPeerBuffer, t_ms: int) -> void",
 			"apply_event(type: int, inp: StreamPeerBuffer, length: int) -> void",
@@ -365,7 +387,9 @@ const CLASSES: Array[Dictionary] = [
 			"get_alive_ids() -> PackedInt32Array", "get_puppet(boar_id: int) -> BoarPuppet",
 			"get_boar_position(boar_id: int) -> Vector3", "get_boar_type(boar_id: int) -> StringName",
 			"get_boar_zone_position(boar_id: int, zone: StringName) -> Vector3",
-			"get_nearest_boar_position(from: Vector3) -> Vector3"]},
+			"get_nearest_boar_position(from: Vector3) -> Vector3",
+			# docs/plano_horda_nivel2.md section 4.8
+			"queue_revive_claim(target_slot: int) -> void", "queue_ammo_crate_claim(crate: int) -> void"]},
 	{"name": "BoarPuppet", "path": "res://src/boars/boar_puppet.gd", "base": "Node3D", "pkg": "B",
 		"props": ["boar_id", "type_id", "weight_kg", "state", "wounded", "alive"],
 		"signals": ["hit_by_local(puppet: BoarPuppet, hit: HitInfo)"],
@@ -380,7 +404,10 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["build_flora(density: float, sync_layout: bool = false) -> void",
 			"find_prop_spawn(prop_id: StringName) -> PropSpawn",
 			# docs/arquitetura.md section 8.4 (1.4, HF5): the map image the minimap draws
-			"build_minimap(cfg: Dictionary) -> void", "get_minimap_texture() -> Texture2D", "get_minimap_image() -> Image"]},
+			"build_minimap(cfg: Dictionary) -> void", "get_minimap_texture() -> Texture2D", "get_minimap_image() -> Image",
+			# docs/plano_horda_nivel2.md section 4.3
+			"set_horde_layout(on: bool) -> void", "get_farm_rect() -> Rect2",
+			"get_horde_route_obstacles(avoid_crops: Array, crop_margin_m: float, corner_out_m: float) -> Array[Dictionary]"]},
 	{"name": "Heightmap", "path": "res://src/world/heightmap.gd", "base": "RefCounted", "pkg": "B",
 		"methods": ["get_height(x: float, z: float) -> float", "get_normal(x: float, z: float) -> Vector3",
 			# docs/arquitetura.md section 8.5 (1.4, HF5): the grid itself, read only
@@ -398,7 +425,7 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["apply_eaten(indices: PackedInt32Array) -> void", "set_replicated_health(pct: float) -> void",
 			"set_store_mode(on: bool) -> void", "is_store_mode() -> bool"]},
 	{"name": "PropSpawn", "path": "res://src/world/prop_spawn.gd", "base": "Marker3D", "pkg": "B",
-		"props": ["prop_id", "collision_size", "footprint_radius_m"]},
+		"props": ["prop_id", "collision_size", "footprint_radius_m", "horde_collision_boxes", "horde_obstacle_circles"]},
 	{"name": "WaterBody", "path": "res://src/world/water_body.gd", "base": "Marker3D", "pkg": "B",
 		"props": ["radius_m", "depth_m"]},
 	{"name": "FloraZone", "path": "res://src/world/flora_zone.gd", "base": "Marker3D", "pkg": "B",
@@ -493,7 +520,9 @@ const CLASSES: Array[Dictionary] = [
 			"bind_world(world: HuntWorld) -> void", "unbind_world(world: HuntWorld) -> void", "flush() -> void",
 			"is_reconnecting() -> bool", "get_traffic() -> Dictionary",
 			"debug_cut(duration_s: float, half_open: bool = false) -> void",
-			"host_select_mode(mode: StringName) -> bool", "get_selected_mode() -> StringName"]},
+			"host_select_mode(mode: StringName) -> bool", "get_selected_mode() -> StringName",
+			# docs/plano_horda_nivel2.md section 4.8
+			"host_select_horde_level(level: int) -> bool", "get_selected_horde_level() -> int"]},
 	{"name": "NetSignaling", "path": "res://src/net/net_signaling.gd", "base": "RefCounted", "pkg": "N",
 		"methods": ["build_url(base: String, params: Dictionary) -> String",
 			"open(url: String, cfg: Dictionary, now_ms: int) -> bool", "is_open() -> bool", "is_closed() -> bool",
@@ -545,26 +574,37 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"H_SNAPSHOT": 0x20, "EV_BOAR_SPAWN": 0x21, "EV_BOAR_HIT": 0x22, "EV_BOAR_ATTACK": 0x23,
 			"EV_BOAR_DEATH": 0x24, "EV_CROP_EATEN": 0x25, "EV_BAIT": 0x26, "EV_DOG_MARK": 0x27, "EV_DOG_CMD": 0x28,
 			"EV_MESSAGE": 0x29, "EV_HUNT_END": 0x2A, "EV_FULL_SYNC": 0x2B, "EV_HORDE_WAVE": 0x2C, "MAX_BOARS_PER_HUNT": 255,
+			# docs/plano_horda_nivel2.md section 4.1
+			"EV_HUNTER_REVIVED": 0x2D, "EV_AMMO_CRATE": 0x2E,
 			"C_STATE": 0x40, "C_SHOT": 0x41, "C_CHARGE_HIT": 0x42, "C_BAIT": 0x43, "C_DOG_CMD": 0x44,
-			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32, "HF_AWAY": 64}},
+			"C_REVIVE": 0x45, "C_AMMO_CRATE": 0x46,
+			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32, "HF_AWAY": 64,
+			"HF_DOWNED": 128}},
 	{"name": "NetPeerInfo", "path": "res://src/core/net_peer_info.gd", "base": "RefCounted",
 		"props": ["slot", "display_name", "is_host", "ready", "loaded", "weapon_id", "dog_id", "path"]},
 	{"name": "HunterVisualBase", "path": "res://src/core/hunter_visual_base.gd", "base": "Node3D",
 		"methods": ["setup(slot: int, weapon_id: StringName) -> void", "play_death(instant: bool = false) -> void",
 			"slot_color(slot: int) -> Color"]},
-	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count", "mode"],
-		"methods": ["make_debug(p_map_id: StringName = &\"mato_grosso\", p_contract_index: int = 0, p_mode: StringName = &\"contract\") -> HuntRequest",
+	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count", "mode", "horde_level"],
+		"methods": ["make_debug(p_map_id: StringName = &\"mato_grosso\", p_contract_index: int = 0, p_mode: StringName = &\"contract\", p_horde_level: int = 1) -> HuntRequest",
 			"is_horde() -> bool"]},
 	{"name": "HuntResult", "path": "res://src/core/hunt_result.gd", "base": "RefCounted",
-		"props": ["counts_for_progression", "player_count", "team_kills", "scoreboard", "mode", "horde_wave_count", "horde_waves_cleared"],
+		"props": ["counts_for_progression", "player_count", "team_kills", "scoreboard", "mode", "horde_wave_count", "horde_waves_cleared", "horde_level"],
 		"methods": ["is_horde() -> bool"]},
 	{"name": "KillInfo", "path": "res://src/core/kill_info.gd", "base": "RefCounted", "props": ["killer_slot"]},
 	{"name": "HitInfo", "path": "res://src/core/hit_info.gd", "base": "RefCounted", "props": ["shooter_slot"]},
 	{"name": "ScenePaths", "path": "res://src/core/scene_paths.gd", "base": "RefCounted",
 		"consts": {"LOBBY": "res://src/ui/lobby/lobby.tscn", "REMOTE_HUNTER": "res://src/player/remote_hunter.tscn",
-			"BARN_CORN": "res://assets/models/props/barn_corn.tscn"}},
+			"BARN_CORN": "res://assets/models/props/barn_corn.tscn",
+			"AMMO_CRATE": "res://assets/models/props/ammo_crate.tscn"}},
 	{"name": "PlayerBase", "path": "res://src/core/player_base.gd", "base": "CharacterBody3D", "props": ["slot"],
 		"methods": ["get_weapon_count() -> int", "has_infinite_reserve() -> bool",
+			# docs/plano_horda_nivel2.md section 4.1 (revive, ammo crates, bot interact)
+			"is_downed() -> bool", "revive(health: float) -> void", "get_bleed_out_left_s() -> float",
+			"needs_ammo() -> bool", "add_ammo_mags(mags: int) -> int", "get_revive_target_slot() -> int",
+			"get_revive_progress() -> float", "bot_set_interact(held: bool) -> void",
+			# Q4 (owner): the ammo crate is taken with a press of interact
+			"get_ammo_crate_target() -> int",
 			"setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld) -> void",
 			"is_local() -> bool", "is_present() -> bool", "get_display_name() -> String",
 			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
@@ -586,7 +626,12 @@ const CORE_CLASSES: Array[Dictionary] = [
 			# docs/arquitetura.md section 8.4 (1.3, HF3): INF = no dog target (the default)
 			"get_dog_target_position() -> Vector3",
 			# docs/arquitetura.md section 8.4 (1.4, HF5): null = the world has no map image
-			"get_minimap_texture() -> Texture2D"]},
+			"get_minimap_texture() -> Texture2D",
+			# docs/plano_horda_nivel2.md section 4.1: 0 / Rect2() / no-op / empty outside horde level 2
+			"get_horde_level() -> int", "get_player_bounds() -> Rect2", "request_revive(target_slot: int) -> void",
+			"get_ammo_crate_positions() -> PackedVector3Array",
+			# Q4 (owner): crate in reach (-1 = none) and the press of interact that takes it
+			"get_ammo_crate_in_reach(at: Vector3) -> int", "request_ammo_crate(crate: int) -> void"]},
 	{"name": "CornStockVisualBase", "path": "res://src/core/corn_stock_visual_base.gd", "base": "Node3D",
 		"methods": ["stage_for(pct: float) -> int", "setup(ring_radius_m: float) -> void", "set_stock_pct(pct: float) -> void",
 			"set_under_attack(on: bool) -> void", "create_fallback() -> CornStockVisualBase"],
@@ -685,6 +730,8 @@ static func type_code(type_name: String) -> int:
 			return TYPE_CALLABLE
 		"PackedVector3Array":
 			return TYPE_PACKED_VECTOR3_ARRAY
+		"PackedVector2Array":
+			return TYPE_PACKED_VECTOR2_ARRAY
 		"PackedFloat32Array":
 			return TYPE_PACKED_FLOAT32_ARRAY
 		"PackedColorArray":

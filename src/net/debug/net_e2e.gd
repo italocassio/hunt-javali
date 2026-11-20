@@ -20,6 +20,9 @@ extends Node
 ##   --horde: the host picks the "Horda Javali" mode in the room (Net.host_select_mode); the client must see it
 ##   in its lobby before L_START and both HuntRequests must come out horde / mato_grosso / contract_index 0
 ##   (docs/horda.md 9.1). Without it the same checks expect the contract mode.
+##   --level2: implies --horde; the host also picks horde level 2 (Net.host_select_horde_level) and both
+##   HuntRequests must come out with horde_level 2 (the client sees it in its lobby first). Without it the
+##   checks expect horde_level 1.
 ## Exit code 0 and "NET_E2E checks=N failures=0" when green.
 
 const PEER_ARG: String = "--e2e-peer="
@@ -32,6 +35,8 @@ const DEADLINES_ARG: String = "--deadlines"  # scenario: stalls, absences, timeo
 const REAL_TIMEOUTS_ARG: String = "--real-timeouts"   # with --deadlines: data/net.json values, not shortened ones
 const REJOIN_ARG: String = "--rejoin"        # scenario: reconnection of a client in the hunt (net_rejoin.gd)
 const HORDE_ARG: String = "--horde"          # scenario: the room mode is Horda Javali (passed on to both players)
+const LEVEL2_ARG: String = "--level2"        # scenario: Horda Javali level 2 (implies --horde)
+const LEVEL2: int = 2
 const SERVER_ARG: String = "--server="       # read by the autoload Net in the children
 
 const HOST_ADDR: String = "127.0.0.1"
@@ -58,6 +63,7 @@ var _dir: String = ""
 var _keep: bool = false
 var _host_drops: bool = false
 var _horde: bool = false
+var _horde_level: int = 1
 var _pids: Dictionary = {}        # label -> pid
 var _sessions: Array[NetSession] = []
 var _checks: int = 0
@@ -99,7 +105,9 @@ func _become_peer(peer_role: String) -> void:
 	driver.set("dir", _arg(DIR_ARG))
 	driver.set("code", _arg(CODE_ARG))
 	driver.set("host_drops", OS.get_cmdline_user_args().has(DROP_ARG))
-	driver.set("horde", OS.get_cmdline_user_args().has(HORDE_ARG))
+	var user_args: PackedStringArray = OS.get_cmdline_user_args()
+	driver.set("horde", user_args.has(HORDE_ARG) or user_args.has(LEVEL2_ARG))
+	driver.set("horde_level", LEVEL2 if user_args.has(LEVEL2_ARG) else 1)
 	get_tree().root.add_child.call_deferred(driver)
 
 
@@ -109,7 +117,8 @@ func _run() -> void:
 	Profile.set_save_path("user://net_e2e_orchestrator.json")   # never the player's save
 	_keep = OS.get_cmdline_user_args().has(KEEP_ARG)
 	_host_drops = OS.get_cmdline_user_args().has(DROP_ARG)
-	_horde = OS.get_cmdline_user_args().has(HORDE_ARG)
+	_horde = OS.get_cmdline_user_args().has(HORDE_ARG) or OS.get_cmdline_user_args().has(LEVEL2_ARG)
+	_horde_level = LEVEL2 if OS.get_cmdline_user_args().has(LEVEL2_ARG) else 1
 	_dir = _arg(DIR_ARG)
 	if _dir == "":
 		_dir = OS.get_temp_dir().path_join("javali_net_e2e_%d" % OS.get_process_id())
@@ -191,6 +200,8 @@ func _run() -> void:
 		var want_mode: StringName = Ids.MODE_HORDE if _horde else Ids.MODE_CONTRACT
 		var saw_mode: bool = await _wait(func() -> bool: return fillers[1].get_selected_mode() == want_mode, SESSION_MS)
 		_ok(saw_mode, "quarto peer vê o modo da sala: %s (%s)" % [str(want_mode), str(fillers[1].get_selected_mode())])
+		var saw_level: bool = await _wait(func() -> bool: return fillers[1].get_selected_horde_level() == _horde_level, SESSION_MS)
+		_ok(saw_level, "quarto peer vê o nível da sala: %d (%d)" % [_horde_level, fillers[1].get_selected_horde_level()])
 	var fifth: NetSession = _session(url, _version(), "Quinto")
 	fifth.join(code)
 	var fifth_fail: Array = await _wait_failure(fifth)
@@ -234,8 +245,11 @@ func _check_results() -> void:
 			var lobby_seen: Dictionary = r.get("lobby_seen", {})
 			_ok(str(lobby_seen.get("mode", "?")) == want_mode and int(lobby_seen.get("state", -1)) == Net.RoomState.LOBBY,
 				"client: viu o modo %s no lobby, antes do L_START (%s)" % [want_mode, str(lobby_seen)])
+			_ok(int(lobby_seen.get("horde_level", -1)) == _horde_level, "client: viu o nível %d no lobby, antes do L_START (%s)"
+				% [_horde_level, str(lobby_seen)])
 		else:
 			_ok(bool(r.get("select_ok", not _horde)), "host: host_select_mode aceito")
+			_ok(bool(r.get("level_ok", true)), "host: host_select_horde_level aceito")
 		_ok(int(loading.get("player_count", 0)) == 2, "%s: 2 jogadores em LOADING" % who)
 		_ok(int(loading.get("seed", 0)) != 0, "%s: get_hunt_seed() já preenchido em LOADING" % who)
 		var roster: Array = loading.get("roster", [])
@@ -252,6 +266,8 @@ func _check_results() -> void:
 			"%s: HuntRequest.rng_seed = semente da sala (%s)" % [who, str(go.get("request_seed"))])
 		_ok(int(go.get("request_players", 0)) == 2, "%s: HuntRequest.player_count = 2" % who)
 		_ok(str(go.get("request_mode", "?")) == want_mode, "%s: HuntRequest.mode = %s (%s)" % [who, want_mode, str(go.get("request_mode", "?"))])
+		_ok(int(go.get("request_horde_level", -1)) == _horde_level, "%s: HuntRequest.horde_level = %d (%s)"
+			% [who, _horde_level, str(go.get("request_horde_level", ""))])
 		if _horde:
 			_ok(str(go.get("request_map", "")) == "mato_grosso", "%s: HuntRequest.map_id = mato_grosso (%s)" % [who, str(go.get("request_map", ""))])
 			_ok(int(go.get("request_contract", -1)) == 0, "%s: HuntRequest.contract_index = 0 (%s)" % [who, str(go.get("request_contract", ""))])
@@ -267,6 +283,7 @@ func _check_results() -> void:
 		% [str(host_go.get("seed")), str(client_go.get("seed"))])
 	_ok(str(host_go.get("request_map", "")) == str(client_go.get("request_map", "-")), "mesmo mapa nos dois")
 	_ok(str(host_go.get("request_mode", "")) == str(client_go.get("request_mode", "-")), "mesmo modo nos dois")
+	_ok(int(host_go.get("request_horde_level", -1)) == int(client_go.get("request_horde_level", -2)), "mesmo nível nos dois")
 	_ok(int(host_go.get("request_contract", -1)) == int(client_go.get("request_contract", -2)), "mesmo contrato nos dois")
 	_check_view(host, client, "anfitrião vê o cliente")
 	_check_view(client, host, "cliente vê o anfitrião")
@@ -340,6 +357,8 @@ func _peer_args(peer_role: String, url: String, code: String) -> PackedStringArr
 		args.append(DROP_ARG)
 	if _horde:
 		args.append(HORDE_ARG)
+	if _horde_level == LEVEL2:
+		args.append(LEVEL2_ARG)
 	return args
 
 

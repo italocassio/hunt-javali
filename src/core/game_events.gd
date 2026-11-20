@@ -17,6 +17,9 @@ signal player_died()
 signal item_used(item_id: StringName, position: Vector3)
 signal thermal_vision_changed(active: bool)
 signal dog_command_requested()
+signal player_downed(bleed_out_s: float)   ## Local player went down (horde revive); A Player -> A Hud
+signal player_revived(health: float)       ## Local player was revived with that health; A Player -> A Hud
+signal ammo_picked_up(rounds: int)         ## Local player took rounds from an ammo crate; A Player -> A Hud
 
 # Boars / world
 signal boar_spawned(boar_id: int, type_id: StringName, weight_kg: float)
@@ -42,6 +45,8 @@ signal spectate_changed(slot: int)
 signal net_stall_changed(stalled: bool)
 signal net_reconnect_changed(active: bool)          # Net -> A Hud, A Player, B HuntController
 signal hunter_away_changed(slot: int, away: bool)   # B HuntController -> A Hud
+signal hunter_downed(slot: int)                     ## A hunter (any slot) went down; B HuntController -> A Hud/Spectator
+signal hunter_revived(slot: int, by_slot: int)      ## A downed hunter was picked up by by_slot; B HuntController -> A Hud
 
 # Horde mode (docs/horda.md section 4). Only emitted when HuntWorld.is_horde().
 signal horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)   # B HuntController -> A Hud

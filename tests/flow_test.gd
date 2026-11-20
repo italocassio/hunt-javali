@@ -5,7 +5,7 @@ extends Node
 ## Scene changes free the current scene, so the real runner is a second node of the same script that is
 ## parented to the root window (it survives Router.goto).
 ##
-## The last three cases are the horde route (docs/horda.md section 14).
+## The last six cases are the horde route (docs/horda.md section 14): level 1, then level 2 (docs/plano_horda_nivel2.md).
 ##
 ## Run: tools/godot.sh --headless --fixed-fps 60 --path . res://tests/flow_test.tscn [-- --strict]
 
@@ -145,6 +145,9 @@ func _run() -> void:
 	await _case("horde_menu_to_hunt", _step_horde_hunt)
 	await _case("horde_result_and_shop", _step_horde_result)
 	await _case("horde_shop_back_to_menu", _step_horde_back_to_menu)
+	await _case("horde2_menu_to_hunt", _step_horde2_hunt)
+	await _case("horde2_result_and_shop", _step_horde2_result)
+	await _case("horde2_shop_back_to_menu", _step_horde_back_to_menu)
 	_t.call("cleanup_test_files")
 	if not _finished:
 		_finished = true
@@ -494,3 +497,90 @@ func _step_horde_back_to_menu() -> void:
 		return
 	if _press("BackButton"):
 		await _wait_scene(ScenePaths.MAIN_MENU)
+
+
+# --------------------------------------------------------------------------------------------
+# Horde level 2 (docs/plano_horda_nivel2.md): menu -> hunt at level 2 -> result -> shop. Same route as level 1; what
+# changes is the rules (counted ammo, crates, confine, spawn) and the prize/header of the result.
+# --------------------------------------------------------------------------------------------
+
+func _step_horde2_hunt() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	_horde_money_before = Profile.get_money()
+	_horde_unlocked_before = Profile.get_unlocked_contract_count(&"mato_grosso")
+	_horde_completed_before.clear()
+	for i: int in Data.get_contract_count(&"mato_grosso"):
+		_horde_completed_before.append(Profile.is_contract_completed(&"mato_grosso", i))
+	_started_signals = 0
+	_ended.clear()
+	var req: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE, 2)
+	_t.call("ok", req.is_horde() and req.horde_level == 2, "pedido de horda Nivel 2")
+	Router.start_hunt(req)
+	if not await _wait_scene(ScenePaths.HUNT, 30.0):
+		return
+	var hunt: HuntController = _scene() as HuntController
+	if hunt == null:
+		_t.call("fail", "cena HUNT nao e HuntController")
+		return
+	var t0: int = Time.get_ticks_msec()
+	while not hunt.is_world_ready() and Time.get_ticks_msec() - t0 < 60000:
+		await get_tree().process_frame
+	_t.call("ok", hunt.is_world_ready(), "mundo da horda Nivel 2 pronto")
+	for i: int in 5:
+		await get_tree().process_frame
+	_t.call("eq", _started_signals, 1, "hunt_started 1x na horda Nivel 2")
+	_t.call("ok", hunt.is_horde(), "is_horde()")
+	_t.call("eq", hunt.get_horde_level(), 2, "get_horde_level() == 2")
+	_t.call("eq", hunt.get_horde_wave(), 1, "onda 1 anunciada")
+	_t.call("eq", hunt.get_horde_phase(), Ids.HP_INTERMISSION, "comeca no intervalo")
+	var player: PlayerBase = hunt.get_player()
+	_t.call("eq", player.get_weapon_count(), Data.get_weapon_ids().size(), "todas as armas")
+	_t.call("ok", not player.has_infinite_reserve(), "Nivel 2: reserva contada (nao infinita)")
+	_t.call("ok", player.get_ammo_reserve() > 0, "Nivel 2: comeca com reserva (%d)" % player.get_ammo_reserve())
+	_t.call("ok", not player.needs_ammo() or player.get_ammo_reserve() > 0, "needs_ammo coerente")
+	var spawn: Vector3 = player.global_position
+	_t.call("ok", Vector2(spawn.x, spawn.z).distance_to(Vector2(30.0, -74.0)) <= 4.0, "jogador nasce a <= 4 m de (30, -74): %s" % str(spawn))
+	var bounds: Rect2 = hunt.get_player_bounds()
+	_t.call("ok", bounds.has_area() and bounds.has_point(Vector2(spawn.x, spawn.z)), "get_player_bounds() definido e com o jogador dentro (%s)" % str(bounds))
+	_t.call("eq", hunt.get_ammo_crate_positions().size(), 3, "3 caixas de municao disponiveis")
+	_t.call("ok", hunt.debug_ammo_crates() != null, "no AmmoCrates existe")
+	_t.call("ok", hunt.find_child("AmmoCrates", true, false) != null, "no 'AmmoCrates' na cena")
+	_t.call("ok", hunt.find_child("WaveLabel", true, false) != null, "HUD: WaveLabel existe")
+	_t.call("ok", _find_label("Celeiro 100%") != null, "HUD: barra do topo diz 'Celeiro 100%'")
+	_ended.clear()
+	hunt.debug_force_end(HuntResult.Outcome.VICTORY)
+	await _wait_scene(ScenePaths.RESULT, 30.0)
+	_t.call("eq", _ended.size(), 1, "hunt_ended 1x na horda Nivel 2")
+
+
+func _step_horde2_result() -> void:
+	if _scene_path() != ScenePaths.RESULT:
+		_t.call("fail", "pre-condicao: nao esta no resultado (%s)" % _scene_path())
+		return
+	var r: HuntResult = Router.last_result
+	_t.call("ok", r != null, "Router.last_result definido")
+	if r != null:
+		_t.call("eq", r.mode, Ids.MODE_HORDE, "last_result.mode")
+		_t.call("eq", r.horde_level, 2, "last_result.horde_level == 2")
+		_t.call("eq", r.outcome, HuntResult.Outcome.VICTORY, "outcome")
+		_t.call("ok", not r.counts_for_progression, "horda nunca conta para progressao")
+		_t.call("eq", r.contract_bonus, Profile.horde_bonus(100.0, 2), "bonus do Nivel 2 com o estoque cheio")
+		_t.call("eq", r.contract_bonus, 5000, "bonus de R$ 5000")
+		_t.call("eq", Profile.get_money(), _horde_money_before + Profile.horde_bonus(100.0, 2), "saldo += Profile.horde_bonus(100, 2) (1x)")
+	_t.call("eq", Profile.get_unlocked_contract_count(&"mato_grosso"), _horde_unlocked_before, "contratos liberados iguais")
+	for i: int in _horde_completed_before.size():
+		_t.call("eq", Profile.is_contract_completed(&"mato_grosso", i), _horde_completed_before[i], "contrato %d: concluido como antes" % i)
+	_t.call("ok", _find_label("Celeiro defendido!") != null, "titulo 'Celeiro defendido!'")
+	var level_name: String = str(Data.get_horde_level(2).get("name", ""))
+	var map_name: String = str(Data.get_map(&"mato_grosso").get("name", "mato_grosso"))
+	_t.call("ok", _find_label("Horda Javali · %s  |  %s" % [level_name, map_name]) != null, "cabecalho 'Horda Javali · %s  |  %s'" % [level_name, map_name])
+	var retry: Button = _button("RetryButton")
+	if retry != null:
+		_t.call("eq", retry.is_visible_in_tree(), false, "%RetryButton invisivel na horda")
+	var cont: Button = _button("ContinueButton")
+	if cont != null:
+		_t.call("ok", cont.is_visible_in_tree(), "%ContinueButton visivel")
+	if _press("ContinueButton"):
+		await _wait_scene(ScenePaths.SHOP)

@@ -31,12 +31,16 @@ const EV_MESSAGE: int = 0x29
 const EV_HUNT_END: int = 0x2A
 const EV_FULL_SYNC: int = 0x2B         # header of a rejoin sync, followed by replayed records (section 4.7.6)
 const EV_HORDE_WAVE: int = 0x2C        # horde wave state (docs/horda.md section 9)
+const EV_HUNTER_REVIVED: int = 0x2D    ## Horde level 2: target_slot u8, by_slot u8
+const EV_AMMO_CRATE: int = 0x2E        ## Horde level 2: crate u8, available u8, taker_slot u8 (255 = nobody)
 # Client -> host
 const C_STATE: int = 0x40              # state lane
 const C_SHOT: int = 0x41
 const C_CHARGE_HIT: int = 0x42
 const C_BAIT: int = 0x43
 const C_DOG_CMD: int = 0x44
+const C_REVIVE: int = 0x45             ## Horde level 2: target_slot u8
+const C_AMMO_CRATE: int = 0x46         ## Horde level 2: crate u8
 
 # Hunter state flags
 const HF_CROUCH: int = 1
@@ -46,6 +50,7 @@ const HF_ALIVE: int = 8
 const HF_RELOAD: int = 16
 const HF_UNARMED: int = 32             # binoculars / item in hand
 const HF_AWAY: int = 64                # set by the host for a hunter that is silent / reconnecting
+const HF_DOWNED: int = 128             ## Horde level 2: down and bleeding out (HF_ALIVE clear)
 
 const BOAR_STATES: Array[StringName] = [&"wander", &"to_crop", &"eat", &"to_bait", &"alert", &"flee",
 	&"scrape", &"charge", &"recover", &"bayed", &"held", &"dead"]

@@ -3,6 +3,31 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.0 — 20/11/2026
+
+**Horda: correções e Nível 2.**
+
+Correções da Horda (valem nos dois níveis):
+- A bala passa entre os arames da cerca, e os javalis enxergam através dela. No modo Contrato nada muda.
+- Os javalis contornam o milharal em vez de atravessá-lo, então dá para vê-los chegando.
+- Dá para entrar no celeiro. O milho fica numa tulha de madeira no fundo.
+- O início de cada onda toca uma sirene.
+
+Nível 2 (o anfitrião escolhe "Nível 1" ou "Nível 2" na sala da horda):
+- Munição contada: cada arma começa com o pente e mais 2 pentes. Três caixas de cartuchos no celeiro dão mais
+  2 pentes em cada arma e voltam depois de 60 s. Para pegar, aperte F (no celular, o botão "Pegar") ao lado da caixa.
+- Ninguém sai do cercado da fazenda.
+- Os javalis são mais agressivos: fêmeas investem quando provocadas, o alcance e o dano sobem e o aviso antes
+  da investida é mais curto.
+- Quem cai pode ser levantado por um companheiro, que segura F (ou "Levantar") por 4 s ao lado; volta com 50 de
+  vida. Sem ajuda, morre de vez em 60 s. Sozinho na sala, cair é derrota.
+- Prêmios do Nível 2: abate × 0,5 e bônus de vitória de até R$ 5000.
+
+Detalhes técnicos: contrato horda 2.0 em `docs/plano_horda_nivel2.md`; camada de colisão 5 `fence`;
+`data/horde.json` versão 2 com `levels`; classes novas `HordeRoute` e `HordeAmmoCrates`; `horde_level` no
+`HuntRequest`, `HuntResult`, `L_LOBBY` e `L_START`; `HF_DOWNED`, `C_REVIVE`, `C_AMMO_CRATE`, `EV_HUNTER_REVIVED`,
+`EV_AMMO_CRATE`; ação de entrada `interact` (F); sirene gravada com ElevenLabs em `assets/audio/sfx/horde_wave_start.mp3`.
+
 ## 0.8.4 — 20/11/2026
 
 **Painel da arma com retrato e barra de vida embaixo.**

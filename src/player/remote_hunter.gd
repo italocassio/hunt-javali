@@ -20,6 +20,7 @@ const DEFAULT_MAP_RECT: Rect2 = Rect2(-128.0, -128.0, 256.0, 256.0)   # only if 
 const STEP_SFX: StringName = &"step_grass"
 const FLAGS_OFFSET: int = NetCodec.HUNTER_STATE_BYTES - 4   # flags byte of a raw HUNTER_STATE (weapon, health, shot_seq follow)
 const SPEED_OFFSET: int = FLAGS_OFFSET - 1
+const DOWNED_NAME_FORMAT: String = "%s (caído)"   # name tag of a downed hunter (docs/plano_horda_nivel2.md 4.7)
 
 var _visual: HunterVisualBase = null
 var _label: Label3D = null
@@ -49,6 +50,7 @@ var _pitch_deg: float = 0.0
 var _stride: float = 0.0
 var _last_flat_pos: Vector3 = Vector3.ZERO
 var _have_last_pos: bool = false
+var _visual_fallen: bool = false   # play_death was called on the current visual (it ignores later calls)
 
 # Debug counters (sandbox/tests).
 var fire_events: int = 0
@@ -86,7 +88,7 @@ func setup_remote(p_slot: int, p_display_name: String, p_weapon_id: StringName, 
 	if _visual == null:
 		_build_visual(p_weapon_id)
 	elif _label != null:
-		_label.text = _display_name
+		_refresh_name_text()
 
 
 func _build_visual(weapon_id: StringName) -> void:
@@ -100,8 +102,36 @@ func _build_visual(weapon_id: StringName) -> void:
 	visual.setup(slot, weapon_id)   # exactly once, before add_child
 	add_child(visual)
 	_visual = visual
+	_visual_fallen = false
 	_shown_weapon = weapon_id
 	_build_name_tag()
+
+
+## A hunter that stood up again after falling (horde revive): play_death froze the old visual for good, so the child
+## Visual is replaced by a fresh instance (setup, then set_weapon through _sync_weapon).
+func _rebuild_visual() -> void:
+	var old: HunterVisualBase = _visual
+	_visual = null
+	_label = null
+	if old != null:
+		remove_child(old)
+		old.queue_free()
+	_build_visual(&"")
+	_sync_weapon()
+	_visual.set_crouching(is_crouching())
+	_visual.set_aiming(is_aiming())
+	_visual.set_look_pitch(deg_to_rad(_pitch_deg))
+	_visual.set_locomotion(_speed)
+
+
+func _play_death(instant: bool) -> void:
+	_visual_fallen = true
+	_visual.play_death(instant)
+
+
+func _refresh_name_text() -> void:
+	if _label != null:
+		_label.text = DOWNED_NAME_FORMAT % _display_name if is_downed() else _display_name
 
 
 func _build_name_tag() -> void:
@@ -155,6 +185,10 @@ func heal(_amount: float) -> void:
 
 func is_alive() -> bool:
 	return (_flags & NetCodec.HF_ALIVE) != 0
+
+
+func is_downed() -> bool:
+	return (_flags & NetCodec.HF_DOWNED) != 0
 
 
 func get_health() -> float:
@@ -290,13 +324,16 @@ func _snap_to(sample: Dictionary) -> void:
 	_speed = float(sample["speed"])
 	_pitch_deg = float(sample["pitch"])
 	if _visual != null:
+		if is_alive() and _visual_fallen:
+			_rebuild_visual()
 		_sync_weapon()
 		_visual.set_crouching(is_crouching())
 		_visual.set_aiming(is_aiming())
 		_visual.set_look_pitch(deg_to_rad(_pitch_deg))
 		_visual.set_locomotion(_speed)
 		if not is_alive():
-			_visual.play_death(true)
+			_play_death(true)
+		_refresh_name_text()
 
 
 func _process(delta: float) -> void:
@@ -343,6 +380,8 @@ func _apply_discrete(s: Dictionary) -> void:
 	var old_flags: int = _flags
 	_flags = flags
 	_weapon_index = int(s["weapon"])
+	if (flags & NetCodec.HF_ALIVE) != 0 and _visual_fallen:
+		_rebuild_visual()
 	_sync_weapon()
 	_visual.set_crouching((flags & NetCodec.HF_CROUCH) != 0)
 	_visual.set_aiming((flags & NetCodec.HF_AIM) != 0)
@@ -361,7 +400,9 @@ func _apply_discrete(s: Dictionary) -> void:
 		var def: Dictionary = Data.get_weapon(get_current_weapon_id())
 		_visual.play_reload(float(def.get("reload_s", 2.0)))
 	if (old_flags & NetCodec.HF_ALIVE) != 0 and (flags & NetCodec.HF_ALIVE) == 0:
-		_visual.play_death()
+		_play_death(false)
+	if (old_flags & NetCodec.HF_DOWNED) != (flags & NetCodec.HF_DOWNED):
+		_refresh_name_text()
 
 
 func _sync_weapon() -> void:
@@ -404,7 +445,8 @@ func _update_name_tag() -> void:
 	if cam == null:
 		return
 	var watched: bool = cam is SpectatorCamera and (cam as SpectatorCamera).get_target_slot() == slot   # the HUD names it
-	_label.visible = cam.global_position.distance_to(global_position) <= _tag_max_m and is_alive() and not watched
+	_label.visible = cam.global_position.distance_to(global_position) <= _tag_max_m and (is_alive() or is_downed()) \
+		and not watched
 
 
 func _weapon_id_at(index: int) -> StringName:

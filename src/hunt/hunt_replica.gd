@@ -22,6 +22,10 @@ signal full_sync_started(crop_pct: float)
 signal full_sync_finished(killed: int, total: int)
 ## Horde (docs/horda.md section 9.2): the host's wave state changed (or was replayed by a full sync).
 signal horde_wave_received(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int)
+## Horde level 2: the host accepted a revive (EV_HUNTER_REVIVED).
+signal hunter_revived_received(target_slot: int, by_slot: int)
+## Horde level 2: an ammo crate was taken (available false, taker = who) or came back (EV_AMMO_CRATE, also replayed).
+signal ammo_crate_received(crate: int, available: bool, taker_slot: int)
 
 const SPAWN_BYTES: int = 9
 const HIT_BYTES: int = 8
@@ -52,6 +56,8 @@ const PATCH_BYTES: int = 2
 const HORDE_WAVE_BYTES: int = 7          # EV_HORDE_WAVE body
 const COUNTDOWN_WIRE_SCALE: float = 10.0 # EV_HORDE_WAVE countdown u16 in 0.1 s
 const SNAP_FLAG_CROP_ATTACK: int = 1     # H_SNAPSHOT flags b0
+const HUNTER_REVIVED_BYTES: int = 2      # EV_HUNTER_REVIVED body: target_slot u8, by_slot u8
+const AMMO_CRATE_BYTES: int = 3          # EV_AMMO_CRATE body: crate u8, available u8, taker_slot u8
 const DEFAULT_INTERP_DELAY_MS: float = 200.0
 const DEFAULT_THERMAL_RANGE_M: float = 150.0
 ## Host-clock estimate: follows the freshest snapshot at once, eases down slowly when packets come late.
@@ -94,6 +100,8 @@ var hits_claimed: int = 0
 var charge_hits: int = 0
 var dog_commands_claimed: int = 0
 var full_syncs_applied: int = 0
+var revives_claimed: int = 0
+var ammo_crates_claimed: int = 0
 
 
 func setup(world: HuntWorld, heightmap: Heightmap, map_rect: Rect2, crop: CropManager) -> void:
@@ -368,6 +376,15 @@ func _apply_record(type: int, inp: StreamPeerBuffer, length: int) -> void:
 		NetCodec.EV_HORDE_WAVE:
 			if length >= HORDE_WAVE_BYTES:
 				_on_horde_wave(inp)
+		NetCodec.EV_HUNTER_REVIVED:
+			if length >= HUNTER_REVIVED_BYTES:
+				var target: int = inp.get_u8()
+				hunter_revived_received.emit(target, inp.get_u8())
+		NetCodec.EV_AMMO_CRATE:
+			if length >= AMMO_CRATE_BYTES:
+				var crate: int = inp.get_u8()
+				var available: bool = inp.get_u8() != 0
+				ammo_crate_received.emit(crate, available, inp.get_u8())
 
 
 ## EV_HORDE_WAVE: wave u8, wave_count u8, phase u8, countdown u16 (x0.1 s), wave_total u8, killed_before u8.
@@ -433,7 +450,7 @@ func _on_spawn(inp: StreamPeerBuffer) -> void:
 		return
 	var type_id: StringName = _type_ids[type_index]
 	var p: BoarPuppet = BoarPuppet.new()
-	p.setup(id, type_id, weight, xz, yaw, _hm)
+	p.setup(id, type_id, weight, xz, yaw, _hm, _world.get_horde_level() if _world != null else 0)
 	p.hit_by_local.connect(_on_local_hit)
 	add_child(p)
 	_puppets[id] = p
@@ -563,6 +580,26 @@ func queue_bait_claim(at: Vector3) -> void:
 	NetCodec.put_xz(_claims, _rect, at.x, at.z)
 	_end_claim(pos)
 	baits_claimed += 1
+
+
+## Horde level 2, C_REVIVE: target_slot u8. The local hunter finished holding interact next to that hunter.
+func queue_revive_claim(target_slot: int) -> void:
+	if _suspended:
+		return
+	var at: int = _begin_claim(NetCodec.C_REVIVE)
+	_claims.put_u8(target_slot & 0xFF)
+	_end_claim(at)
+	revives_claimed += 1
+
+
+## Horde level 2, C_AMMO_CRATE: crate u8. The local hunter pressed interact at that available crate and needs ammo.
+func queue_ammo_crate_claim(crate: int) -> void:
+	if _suspended:
+		return
+	var at: int = _begin_claim(NetCodec.C_AMMO_CRATE)
+	_claims.put_u8(crate & 0xFF)
+	_end_claim(at)
+	ammo_crates_claimed += 1
 
 
 func take_claims(out: StreamPeerBuffer) -> void:

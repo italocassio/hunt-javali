@@ -44,14 +44,15 @@ var _voice_time: float = 0.0
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()   # cosmetic only (voices)
 
 
-func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, xz: Vector2, yaw: float, hm: Heightmap) -> void:
+## horde_level: the hunt's horde level (HuntWorld.get_horde_level; 0 = contract): its boar_overrides set the charge damage.
+func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, xz: Vector2, yaw: float, hm: Heightmap, horde_level: int = 0) -> void:
 	boar_id = p_id
 	type_id = p_type_id
 	weight_kg = p_weight_kg
 	_hm = hm
 	name = "BoarPuppet_%d" % boar_id
 	body_scale = BoarVisualBase.scale_for_weight(weight_kg)
-	var def: Dictionary = Data.get_boar_type(type_id)
+	var def: Dictionary = Data.get_horde_boar_type(type_id, horde_level)
 	_charge_damage = float(def.get("charge_damage", 0.0))
 	_knockback_mps = float(Data.get_game().get("player", {}).get("knockback_mps", _knockback_mps))
 	_zone_mults = Data.get_boar_rules().get("zone_multipliers", {})

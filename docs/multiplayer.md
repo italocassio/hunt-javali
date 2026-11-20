@@ -601,8 +601,8 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | Registro | Dir. | Pista | Frequência | Corpo | Bytes |
 |---|---|---|---|---|---|
 | `L_READY` | C→H | E | ao mudar | `ready u8, weapon0 u8, weapon1 u8, dog u8, token u32` | 8 |
-| `L_LOBBY` | H→C | E | ao mudar | `state u8, map u8, contract u8, n u8, n×{slot u8, flags u8 (b0 pronto, b1 anfitrião, b2 carregou, b3 rtc), weapon0 u8, dog u8}, mode u8` (0.5.0: `mode` no fim, índice em `NetCodec.MODES`; ausente = contrato) | 5+4n |
-| `L_START` | H→C | E | 1× | `map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[4] u8, mode u8` (0.5.0: `mode` na posição `8 + net.max_players`; ausente = contrato) | 13 |
+| `L_LOBBY` | H→C | E | ao mudar | `state u8, map u8, contract u8, n u8, n×{slot u8, flags u8 (b0 pronto, b1 anfitrião, b2 carregou, b3 rtc), weapon0 u8, dog u8}, mode u8, horde_level u8` (0.5.0: `mode` depois da lista, índice em `NetCodec.MODES`; ausente = contrato. 0.9.0: `horde_level` depois de `mode`; ausente, 0 ou acima de `Data.get_horde_level_count()` = 1) | 6+4n |
+| `L_START` | H→C | E | 1× | `map u8, contract u8, rng_seed u32, player_count u8, slots_mask u8, dog[4] u8, mode u8, horde_level u8` (0.5.0: `mode` na posição `8 + net.max_players`; ausente = contrato. 0.9.0: `horde_level` em `9 + net.max_players`; ausente, 0 ou acima do total = 1) | 14 |
 | `L_LOADED` | C→H | E | 1× | — | 0 |
 | `L_GO` | H→C | E | 1× | — | 0 |
 | `L_NEED_RELAY` | ambos | E | raro | — | 0 |

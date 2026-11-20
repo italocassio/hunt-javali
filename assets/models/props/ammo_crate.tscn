@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/models/props/ammo_crate.gd" id="1"]
+
+[node name="AmmoCrate" type="Node3D"]
+script = ExtResource("1")

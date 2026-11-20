@@ -1,5 +1,5 @@
 extends Node3D
-## Preview: the barn prop five times, each with the corn stock at one stage (4 full ... 0 empty), 3 + 2 grid.
+## Preview: the barn prop five times, each with the corn stock at one stage (4 full ... 0 empty), 3 + 2 grid, with the ammo crates at the barn front.
 ## Screenshot: tools/godot.sh --path . --windowed --resolution 1600x900 -s res://tools/screenshot.gd -- \
 ##     --scene=res://assets/preview/barn_corn_preview.tscn --out=C:/abs/shot.png --frames=60
 ## User arg --cam=close frames the first (full) barn only.
@@ -7,6 +7,7 @@ extends Node3D
 const RING_M: float = 11.0
 const SPACING_X: float = 28.0
 const SPACING_Z: float = 28.0
+const CRATE_OFFSETS: Array[Vector3] = [Vector3(-3.0, 0.0, -2.0), Vector3(0.0, 0.0, -2.0), Vector3(3.0, 0.0, -2.0)]   # seed: x 35|38|41 at z -90 around the barn (38, -88)
 const STAGE_PCTS: Array[float] = [100.0, 60.0, 40.0, 10.0, 0.0]
 
 
@@ -27,6 +28,7 @@ func _ready() -> void:
 	add_child(ground)
 	var barn_scene: PackedScene = load("res://assets/models/props/barn.tscn")
 	var corn_scene: PackedScene = load("res://assets/models/props/barn_corn.tscn")
+	var crate_scene: PackedScene = load(ScenePaths.AMMO_CRATE)
 	var tris: int = 0
 	for i: int in STAGE_PCTS.size():
 		var col: int = i % 3
@@ -43,14 +45,23 @@ func _ready() -> void:
 		corn.set_stock_pct(STAGE_PCTS[i])
 		if i == 1:
 			corn.set_under_attack(true)
+		for off: Vector3 in CRATE_OFFSETS:
+			var crate: Node3D = crate_scene.instantiate() as Node3D
+			add_child(crate)
+			crate.position = pos + off
+			crate.rotation.y = off.x * 0.1
 		tris = MeshKit.count_triangles(corn)
 	print("BARN_CORN tris(all meshes)=%d" % tris)
+	var crate_probe: Node3D = crate_scene.instantiate() as Node3D
+	add_child(crate_probe)
+	print("AMMO_CRATE tris=%d meshes=%d" % [MeshKit.count_triangles(crate_probe), crate_probe.find_children("*", "MeshInstance3D", true, false).size()])
+	crate_probe.free()
 	var cam: Camera3D = Camera3D.new()
 	add_child(cam)
 	cam.fov = 62.0
 	if OS.get_cmdline_user_args().has("--cam=close"):
-		cam.position = Vector3(-30.0, 9.0, -26.0)
-		cam.look_at(Vector3(-30.0, 1.5, 0.0))
+		cam.position = Vector3(-30.0, 3.2, -14.0)
+		cam.look_at(Vector3(-30.0, 1.0, 3.0))
 	else:
 		cam.position = Vector3(0.0, 16.0, -38.0)
 		cam.look_at(Vector3(0.0, 0.0, 12.0))

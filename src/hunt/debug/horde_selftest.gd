@@ -6,6 +6,10 @@ extends Node
 ##             without eating a patch, debug kills; then VICTORY and the result checks (c)
 ##   ends      DEFEAT_CROP and DEFEAT_DEATH
 ##   charge    a male 8 m from the hunter scrapes >= 0.8 s before charging; a piglet never scrapes
+##   layout    level 1 (docs/plano_horda_nivel2.md C1-C3): a bullet ray goes through the fence in the horde and stops on it
+##             in the contract; the barn is open (a bot walks in between the front posts and stops at the grain bin);
+##             static shapes <= 400; route obstacles and HordeRoute vectors. "waves" also checks that no boar on its
+##             way to the barn is ever inside the corn field.
 ## No wander / flee state is ever emitted in any of them.
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/hunt/debug/horde_selftest.tscn [-- --only=waves]
 ## Not part of the game; the qa-tester owns the real tests in tests/.
@@ -23,6 +27,22 @@ const PIGLET_DIST_M: float = 8.0
 const PIGLET_WATCH_S: float = 6.0
 const TELEGRAPH_TOL_S: float = 0.001
 const RETURN_LIMIT_S: float = 30.0
+# Layout (docs/plano_horda_nivel2.md section 8, package B acceptance)
+const FENCE_RAY_FROM: Vector2 = Vector2(14.0, -58.0)     # in front of FenceS8 (z = -62); x = 10 is the gate
+const FENCE_AT: Vector2 = Vector2(14.0, -62.0)
+const FENCE_RAY_HEIGHT_M: float = 1.2
+const FENCE_RAY_LENGTH_M: float = 10.0
+const WALK_FROM: Vector2 = Vector2(40.0, -100.0)
+const WALK_IN_Z: float = -89.0
+const WALK_TO_Z: float = -78.0
+const BIN_FRONT_Z: float = -86.4        # barn z + 1.6: front face of the grain bin
+const BACK_WALL_Z: float = -83.24       # barn z + 4.76: inner face of the back wall
+const BIN_STOP_SLACK_M: float = 1.2     # the capsule stops up to its radius (plus slack) before the bin
+const WALK_LIMIT_S: float = 8.0
+const WALK_PUSH_S: float = 3.0
+const CORN_CORE: Rect2 = Rect2(27.0, -15.0, 56.0, 70.0)  # the corn field itself (no route margin)
+const ROUTE_CORN: Rect2 = Rect2(23.0, -19.0, 64.0, 78.0)
+const ROUTE_TOL_M: float = 0.01
 
 var _passed: int = 0
 var _failed: int = 0
@@ -36,6 +56,7 @@ var _kills: Array[KillInfo] = []
 var _max_visible_carcasses: int = 0
 var _forbidden: Array = []              # [id, state] of every wander/flee seen in any session
 var _scraped_piglets: Array[int] = []
+var _in_corn: Array = []                # [id, x, z] of a boar seen in to_crop inside CORN_CORE
 var _start_ms: int = 0
 
 
@@ -54,8 +75,8 @@ func _ready() -> void:
 		if arg.begins_with("--only="):
 			only = arg.trim_prefix("--only=").split(",", false)
 	_check("horde_data_loaded", not _horde.is_empty() and (_horde.get("waves", []) as Array).size() >= 1)
-	var all: Dictionary = {"plan": _test_plan, "assembly": _test_assembly, "waves": _test_waves, "ends": _test_ends,
-		"charge": _test_charge, "trim": _test_trim}
+	var all: Dictionary = {"plan": _test_plan, "assembly": _test_assembly, "layout": _test_layout, "waves": _test_waves,
+		"ends": _test_ends, "charge": _test_charge, "trim": _test_trim}
 	for key: String in all.keys():
 		# "trim" (inflated data, prints the expected push_error) only runs when asked for.
 		if (only.is_empty() and key != "trim") or only.has(key):
@@ -89,7 +110,7 @@ func _on_state(id: int, state: StringName) -> void:
 	if not _states.has(id):
 		_states[id] = []
 	(_states[id] as Array).append([state, t])
-	if state == Ids.BS_WANDER or state == Ids.BS_FLEE:
+	if (state == Ids.BS_WANDER or state == Ids.BS_FLEE) and _hunt != null and _hunt.is_horde():
 		_forbidden.append([id, state])
 	if state == Ids.BS_SCRAPE and _hunt != null and _hunt.get_boar_type(id) == Ids.PIGLET:
 		_scraped_piglets.append(id)
@@ -102,14 +123,14 @@ func _on_spawned(id: int, _type_id: StringName, _weight: float) -> void:
 
 # --- Plumbing ------------------------------------------------------------------------------------
 
-func _open() -> void:
+func _open(mode: StringName = Ids.MODE_HORDE) -> void:
 	_ended.clear()
 	_states.clear()
 	_seq.clear()
 	_spawn_time.clear()
 	_kills.clear()
 	_max_visible_carcasses = 0
-	var req: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE)
+	var req: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, mode)
 	req.rng_seed = 4242
 	req.quality = Ids.Q_LOW
 	Router.set_pending_request(req)
@@ -362,6 +383,7 @@ func _test_waves() -> void:
 			if born.size() == total and eaten_at.size() == total:
 				break
 			min_stock = minf(min_stock, _hunt.get_crop_health_pct())
+			_watch_corn()
 			if _hunt.get_crop_health_pct() < STOCK_RESET_BELOW:
 				_hunt.debug_set_crop_health(100.0)
 			await get_tree().process_frame
@@ -369,6 +391,11 @@ func _test_waves() -> void:
 		for id: Variant in eaten_at:
 			worst = maxf(worst, float(eaten_at[id]) - float(_spawn_time.get(id, t0)))
 		var reached: bool = born.size() == total and eaten_at.size() == total and late.is_empty()
+		for id: Variant in late:
+			var lb: Boar = _hunt.spawner.get_boar(int(id))
+			if lb != null:
+				print("trace late boar %d %s at (%.1f, %.1f) state=%s route=%s" % [int(id), lb.type_id, lb.position.x, lb.position.z,
+					lb.state, lb.debug_route()])
 		all_reach = all_reach and reached
 		print("trace wave %d: total=%d born=%d at_ring=%d slowest=%.1f s late=%s t=%.1f" % [w, total, born.size(), eaten_at.size(), worst, late, _hunt.get_elapsed_s() - t0])
 		# The stock drains, no patch is ever eaten.
@@ -395,6 +422,7 @@ func _test_waves() -> void:
 			phases_ok = false
 			break
 	_check("every_boar_reaches_the_barn_within_90s", all_reach, str(detail))
+	_check("no_boar_on_its_way_inside_the_corn", _in_corn.is_empty(), str(_in_corn.slice(0, 8)))
 	_check("stock_drains_without_patches", all_drain and no_patch, "patches=%d %s" % [_hunt.crop.get_patch_eaten(), detail])
 	_check("phases_follow_the_waves", phases_ok, str(detail))
 	await _sleep(1.0)
@@ -407,12 +435,12 @@ func _test_waves() -> void:
 	_check("result_waves", r.horde_waves_cleared == r.horde_wave_count and r.horde_wave_count == n and n == (_horde["waves"] as Array).size(),
 		"cleared=%d count=%d" % [r.horde_waves_cleared, r.horde_wave_count])
 	_check("result_mode_no_progress", r.mode == Ids.MODE_HORDE and r.is_horde() and not r.counts_for_progression)
-	_check("result_bonus", r.contract_bonus == Profile.horde_bonus(r.crop_health_pct) and r.contract_bonus > 0
+	_check("result_bonus", r.contract_bonus == Profile.horde_bonus(r.crop_health_pct, 1) and r.contract_bonus > 0
 		and r.total_money == r.money_from_kills + r.contract_bonus, "bonus=%d crop=%.2f" % [r.contract_bonus, r.crop_health_pct])
 	var rewards_ok: bool = r.kills.size() == _data_total() and r.boars_total == _data_total()
 	var max_id: int = 0
 	for k: KillInfo in r.kills:
-		rewards_ok = rewards_ok and k.reward_money == Profile.horde_kill_reward(k.type_id, k.weight_kg, k.killing_zone, k.one_shot)
+		rewards_ok = rewards_ok and k.reward_money == Profile.horde_kill_reward(k.type_id, k.weight_kg, k.killing_zone, k.one_shot, 1)
 		max_id = maxi(max_id, k.boar_id)
 	_check("kill_rewards_are_horde_rewards", rewards_ok, "kills=%d total=%d data=%d" % [r.kills.size(), r.boars_total, _data_total()])
 	_check("ids_fit_u8", max_id <= NetCodec.MAX_BOARS_PER_HUNT and max_id == r.kills.size(), "max_id=%d" % max_id)
@@ -443,6 +471,98 @@ func _progress_order_ok() -> bool:
 			print("trace bad progress order at %d: %s after %s" % [i, e, prev])
 			return false
 	return count > 0
+
+
+## C2: a boar on its way to the barn (to_crop) never stands inside the corn field itself.
+func _watch_corn() -> void:
+	for id: int in _hunt.get_alive_boar_ids():
+		var b: Boar = _hunt.spawner.get_boar(id)
+		if b != null and b.state == Ids.BS_TO_CROP and CORN_CORE.has_point(b.get_xz()) and _in_corn.size() < 50:
+			_in_corn.append([id, snappedf(b.position.x, 0.1), snappedf(b.position.z, 0.1)])
+
+
+# --- Layout: fence, open barn, route (docs/plano_horda_nivel2.md C1-C3) ----------------------------
+
+func _fence_ray(mask: int) -> Dictionary:
+	var y: float = _hunt.get_height(FENCE_AT.x, FENCE_AT.y) + FENCE_RAY_HEIGHT_M
+	var from: Vector3 = Vector3(FENCE_RAY_FROM.x, y, FENCE_RAY_FROM.y)
+	var q: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, from + Vector3(0.0, 0.0, -FENCE_RAY_LENGTH_M), mask)
+	return _hunt.get_world_3d().direct_space_state.intersect_ray(q)
+
+
+func _is_fence(hit: Dictionary) -> bool:
+	var body: Node = hit.get("collider") as Node
+	var spawn: PropSpawn = body.get_parent() as PropSpawn if body != null else null
+	return spawn != null and MapRoot.FENCE_IDS.has(spawn.prop_id)
+
+
+func _hit_name(hit: Dictionary) -> String:
+	var body: Node = hit.get("collider") as Node
+	return "%s/%s" % [body.get_parent().name, body.name] if body != null and body.get_parent() != null else "nothing"
+
+
+func _test_layout() -> void:
+	# Contract: the fence is a wall for the bullet, as always (Q2).
+	await _open(Ids.MODE_CONTRACT)
+	var hit: Dictionary = _fence_ray(Layers.MASK_WEAPON_RAY)
+	_check("contract_fence_stops_the_bullet", _is_fence(hit), _hit_name(hit))
+	var map: MapRoot = _hunt.get_node("Map") as MapRoot
+	_check("contract_no_route_no_bounds", _hunt.horde_route_obstacles.is_empty() and _hunt.get_player_bounds() == Rect2()
+		and _hunt.get_horde_level() == 0, "obstacles=%d" % _hunt.horde_route_obstacles.size())
+	var contract_shapes: int = map.get_static_shapes_used()
+	await _close()
+	await _open()
+	hit = _fence_ray(Layers.MASK_WEAPON_RAY)
+	_check("horde_bullet_goes_through_the_fence", not _is_fence(hit), _hit_name(hit))
+	hit = _fence_ray(Layers.FENCE)
+	_check("horde_fence_body_on_fence_layer", _is_fence(hit) and ((hit["collider"] as CollisionObject3D).collision_layer == Layers.FENCE)
+		and (Layers.MASK_PLAYER_BODY & Layers.FENCE) != 0, _hit_name(hit))
+	map = _hunt.get_node("Map") as MapRoot
+	_check("static_shapes_within_budget", map.get_static_shapes_used() <= MapRoot.STATIC_SHAPE_BUDGET,
+		"horde=%d contract=%d" % [map.get_static_shapes_used(), contract_shapes])
+	_check("horde_level_1", _hunt.get_horde_level() == 1 and _hunt.get_player_bounds() == Rect2()
+		and _hunt.get_ammo_crate_positions().is_empty() and _hunt.debug_partial_result().horde_level == 1)
+	var obs: Array[Dictionary] = _hunt.horde_route_obstacles
+	var barn_rect: Rect2 = Rect2(BARN_XZ.x - 8.4, BARN_XZ.y - 5.4, 16.8, 10.8)
+	var exit_want: Vector2 = Vector2(BARN_XZ.x, BARN_XZ.y - 7.0)
+	_check("route_obstacles_corn_and_barn", obs.size() == 2 and (obs[0]["rect"] as Rect2).is_equal_approx(ROUTE_CORN)
+		and not (obs[0]["exit"] as Vector2).is_finite() and (obs[1]["rect"] as Rect2).is_equal_approx(barn_rect)
+		and (obs[1]["exit"] as Vector2).distance_to(exit_want) < ROUTE_TOL_M, str(obs))
+	var corn_only: Array[Dictionary] = [{"rect": ROUTE_CORN, "exit": Vector2.INF}]
+	var r1: PackedVector2Array = HordeRoute.plan(Vector2(105.0, 95.0), BARN_XZ, corn_only, 2.0)
+	var r2: PackedVector2Array = HordeRoute.plan(Vector2(20.0, 115.0), BARN_XZ, corn_only, 2.0)
+	var r3: PackedVector2Array = HordeRoute.plan(Vector2(105.0, 95.0), BARN_XZ, [] as Array[Dictionary], 2.0)
+	var r4: PackedVector2Array = HordeRoute.plan(Vector2(38.0, -86.0), Vector2(60.0, -88.0), obs, 2.0)
+	_check("route_vectors", _same(r1, [Vector2(89.0, -21.0), BARN_XZ]) and _same(r2, [Vector2(21.0, -21.0), BARN_XZ])
+		and _same(r3, [BARN_XZ]) and r4.size() >= 2 and r4[0].distance_to(exit_want) < ROUTE_TOL_M,
+		"%s %s %s %s" % [r1, r2, r3, r4])
+	# C3: the barn is open at its front (-Z) and the grain bin is solid.
+	await _park(false)
+	var p: PlayerBase = _hunt.get_player()
+	_place(WALK_FROM.x, WALK_FROM.y)
+	p.bot_look_at(Vector3(WALK_FROM.x, p.get_eye_position().y, WALK_TO_Z))
+	p.bot_set_move(Vector2(0.0, 1.0), false)
+	var entered: bool = await _wait(func() -> bool: return p.global_position.z >= WALK_IN_Z, WALK_LIMIT_S)
+	var in_at: Vector3 = p.global_position
+	var max_z: float = p.global_position.z
+	var t0: float = _hunt.get_elapsed_s()
+	while _hunt.get_elapsed_s() - t0 < WALK_PUSH_S:
+		p.bot_look_at(Vector3(WALK_FROM.x, p.get_eye_position().y, WALK_TO_Z))
+		max_z = maxf(max_z, p.global_position.z)
+		await get_tree().process_frame
+	p.bot_set_move(Vector2.ZERO, false)
+	_check("barn_open_front", entered, "at %s" % in_at)
+	_check("barn_grain_bin_stops_the_hunter", max_z <= BIN_FRONT_Z and max_z >= BIN_FRONT_Z - BIN_STOP_SLACK_M and max_z < BACK_WALL_Z,
+		"max z %.2f (bin front %.2f)" % [max_z, BIN_FRONT_Z])
+
+
+func _same(got: PackedVector2Array, want: Array) -> bool:
+	if got.size() != want.size():
+		return false
+	for i: int in got.size():
+		if got[i].distance_to(want[i] as Vector2) > ROUTE_TOL_M:
+			return false
+	return true
 
 
 # --- (d) defeats ---------------------------------------------------------------------------------

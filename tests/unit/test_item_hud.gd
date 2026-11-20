@@ -130,15 +130,24 @@ func test_item_keys_are_unique_physical_keys() -> void:
 			if ev is InputEventKey:
 				keys.append(int((ev as InputEventKey).physical_keycode))
 		eq(keys, [int(want[action])] as Array[int], "%s: so a tecla %s" % [action, OS.get_keycode_string(int(want[action]))])
-	# no physical key serves two actions
-	var owner_of: Dictionary = {}
+	# no physical key serves two actions, with ONE documented exception: F serves spectate_next and interact
+	# (docs/plano_horda_nivel2.md 4.9 and risk R9: interact is read only with the player alive, spectate_next only
+	# with the spectator camera active, so they never act together). Exactly that pair and nothing else.
+	var owners_of: Dictionary = {}
 	for action: String in InputSetup.ACTIONS:
 		for ev: InputEvent in InputMap.action_get_events(action):
 			if ev is InputEventKey:
 				var code: int = int((ev as InputEventKey).physical_keycode)
-				ok(not owner_of.has(code) or owner_of[code] == action,
-					"tecla %s usada por %s e %s" % [OS.get_keycode_string(code), owner_of.get(code, ""), action])
-				owner_of[code] = action
+				if not owners_of.has(code):
+					owners_of[code] = []
+				(owners_of[code] as Array).append(action)
+	for code: int in owners_of:
+		var owners: Array = owners_of[code]
+		owners.sort()
+		if code == int(KEY_F):
+			eq(owners, ["interact", "spectate_next"], "F e compartilhada exatamente por interact e spectate_next")
+		else:
+			eq(owners.size(), 1, "tecla %s usada por mais de uma acao: %s" % [OS.get_keycode_string(code), str(owners)])
 
 
 func test_pressing_an_item_key_presses_only_its_action() -> void:
@@ -153,8 +162,12 @@ func test_pressing_an_item_key_presses_only_its_action() -> void:
 		await frames(2)
 		ok(Input.is_action_pressed(action), "tecla aperta aperta %s" % action)
 		for other: String in InputSetup.ACTIONS:
-			if other != action:
-				ok(not Input.is_action_pressed(other), "%s nao aperta %s" % [action, other])
+			if other == action:
+				continue
+			if action == "spectate_next" and other == "interact":
+				ok(Input.is_action_pressed(other), "F aperta spectate_next e interact juntas (par documentado, R9)")
+				continue
+			ok(not Input.is_action_pressed(other), "%s nao aperta %s" % [action, other])
 		ev = ev.duplicate() as InputEventKey
 		ev.pressed = false
 		Input.parse_input_event(ev)

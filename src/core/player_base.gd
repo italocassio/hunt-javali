@@ -74,6 +74,38 @@ func has_infinite_reserve() -> bool:      # horde: reloading never spends the re
 	return false
 
 
+func is_downed() -> bool:                 ## Horde revive: down but still bleeding out (not alive, not dead)
+	return false
+
+
+func revive(_health: float) -> void:      ## Horde revive: stand a downed hunter up with that health; no-op unless downed
+	pass
+
+
+func get_bleed_out_left_s() -> float:     ## Seconds until a downed hunter dies; 0.0 when not downed
+	return 0.0
+
+
+func needs_ammo() -> bool:                ## True if any weapon's reserve is below its cap (ammo crate worth taking)
+	return false
+
+
+func add_ammo_mags(_mags: int) -> int:    ## Adds magazines to every weapon up to the cap; returns rounds added
+	return 0
+
+
+func get_revive_target_slot() -> int:     ## Slot of the downed hunter in revive range; -1 = none
+	return -1
+
+
+func get_revive_progress() -> float:      ## 0..1 hold progress of the revive in course
+	return 0.0
+
+
+func get_ammo_crate_target() -> int:      ## Ammo crate a press of interact takes (in reach, needs_ammo, no revive target); -1 = none
+	return -1
+
+
 func setup_remote(_slot: int, _display_name: String, _weapon_id: StringName, _world: HuntWorld) -> void:
 	pass
 
@@ -132,6 +164,10 @@ func bot_use_item(_item_id: StringName) -> bool:
 
 
 func bot_dog_command() -> void:
+	pass
+
+
+func bot_set_interact(_held: bool) -> void:   ## Holds/releases the interact action (revive; a press takes an ammo crate)
 	pass
 
 

@@ -474,7 +474,11 @@ func test_legend_set_items_same_list_keeps_rows() -> void:
 
 func test_help_action_is_h_and_last() -> void:
 	ok(InputMap.has_action(&"help"), "InputMap tem 'help'")
-	eq(String(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 1]), "help", "help e a ultima ACTIONS")
+	# docs/plano_horda_nivel2.md 4.9: `interact` comes right after `help`, so help is the second to last
+	var help_at: int = InputSetup.ACTIONS.find("help")
+	ok(help_at >= 0, "help esta em ACTIONS")
+	eq(String(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 2]), "help", "help e a penultima ACTIONS (interact vem depois, §4.9)")
+	eq(String(InputSetup.ACTIONS[help_at + 1]), "interact", "interact logo depois de help")
 	var found: bool = false
 	for ev: InputEvent in InputMap.action_get_events(&"help"):
 		if ev is InputEventKey and (ev as InputEventKey).physical_keycode == KEY_H:

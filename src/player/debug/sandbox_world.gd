@@ -12,6 +12,11 @@ extends HuntWorld
 ## --mag=<n> (rounds in the magazine of the weapon in hand, to see the low-ammo colour)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
+## Horde level (docs/plano_horda_nivel2.md): --horde_level=N (or horde_level = N before add_child; default 1) picks the
+## rules of Data.get_horde_level(N) for the Player (counted ammo, revive, confinement). Tests may also set player_bounds,
+## ammo_crate_positions and extra_hunters (fake allies) and read revive_requests (slots passed to request_revive) and
+## ammo_crate_requests (crates passed to request_ammo_crate; the sandbox takes nothing, the reach is the level's
+## ammo_crates.pickup_radius_m).
 
 const GROUND_SIZE_M: float = 200.0
 const TARGET_DISTANCES_M: Array[float] = [10.0, 30.0, 60.0]
@@ -55,6 +60,12 @@ var horde_wave_total: int = 0
 var horde_wave_remaining: int = 0
 var horde_waves_cleared: int = 0
 var horde_objective: Vector3 = HORDE_OBJECTIVE
+var horde_level: int = 1
+var player_bounds: Rect2 = Rect2()
+var ammo_crate_positions: PackedVector3Array = PackedVector3Array()
+var extra_hunters: Array[PlayerBase] = []
+var revive_requests: Array[int] = []
+var ammo_crate_requests: Array[int] = []
 var dog_present: bool = false
 var dog_state: StringName = Ids.DS_FOLLOW
 ## Fake dog for the HUD card, compass and minimap (INF = not placed). --dog_state=seek places the dog and
@@ -76,6 +87,9 @@ func _ready() -> void:
 	_args = _parse_args()
 	if _args.has("horde"):
 		horde_mode = true
+	if _args.has("horde_level"):
+		horde_mode = true
+		horde_level = int(_args["horde_level"])
 	_multipliers = Data.get_boar_rules().get("zone_multipliers", {})
 	if _args.has("onboarding") or _args.has("hunts"):
 		_use_throwaway_profile(int(_args.get("hunts", "0")))
@@ -444,6 +458,57 @@ func get_horde_wave_remaining() -> int:
 
 func get_horde_waves_cleared() -> int:
 	return horde_waves_cleared
+
+
+func get_horde_level() -> int:
+	return horde_level if horde_mode else 0
+
+
+func get_player_bounds() -> Rect2:
+	return player_bounds
+
+
+func request_revive(target_slot: int) -> void:
+	revive_requests.append(target_slot)
+
+
+func get_ammo_crate_positions() -> PackedVector3Array:
+	return ammo_crate_positions
+
+
+func get_ammo_crate_in_reach(at: Vector3) -> int:
+	if not horde_mode:
+		return -1
+	var crates_cfg: Dictionary = Data.get_horde_level(horde_level).get("ammo_crates", {})
+	var best: int = -1
+	var best_d: float = float(crates_cfg.get("pickup_radius_m", 0.0))
+	for i: int in ammo_crate_positions.size():
+		var d: float = Vector2(at.x - ammo_crate_positions[i].x, at.z - ammo_crate_positions[i].z).length()
+		if d <= best_d and (best < 0 or d < best_d):
+			best = i
+			best_d = d
+	return best
+
+
+func request_ammo_crate(crate: int) -> void:
+	ammo_crate_requests.append(crate)
+
+
+func get_hunters() -> Array[PlayerBase]:
+	var out: Array[PlayerBase] = []
+	if player != null:
+		out.append(player)
+	out.append_array(extra_hunters)
+	return out
+
+
+func get_hunter(for_slot: int) -> PlayerBase:
+	if extra_hunters.is_empty():
+		return player   # solo: same as HuntWorld
+	for hunter: PlayerBase in get_hunters():
+		if hunter.slot == for_slot:
+			return hunter
+	return null
 
 
 func debug_horde_start_next_wave() -> void:

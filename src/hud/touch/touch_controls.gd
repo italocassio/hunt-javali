@@ -30,6 +30,9 @@ const ITEM_ROW_BOTTOM_PX: float = 250.0
 const ITEM_NAME_FONT_PX: int = 16
 const ITEM_COUNT_FONT_PX: int = 16
 const DOG_SLOT: StringName = &"dog_command"
+const INTERACT_ACTION: StringName = &"interact"   # horde level 2: a downed ally ("Levantar") or an ammo crate in reach
+const INTERACT_LABEL_CRATE: String = "Pegar"      # the same button over an ammo crate (no revive target)
+const PAUSE_ACTION: StringName = &"pause"
 const FLASH_HZ: float = 2.0
 const DIM_ALPHA: float = 0.35
 const BUSY_VEIL: Color = Color(0.0, 0.0, 0.0, 0.55)
@@ -39,7 +42,9 @@ const BUSY_SECTOR_STEPS: int = 48
 
 ## action, diameter, label, icon id, offset from the bottom-right corner (dx, dy as positive numbers),
 ## mode: "hold" presses while touched, "toggle" flips on each tap.
-## The dog button only exists while there is a dog (set_dog_present).
+## The dog button only exists while there is a dog (set_dog_present); the interact button ("Levantar") only while a
+## downed ally is in reach, or ("Pegar") an ammo crate worth taking, and a downed hunter keeps only the pause button
+## and the look drag.
 const BUTTONS: Array[Dictionary] = [
 	{"action": &"fire", "d": 130.0, "label": "Tiro", "icon": &"btn_fire", "from": "br", "ox": 125.0, "oy": 130.0, "mode": "hold"},
 	{"action": &"aim", "d": 100.0, "label": "Mira", "icon": &"btn_aim", "from": "br", "ox": 290.0, "oy": 105.0, "mode": "toggle"},
@@ -47,6 +52,7 @@ const BUTTONS: Array[Dictionary] = [
 	{"action": &"weapon_swap", "d": 76.0, "label": "Troca", "icon": &"btn_swap", "from": "br", "ox": 235.0, "oy": 235.0, "mode": "hold"},
 	{"action": &"crouch", "d": 76.0, "label": "Agachar", "icon": &"btn_crouch", "from": "br", "ox": 410.0, "oy": 130.0, "mode": "hold"},
 	{"action": &"dog_command", "d": 76.0, "label": "Cão", "icon": &"btn_dog", "from": "br", "ox": 235.0, "oy": 350.0, "mode": "hold", "slot": &"dog_command"},
+	{"action": &"interact", "d": 100.0, "label": "Levantar", "icon": &"", "from": "br", "ox": 410.0, "oy": 380.0, "mode": "hold"},
 	{"action": &"pause", "d": 64.0, "label": "II", "icon": &"btn_pause", "from": "tl", "ox": 56.0, "oy": 56.0, "mode": "hold"},
 ]
 
@@ -79,6 +85,9 @@ var _dog_retreating: bool = false
 var _flashing: Dictionary = {}        # slot id -> true
 var _ended: bool = false
 var _action_labels: bool = false      # onboarding: every action button shows its name under the circle
+var _revive_on: bool = false          # a downed ally is in reach: the interact button exists ("Levantar")
+var _crate_on: bool = false           # an ammo crate is in reach (no revive target): the interact button exists ("Pegar")
+var _downed: bool = false             # the local hunter is down: only pause and the look drag are left
 
 
 func _ready() -> void:
@@ -162,6 +171,14 @@ func get_button_diameters() -> Dictionary:
 	return out
 
 
+## Text drawn on (or under) an existing button; "" when the button does not exist now.
+func get_button_label(action_name: StringName) -> String:
+	for def: Dictionary in _defs:
+		if def["action"] == action_name:
+			return String(def["label"])
+	return ""
+
+
 ## Any touch outside the stick, the buttons and the slider looks, so the look zone starts at the left edge.
 func get_look_zone_start_x() -> float:
 	return 0.0
@@ -182,8 +199,17 @@ func _rebuild_buttons() -> void:
 	for def: Dictionary in BUTTONS:
 		if def["action"] == DOG_SLOT and not _dog_present:
 			continue
+		if def["action"] == INTERACT_ACTION and not _revive_on and not _crate_on:
+			continue
+		if _downed and def["action"] != PAUSE_ACTION:
+			continue
+		if def["action"] == INTERACT_ACTION and not _revive_on:
+			var crate_def: Dictionary = def.duplicate()
+			crate_def["label"] = INTERACT_LABEL_CRATE
+			_defs.append(crate_def)
+			continue
 		_defs.append(def)
-	if _items != null:
+	if _items != null and not _downed:
 		var index: int = 0
 		for item_id: StringName in _items.get_usable_ids():
 			var action_name: StringName = InputSetup.get_item_action(item_id)
@@ -256,6 +282,7 @@ func _release_everything() -> void:
 
 
 func _process(_delta: float) -> void:
+	_sync_revive_state()
 	# The aim toggle must follow the player: if the player dropped the aim (death, pause), reset it.
 	if _player != null and bool(_toggled.get(&"aim", false)) and not _player.is_alive():
 		_toggled[&"aim"] = false
@@ -265,6 +292,26 @@ func _process(_delta: float) -> void:
 			or _player.is_crouching() or Input.is_action_pressed(&"aim") or Input.is_action_pressed(&"crouch")):
 		joystick.unlock_run()
 	_surface.queue_redraw()
+
+
+## The interact button follows get_revive_target_slot(), get_ammo_crate_target() and the fall of the local hunter (all
+## read from the player). A revive target wins over a crate.
+func _sync_revive_state() -> void:
+	if _player == null:
+		return
+	var downed: bool = _player.is_downed()
+	var target: bool = not downed and _player.get_revive_target_slot() >= 0
+	var crate: bool = not downed and not target and _player.get_ammo_crate_target() >= 0
+	if downed == _downed and target == _revive_on and crate == _crate_on:
+		return
+	var went_down: bool = downed and not _downed
+	_downed = downed
+	_revive_on = target
+	_crate_on = crate
+	if went_down:
+		_release_everything()
+	joystick.visible = not _downed
+	_rebuild_buttons()
 
 
 func _notification(what: int) -> void:
@@ -340,7 +387,7 @@ func _finger_down(finger: int, pos: Vector2) -> void:
 		_set_slider_from(pos)
 		return
 	# 3. the fixed stick's active area; 4. anywhere else = look (one look finger at a time, extras ignored)
-	if joystick.contains_point(pos):
+	if joystick.contains_point(pos) and not _downed:
 		if not joystick.is_active():
 			joystick.begin(finger, pos)
 	elif not look_pad.is_active():
@@ -445,9 +492,9 @@ func _draw_surface() -> void:
 			fill = COLOR_FIRE_DOWN if fire else COLOR_FILL_DOWN
 		fill.a *= alpha
 		_surface.draw_circle(c, r, fill)
-		var ring: Color = COLOR_ON if (on or lit) else COLOR_RING
+		var ring: Color = COLOR_ON if (on or lit or action_name == INTERACT_ACTION) else COLOR_RING
 		ring.a *= alpha
-		_surface.draw_arc(c, r, 0.0, TAU, 48, ring, 4.0 if (on or lit) else 3.0, true)
+		_surface.draw_arc(c, r, 0.0, TAU, 48, ring, 4.0 if (on or lit or action_name == INTERACT_ACTION) else 3.0, true)
 		var icon_id: StringName = def["icon"]
 		var label: String = String(def["label"])
 		if _icons.has(icon_id):

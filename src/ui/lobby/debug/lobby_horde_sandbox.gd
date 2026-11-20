@@ -89,7 +89,7 @@ func _case(size: Vector2i, host: bool) -> void:
 		_ok(b_contract.button_pressed and not b_horde.button_pressed, "%s botao Contrato pressionado" % tag)
 	_ok(not slot0.disabled and not slot1.disabled and not locked.visible, "%s armas liberadas em contrato" % tag)
 	_ok(not info.visible, "%s HordeInfoLabel escondido em contrato" % tag)
-	_ok(start.text == "Iniciar caçada", "%s Start Iniciar caçada" % tag)
+	_ok(start.text == UiKit.action_text("Iniciar caçada"), "%s Start Iniciar caçada" % tag)
 
 	# Horde mode.
 	if host:
@@ -110,11 +110,38 @@ func _case(size: Vector2i, host: bool) -> void:
 	_ok(contract_buttons == 0, "%s contratos escondidos" % tag)
 	_ok(slot0.disabled and slot1.disabled and locked.visible, "%s WeaponSlot0/1 desabilitados + aviso" % tag)
 	_ok(locked.text == "Na Horda Javali todos levam todas as armas, com munição infinita.", "%s texto do aviso" % tag)
-	_ok(start.text == "Iniciar horda", "%s Start Iniciar horda" % tag)
+	_ok(start.text == UiKit.action_text("Iniciar horda"), "%s Start Iniciar horda" % tag)
 	var contract_label: Label = lobby.get_node_or_null("%ContractLabel") as Label
 	_ok(contract_label != null and contract_label.text.contains("Horda Javali, ") and contract_label.text.contains(" ondas"), "%s ContractLabel" % tag)
 	var detail: Label = lobby.find_child("Detail", true, false) as Label
 	_ok(detail != null and detail.text.contains("Todas as armas"), "%s detalhe Todas as armas" % tag)
+	var level_row: Control = lobby.get_node_or_null("%HordeLevelRow") as Control
+	var level_label: Label = lobby.get_node_or_null("%HordeLevelLabel") as Label
+	var l1: Button = lobby.find_child("HordeLevel_1", true, false) as Button
+	var l2: Button = lobby.find_child("HordeLevel_2", true, false) as Button
+	_ok(level_row != null and level_label != null and l1 != null and l2 != null, "%s nos de nivel existem" % tag)
+	if level_row != null and level_label != null and l1 != null and l2 != null:
+		_ok(level_row.is_visible_in_tree() == host, "%s botoes de nivel so para o anfitriao em horda" % tag)
+		_ok(level_label.is_visible_in_tree() and level_label.text == "Nível escolhido: Nível 1", "%s HordeLevelLabel nivel 1" % tag)
+		_ok(contract_label.text.contains("Horda Javali, Nível 1, "), "%s ContractLabel com nivel 1" % tag)
+		if host:
+			_ok(l1.size.y >= MIN_MODE_BUTTON_PX and l2.size.y >= MIN_MODE_BUTTON_PX, "%s botoes de nivel >= 64 px (%.0f, %.0f)" % [tag, l1.size.y, l2.size.y])
+			_ok(l1.button_pressed and not l2.button_pressed, "%s HordeLevel_1 pressionado" % tag)
+			_ok(not l1.get_global_rect().intersects(l2.get_global_rect()), "%s botoes de nivel sem sobreposicao" % tag)
+			l2.pressed.emit()
+		else:
+			session.set("_horde_level", 2)
+			Net.roster_changed.emit()
+			lobby.call("_refresh_roster")
+		await _settle()
+		_ok(Net.get_selected_horde_level() == 2, "%s Net no nivel 2" % tag)
+		_ok(level_label.text == "Nível escolhido: Nível 2", "%s HordeLevelLabel nivel 2" % tag)
+		_ok(info.text == str(Data.get_horde_level(2).get("description", "x")), "%s HordeInfoLabel = descricao do nivel 2" % tag)
+		_ok(locked.text == "Na Horda Javali todos levam todas as armas. Munição contada: pegue cartuchos no celeiro." and not locked.text.contains("infinita"), "%s aviso de municao contada" % tag)
+		_ok(contract_label.text.contains("Horda Javali, Nível 2, "), "%s ContractLabel com nivel 2" % tag)
+		if host:
+			_ok(l2.button_pressed and not l1.button_pressed, "%s HordeLevel_2 pressionado" % tag)
+		await _screenshot(viewport, size, host)
 	if host:
 		_ok(b_horde.size.y >= MIN_MODE_BUTTON_PX and b_horde.button_pressed and not b_contract.button_pressed, "%s botao Horda pressionado e >= 64 px" % tag)
 		b_contract.pressed.emit()
@@ -124,6 +151,19 @@ func _case(size: Vector2i, host: bool) -> void:
 	viewport.queue_free()
 	Net.set("_session", null)
 	await get_tree().process_frame
+
+
+## Only with a window and the "--screenshots" user arg (the viewport does not render headless).
+func _screenshot(viewport: SubViewport, size: Vector2i, host: bool) -> void:
+	if not OS.get_cmdline_user_args().has("--screenshots") or not host:
+		return
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	for i: int in SETTLE_FRAMES:
+		await RenderingServer.frame_post_draw
+	var path: String = "user://lobby_level_%dx%d.png" % [size.x, size.y]
+	viewport.get_texture().get_image().save_png(path)
+	print("SCREENSHOT ", ProjectSettings.globalize_path(path))
+	viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
 func _settle() -> void:

@@ -255,7 +255,7 @@ func _check_autoload_signatures() -> void:
 			var expected: Array[String] = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
 				"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
-					"spectate_next", "pause", "help"]
+					"spectate_next", "pause", "help", "interact"]
 			var got: Array[String] = []
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))
@@ -622,13 +622,18 @@ func _check_project_settings() -> void:
 	_t.call("eq", int(ProjectSettings.get_setting("physics/common/max_physics_steps_per_frame")), 4, "max steps")
 	_t.call("eq", bool(ProjectSettings.get_setting("input_devices/pointing/emulate_touch_from_mouse")), false, "emulate_touch_from_mouse")
 	_t.call("eq", bool(ProjectSettings.get_setting("input_devices/pointing/emulate_mouse_from_touch")), true, "emulate_mouse_from_touch")
-	var layer_names: Array[String] = ["terrain", "static", "player", "boar_hitzone"]
-	for i: int in 4:
+	# layer_5 "fence" (docs/plano_horda_nivel2.md 4.1): the invisible wall of horde level 2
+	var layer_names: Array[String] = ["terrain", "static", "player", "boar_hitzone", "fence"]
+	for i: int in 5:
 		_t.call("eq", str(ProjectSettings.get_setting("layer_names/3d_physics/layer_%d" % (i + 1))), layer_names[i], "layer_%d" % (i + 1))
 	_t.call("eq", Layers.TERRAIN, 1, "Layers.TERRAIN")
 	_t.call("eq", Layers.STATIC, 2, "Layers.STATIC")
 	_t.call("eq", Layers.PLAYER, 4, "Layers.PLAYER")
 	_t.call("eq", Layers.BOAR_HITZONE, 8, "Layers.BOAR_HITZONE")
+	_t.call("eq", Layers.FENCE, 16, "Layers.FENCE")
+	_t.call("eq", Layers.MASK_PLAYER_BODY, 19, "Layers.MASK_PLAYER_BODY (TERRAIN | STATIC | FENCE)")
+	_t.call("eq", Layers.MASK_WEAPON_RAY, 11, "Layers.MASK_WEAPON_RAY (sem FENCE: o tiro nao muda)")
+	_t.call("eq", Layers.MASK_LINE_OF_SIGHT, 3, "Layers.MASK_LINE_OF_SIGHT (sem FENCE)")
 	# No [input] section: actions are registered in code by InputSetup (section 3).
 	for prop: Dictionary in ProjectSettings.get_property_list():
 		var pname: String = str(prop["name"])

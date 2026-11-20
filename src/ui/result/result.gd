@@ -129,6 +129,11 @@ func _is_horde() -> bool:
 	return _result != null and _result.is_horde()
 
 
+## Level played; 0 (results saved before levels existed) counts as level 1.
+func _horde_level() -> int:
+	return clampi(_result.horde_level, 1, maxi(1, Data.get_horde_level_count()))
+
+
 func _horde_map_name() -> String:
 	if Data.get_map_ids().has(_result.map_id):
 		return str(Data.get_map(_result.map_id).get("name", _result.map_id))
@@ -236,7 +241,7 @@ func _build_payment_card() -> Control:
 	var bonus_caption: String = "Bônus de defesa" if horde else "Bônus do contrato"
 	var stock_caption: String = "Celeiro" if horde else "Lavoura"
 	if horde:
-		bonus_max = int(Data.get_horde().get("victory_bonus_money", 0))
+		bonus_max = Profile.horde_bonus(100.0, _horde_level())
 	if _result.is_victory():
 		box.add_child(_value_row(bonus_caption, UiKit.money_text(_result.contract_bonus), &"barn" if horde else &"crop"))
 		box.add_child(UiKit.muted("%s em %d%% de %s" % [stock_caption, int(roundf(_result.crop_health_pct)), UiKit.money_text(bonus_max)]))
@@ -371,7 +376,7 @@ func _contract() -> Dictionary:
 
 func _contract_line() -> String:
 	if _is_horde():
-		return "Horda Javali  |  %s" % _horde_map_name()
+		return "Horda Javali · %s  |  %s" % [Data.get_horde_level(_horde_level()).get("name", ""), _horde_map_name()]
 	var contract: Dictionary = _contract()
 	if contract.is_empty():
 		return ""

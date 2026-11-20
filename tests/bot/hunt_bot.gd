@@ -60,12 +60,17 @@ func park_far() -> void:
 func _clear_spot(target: Vector3, base_dir: Vector3) -> Vector3:
 	## Returns a standing position (Vector3.INF when none) with clear line of sight to `target`.
 	var rect: Rect2 = world.get_map_rect().grow(-6.0)
+	# Horde level 2 confines the hunter to the farm: a spot outside would be clamped to the border (docs/plano_horda_nivel2.md N2)
+	# and the shot would be taken from somewhere else. Rect2() = no limit.
+	var bounds: Rect2 = world.get_player_bounds()
 	var space: PhysicsDirectSpaceState3D = world.get_world_3d().direct_space_state
 	for deg: float in ANGLES:
 		var d: Vector3 = base_dir.rotated(Vector3.UP, deg_to_rad(deg))
 		var x: float = target.x + d.x * stand_distance_m
 		var z: float = target.z + d.z * stand_distance_m
 		if not rect.has_point(Vector2(x, z)):
+			continue
+		if bounds.has_area() and not bounds.has_point(Vector2(x, z)):
 			continue
 		var feet: Vector3 = Vector3(x, world.get_height(x, z) + 0.05, z)
 		var eye: Vector3 = feet + Vector3(0.0, 1.65, 0.0)

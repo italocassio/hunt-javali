@@ -243,6 +243,7 @@ pointing/emulate_mouse_from_touch=true
 3d_physics/layer_2="static"
 3d_physics/layer_3="player"
 3d_physics/layer_4="boar_hitzone"
+3d_physics/layer_5="fence"
 
 [physics]
 
@@ -285,8 +286,9 @@ Notas:
 |---|---|---|---|---|
 | 1 | 1 | terrain | `StaticBody3D` do terreno (HeightMapShape3D) e paredes de borda | 0 |
 | 2 | 2 | static | corpos estáticos criados pelo Pacote B: props, troncos de árvore, cupinzeiros, cerca | 0 |
-| 3 | 4 | player | `CharacterBody3D` do jogador | `terrain | static` (3) |
+| 3 | 4 | player | `CharacterBody3D` do jogador | `terrain | static | fence` (19, `Layers.MASK_PLAYER_BODY`) |
 | 4 | 8 | boar_hitzone | `HitZone` (Area3D, `monitoring=false`, `monitorable=true`) | 0 |
+| 5 | 16 | fence | paredes invisíveis que confinam o caçador à fazenda (Horda nível 2); só bloqueiam o corpo do jogador | 0 |
 
 Consultas (não são corpos):
 | Consulta | Dono | Máscara | Áreas | Corpos |
@@ -3271,6 +3273,71 @@ const EV_HORDE_WAVE: int = 0x2C        # horde wave state (docs/horda.md section
 const MODES: Array[StringName] = [&"contract", &"horde"]              # mode u8 of L_LOBBY and L_START
 const HORDE_PHASES: Array[StringName] = [&"intermission", &"wave"]    # phase u8 of EV_HORDE_WAVE
 const MAX_BOARS_PER_HUNT: int = 255    # boar ids are u8 on the wire (1..255): total of a whole hunt
+```
+
+### Acréscimos 0.9.0 (Horda nível 2) — já aplicados em `src/core/`
+
+Fonte: `docs/plano_horda_nivel2.md` §4.1. Todos aditivos, com padrão seguro para o modo contrato e o nível 1.
+Única mudança de valor existente: `MASK_PLAYER_BODY` passa a incluir `FENCE`. Os arquivos reais são a referência.
+
+```gdscript
+# layers.gd
+const FENCE: int = 16
+const MASK_PLAYER_BODY: int = TERRAIN | STATIC | FENCE   # 19; MASK_WEAPON_RAY e MASK_LINE_OF_SIGHT não mudam
+
+# game_events.gd (player_downed/player_revived/ammo_picked_up depois de dog_command_requested;
+# hunter_downed/hunter_revived depois de hunter_away_changed)
+signal player_downed(bleed_out_s: float)   # A Player -> A Hud; local
+signal player_revived(health: float)       # A Player -> A Hud; local
+signal ammo_picked_up(rounds: int)         # A Player -> A Hud; local
+signal hunter_downed(slot: int)            # B HuntController -> A Hud/Spectator
+signal hunter_revived(slot: int, by_slot: int)   # B HuntController -> A Hud
+
+# hunt_request.gd
+var horde_level: int = 1                   # só em horda
+static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0, p_mode: StringName = &"contract", p_horde_level: int = 1) -> HuntRequest   # + r.horde_level = p_horde_level
+
+# hunt_result.gd
+var horde_level: int = 0                   # 0 no contrato
+# to_dict() ganha "horde_level": horde_level
+
+# player_base.gd (depois de is_reloading/get_weapon_count/has_infinite_reserve; bot_set_interact entre os hooks de bot)
+func is_downed() -> bool:
+	return false
+func revive(_health: float) -> void:
+	pass
+func get_bleed_out_left_s() -> float:
+	return 0.0
+func needs_ammo() -> bool:
+	return false
+func add_ammo_mags(_mags: int) -> int:
+	return 0
+func get_revive_target_slot() -> int:
+	return -1
+func get_revive_progress() -> float:
+	return 0.0
+func bot_set_interact(_held: bool) -> void:
+	pass
+
+# hunt_world.gd (depois de get_horde_waves_cleared)
+func get_horde_level() -> int:
+	return 0
+func get_player_bounds() -> Rect2:         # Rect2() = sem limite
+	return Rect2()
+func request_revive(_target_slot: int) -> void:
+	pass
+func get_ammo_crate_positions() -> PackedVector3Array:
+	return PackedVector3Array()
+
+# net_codec.gd
+const EV_HUNTER_REVIVED: int = 0x2D        # target_slot u8, by_slot u8
+const EV_AMMO_CRATE: int = 0x2E            # crate u8, available u8, taker_slot u8 (255 = ninguém)
+const C_REVIVE: int = 0x45                 # target_slot u8
+const C_AMMO_CRATE: int = 0x46             # crate u8
+const HF_DOWNED: int = 128                 # flags de HUNTER_STATE, bit 7
+
+# scene_paths.gd (depois de BARN_CORN)
+const AMMO_CRATE: String = "res://assets/models/props/ammo_crate.tscn"
 ```
 
 `src/core/corn_stock_visual_base.gd` (novo, `class_name CornStockVisualBase extends Node3D`): constantes

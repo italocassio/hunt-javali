@@ -96,6 +96,12 @@ var _world: HuntController = null
 ## Horde mode (docs/horda.md section 6): read once in setup. Every horde deviation (H1-H6) is behind it.
 var _horde: bool = false
 var _to_barn_frac: float = 1.0
+## Horde route to the eat point (docs/plano_horda_nivel2.md C2): planned once per trip in _enter_to_crop; the
+## last point is the eat point (_target).
+var _route: PackedVector2Array = PackedVector2Array()
+var _route_i: int = 0
+var _route_corner_out: float = 0.0
+var _route_arrive: float = 0.0
 var _visual: BoarVisualBase = null
 var _zone_mults: Dictionary = {}
 
@@ -178,7 +184,9 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, p_herd: BoarHer
 	name = "Boar_%d" % boar_id
 	body_scale = BoarVisualBase.scale_for_weight(weight_kg)
 	_radius = BODY_RADIUS_M * body_scale
-	_read_type(Data.get_boar_type(type_id))
+	_horde = _world.is_horde()
+	# Horde level N3: boar_overrides of the level over data/boars.json (level 0 in the contract = the plain type).
+	_read_type(Data.get_horde_boar_type(type_id, _world.get_horde_level()))
 	_zone_mults = Data.get_boar_rules().get("zone_multipliers", {})
 	var game: Dictionary = Data.get_game()
 	var hunt: Dictionary = game.get("hunt", {})
@@ -187,9 +195,11 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, p_herd: BoarHer
 	_sprint_threshold_mps = (float(player_def.get("walk_speed_mps", 4.0)) + float(player_def.get("sprint_speed_mps", 6.5))) * 0.5
 	_knockback_mps = float(player_def.get("knockback_mps", 6.0))
 	_perception_timer = fmod(float(boar_id) * 0.37, 1.0) * _perception_interval
-	_horde = _world.is_horde()
 	if _horde:
-		_to_barn_frac = float(Data.get_horde().get("to_barn_speed_frac", 1.0))
+		var cfg: Dictionary = Data.get_horde_level(_world.get_horde_level())
+		_to_barn_frac = float(cfg.get("to_barn_speed_frac", 1.0))
+		_route_corner_out = float(cfg.get("route_corner_out_m", 0.0))
+		_route_arrive = float(cfg.get("route_waypoint_arrive_m", ARRIVE_M))
 	_build_visual()
 	_build_hit_zones()
 	herd.add(self)
@@ -422,6 +432,11 @@ func debug_kill() -> void:
 	health = 0.0
 	_multi_shot = true
 	_die(Ids.ZONE_BODY)
+
+
+## Horde: the route of the current trip to the barn (last point = eat point); empty outside the horde.
+func debug_route() -> PackedVector2Array:
+	return _route
 
 
 # --- Frame ---------------------------------------------------------------------------------------
@@ -704,6 +719,9 @@ func _enter_to_crop() -> void:
 	_leave_activity()
 	if _horde:
 		_target = _world.get_horde_eat_point(boar_id)   # H2: its own spot on the eat ring of the barn
+		# C2: around the corn and out of the barn shed, planned once for the whole trip.
+		_route = HordeRoute.plan(get_xz(), _target, _world.horde_route_obstacles, _route_corner_out)
+		_route_i = 0
 		_set_state(Ids.BS_TO_CROP)
 		return
 	herd.ensure_crop_target(_world.crop.get_rects(), _now(), _world.rng)
@@ -718,6 +736,18 @@ func _tick_to_crop(delta: float) -> void:
 		return
 	# H3: the horde runs to the barn (limping if wounded).
 	var base: float = _run_speed * _to_barn_frac if _horde else _walk_speed
+	if _horde:
+		# C2: detour points first (the last route point is _target, reached with ARRIVE_M as always).
+		while _route_i < _route.size() - 1 and get_xz().distance_to(_route[_route_i]) < _route_arrive:
+			_route_i += 1
+		if _route_i < _route.size() - 1:
+			_steer(Steering.seek(get_xz(), _route[_route_i]), _speed_for(base), delta)
+			return
+		# Eat points next to the barn corners sit right by its steering circles: circles beyond the eat point do not
+		# push the boar aside (resolve still keeps it out of them).
+		_steer(Steering.seek(get_xz(), _target), _speed_for(base) * Steering.arrive_scale(dist, SLOW_RADIUS_M), delta,
+			minf(AVOID_LOOKAHEAD_M, dist))
+		return
 	_steer(Steering.seek(get_xz(), _target), _speed_for(base) * Steering.arrive_scale(dist, SLOW_RADIUS_M), delta)
 
 
@@ -1065,12 +1095,12 @@ func _speed_for(base: float) -> float:
 
 
 ## Steers toward `desired` (unit XZ direction) with herd separation and obstacle avoidance.
-func _steer(desired: Vector2, speed: float, delta: float) -> void:
+func _steer(desired: Vector2, speed: float, delta: float, lookahead_m: float = AVOID_LOOKAHEAD_M) -> void:
 	var pos: Vector2 = get_xz()
 	var fwd: Vector2 = Steering.dir_from_yaw(_yaw)
 	var dir: Vector2 = desired
 	dir += Steering.separation(pos, self, herd.members, SEPARATION_RADIUS_M) * SEPARATION_WEIGHT
-	dir += _world.obstacles.avoidance(pos, fwd, AVOID_LOOKAHEAD_M, _radius) * AVOID_WEIGHT
+	dir += _world.obstacles.avoidance(pos, fwd, lookahead_m, _radius) * AVOID_WEIGHT
 	var align: float = 1.0
 	if dir.length_squared() > 0.0001:
 		dir = dir.normalized()

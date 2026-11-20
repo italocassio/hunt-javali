@@ -2,6 +2,8 @@ extends SandboxWorld
 ## Package A sandbox for RemoteHunter (docs/multiplayer.md 6.2). Two remote hunters fed through the same
 ## byte path as the network: remote 1 follows the real Player (Player.net_write_state -> net_apply_state),
 ## remote 2 follows a hand-encoded synthetic state (cross-checks the wire format independently).
+## Remote 3 (horde revive, docs/plano_horda_nivel2.md 4.7) goes down with HF_DOWNED and stands up again with HF_ALIVE:
+## is_downed(), the "(caído)" name tag and a fresh Visual after the revive.
 ## Runs a scripted sequence, asserts, and quits by itself.
 ## Command line (after "--"): --noquit (keep running, for screenshots), --cam (a Camera3D that looks at
 ## the hunters, for screenshots)
@@ -22,9 +24,19 @@ const T_END_S: float = 8.7
 const POSITION_TOLERANCE_M: float = 0.5
 const SYNTH_AIM_PITCH_DEG: int = 15
 const SYNTH_HEALTH_AFTER_HIT: int = 70
+const DOWNED_POS: Vector3 = Vector3(-6.0, 0.0, -2.0)
+const T_DOWNED_S: float = 1.0
+const T_DOWNED_CHECK_S: float = 1.6       # past the interpolation delay
+const T_REVIVED_S: float = 2.2
+const T_REVIVED_CHECK_S: float = 2.8
+const REVIVED_HEALTH: int = 50
 
 var _remote1: RemoteHunter = null
 var _remote2: RemoteHunter = null
+var _remote3: RemoteHunter = null
+var _r3_flags: int = NetCodec.HF_ALIVE
+var _r3_health: int = 100
+var _r3_fallen_visual: HunterVisualBase = null
 var _t: float = 0.0
 var _send_t: float = 0.0
 var _synth_angle: float = 0.0
@@ -55,6 +67,7 @@ func _ready() -> void:
 	player.bot_set_move(Vector2(0.0, 1.0), false)
 	_remote1 = _spawn_remote(1, "Ana", Ids.W_CARBINE_22)
 	_remote2 = _spawn_remote(2, "Beto", Ids.W_SHOTGUN_12)
+	_remote3 = _spawn_remote(3, "Caio", Ids.W_CARBINE_22)
 	_synth_pos = SYNTH_CENTER + Vector3(SYNTH_RADIUS_M, 0.0, 0.0)
 	if _args.has("cam"):
 		var cam: Camera3D = Camera3D.new()
@@ -148,6 +161,40 @@ func _run_script() -> void:
 		check(_remote2.is_present(), "remote still present right after the last state")
 	if _silence_checked and _t >= T_END_S:
 		_finish()
+	_run_downed_script()
+
+
+func _run_downed_script() -> void:
+	if _once("r3_down", T_DOWNED_S):
+		_r3_flags = NetCodec.HF_DOWNED
+		_r3_health = 0
+	if _once("r3_down_check", T_DOWNED_CHECK_S):
+		check(_remote3.is_downed(), "remote3 is_downed() with HF_DOWNED")
+		check(not _remote3.is_alive(), "remote3 not alive while downed")
+		check(_remote2.is_alive() and not _remote2.is_downed() and not _remote1.is_downed(), "others not downed")
+		check(_name_tag_text(_remote3) == "Caio (caído)", "remote3 tag while downed: '%s'" % _name_tag_text(_remote3))
+		_r3_fallen_visual = _remote3.get_visual()
+	if _once("r3_up", T_REVIVED_S):
+		_r3_flags = NetCodec.HF_ALIVE
+		_r3_health = REVIVED_HEALTH
+	if _once("r3_up_check", T_REVIVED_CHECK_S):
+		check(_remote3.is_alive() and not _remote3.is_downed(), "remote3 alive again after HF_ALIVE")
+		var visual: HunterVisualBase = _remote3.get_visual()
+		check(visual != null and visual != _r3_fallen_visual, "remote3 visual replaced after the revive")
+		check(visual != null and visual.name == "Visual" and visual.get_parent() == _remote3, "new child named Visual")
+		var visuals: int = 0
+		for child: Node in _remote3.get_children():
+			if child is HunterVisualBase:
+				visuals += 1
+		check(visuals == 1, "remote3 has exactly one visual (%d)" % visuals)
+		check(_name_tag_text(_remote3) == "Caio", "remote3 tag after revive: '%s'" % _name_tag_text(_remote3))
+		check(is_equal_approx(_remote3.get_health(), float(REVIVED_HEALTH)), "remote3 health after revive")
+		print("remote3 downed/revived checks done")
+
+
+func _name_tag_text(remote: RemoteHunter) -> String:
+	var tag: Label3D = remote.find_child("NameTag", true, false) as Label3D
+	return tag.text if tag != null else "<no tag>"
 
 
 func _send_states() -> void:
@@ -158,6 +205,17 @@ func _send_states() -> void:
 	var synth: StreamPeerBuffer = StreamPeerBuffer.new()
 	_encode_synthetic(synth)
 	_feed(_remote2, synth.data_array)
+	var downed: StreamPeerBuffer = StreamPeerBuffer.new()
+	NetCodec.put_xz(downed, get_map_rect(), DOWNED_POS.x, DOWNED_POS.z)
+	downed.put_16(0)
+	downed.put_u16(0)
+	downed.put_8(0)
+	downed.put_u8(0)
+	downed.put_u8(_r3_flags)
+	downed.put_u8(0)
+	downed.put_u8(_r3_health)
+	downed.put_u8(0)
+	_feed(_remote3, downed.data_array)
 
 
 func _feed(remote: RemoteHunter, bytes: PackedByteArray) -> void:

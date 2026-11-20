@@ -3,7 +3,8 @@ extends Control
 ## Friends lobby (multiplayer phase F6). docs/multiplayer.md section 6.11.
 ## Entry:      %NameEdit, %CreateRoomButton, %CodeEdit, %JoinButton, %BackButton.
 ## Connecting: %StatusLabel, %CancelButton.
-## Mode:       %ModeLabel (everyone), %ModeContractButton / %ModeHordeButton (host only), %HordeInfoLabel.
+## Mode:       %ModeLabel (everyone), %ModeContractButton / %ModeHordeButton (host only), %HordeInfoLabel,
+##             %HordeLevelLabel (everyone, horde), %HordeLevelRow with HordeLevel_<n> buttons (host only, horde).
 ## Room:       %RoomCodeLabel, %RoomLinkLabel, %CopyLinkButton, Slot_0..Slot_3 (Swatch, Info/Name, Info/Detail, Role),
 ##             %MapOption + Contract_<index> (host only), %ContractLabel, %HintLabel, LoadoutPanel
 ##             (%WeaponSlot0/1, %DogOption, Item_<id>), %ReadyButton (client), %StartButton (host),
@@ -20,7 +21,9 @@ const _DEFAULT_NAME_CHARS: int = 12
 const _CARD_WIDTH_PX: float = 1000.0
 const _SWATCH_PX: float = 28.0
 const HORDE_WEAPONS_TEXT: String = "Na Horda Javali todos levam todas as armas, com munição infinita."
+const HORDE_WEAPONS_COUNTED_TEXT: String = "Na Horda Javali todos levam todas as armas. Munição contada: pegue cartuchos no celeiro."
 const _MODE_BUTTON_MIN_PX: float = 64.0
+const _LEVEL_BUTTON_MIN_PX: float = 64.0
 
 var _code_length: int = _DEFAULT_CODE_LENGTH
 var _max_players: int = _DEFAULT_MAX_PLAYERS
@@ -50,6 +53,9 @@ var _mode_buttons_row: HBoxContainer = null
 var _mode_contract_button: Button = null
 var _mode_horde_button: Button = null
 var _horde_info: Label = null
+var _horde_level_label: Label = null
+var _horde_level_row: HBoxContainer = null
+var _horde_level_buttons: Array[Button] = []
 var _loadout_panel: LoadoutPanel = null
 var _ready_button: Button = null
 var _start: Button = null
@@ -261,6 +267,21 @@ func _build_room() -> HBoxContainer:
 	left.add_child(_mode_buttons_row)
 	_mode_contract_button = _build_mode_button("Contrato", Ids.MODE_CONTRACT, "ModeContractButton")
 	_mode_horde_button = _build_mode_button("Horda Javali", Ids.MODE_HORDE, "ModeHordeButton")
+	_horde_level_label = UiKit.label("", "", true)
+	UiKit.mark(_horde_level_label, self, "HordeLevelLabel")
+	left.add_child(_horde_level_label)
+	_horde_level_row = HBoxContainer.new()
+	_horde_level_row.add_theme_constant_override("separation", 8)
+	UiKit.mark(_horde_level_row, self, "HordeLevelRow")
+	left.add_child(_horde_level_row)
+	for level: int in range(1, Data.get_horde_level_count() + 1):
+		var lb: Button = UiKit.button(str(Data.get_horde_level(level).get("name", "Nível %d" % level)), "SecondaryButton", _LEVEL_BUTTON_MIN_PX, &"", false)
+		lb.toggle_mode = true
+		lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		lb.name = "HordeLevel_%d" % level
+		lb.pressed.connect(_on_level_pressed.bind(level))
+		_horde_level_row.add_child(lb)
+		_horde_level_buttons.append(lb)
 	_horde_info = UiKit.muted("")
 	UiKit.mark(_horde_info, self, "HordeInfoLabel")
 	left.add_child(_horde_info)
@@ -411,7 +432,7 @@ func _refresh_roster() -> void:
 	var is_host: bool = Net.is_host()
 	_start.visible = is_host
 	_start.text = UiKit.action_text("Iniciar horda" if horde else "Iniciar caçada")
-	_loadout_panel.set_weapons_locked(HORDE_WEAPONS_TEXT if horde else "")
+	_loadout_panel.set_weapons_locked(_horde_weapons_text() if horde else "")
 	_start.disabled = waiting > 0
 	_ready_button.visible = not is_host
 	var me: NetPeerInfo = Net.get_peer(local_slot)
@@ -437,9 +458,10 @@ func _refresh_contracts() -> void:
 	var index: int = Net.get_selected_contract_index()
 	_refresh_mode(is_host)
 	if _is_horde():
-		var horde_def: Dictionary = Data.get_horde()
+		var level: int = _horde_level()
+		var horde_def: Dictionary = Data.get_horde_level(level)
 		var horde_map: StringName = StringName(str(horde_def.get("map_id", "")))
-		_contract_label.text = "%s: Horda Javali, %d ondas" % [Data.get_map(horde_map).get("name", horde_map), (horde_def.get("waves", []) as Array).size()]
+		_contract_label.text = "%s: Horda Javali, %s, %d ondas" % [Data.get_map(horde_map).get("name", horde_map), horde_def.get("name", ""), (horde_def.get("waves", []) as Array).size()]
 		_contract_header.visible = false
 		_map_option.visible = false
 		_contract_box.visible = false
@@ -467,6 +489,15 @@ func _is_horde() -> bool:
 	return Net.get_selected_mode() == Ids.MODE_HORDE
 
 
+func _horde_level() -> int:
+	return clampi(Net.get_selected_horde_level(), 1, maxi(1, Data.get_horde_level_count()))
+
+
+func _horde_weapons_text() -> String:
+	var infinite: bool = bool((Data.get_horde_level(_horde_level()).get("ammo", {}) as Dictionary).get("infinite", true))
+	return HORDE_WEAPONS_TEXT if infinite else HORDE_WEAPONS_COUNTED_TEXT
+
+
 ## Mode label for everyone; mode buttons (host only) mirror the state kept by Net.
 func _refresh_mode(is_host: bool) -> void:
 	var horde: bool = _is_horde()
@@ -474,8 +505,15 @@ func _refresh_mode(is_host: bool) -> void:
 	_mode_buttons_row.visible = is_host
 	_mode_contract_button.set_pressed_no_signal(not horde)
 	_mode_horde_button.set_pressed_no_signal(horde)
+	var level: int = _horde_level()
+	var level_def: Dictionary = Data.get_horde_level(level)
+	_horde_level_label.visible = horde
+	_horde_level_label.text = "Nível escolhido: %s" % level_def.get("name", level) if horde else ""
+	_horde_level_row.visible = horde and is_host
+	for i: int in _horde_level_buttons.size():
+		_horde_level_buttons[i].set_pressed_no_signal(i + 1 == level)
 	_horde_info.visible = horde
-	_horde_info.text = str(Data.get_horde().get("description", "")) if horde else ""
+	_horde_info.text = str(level_def.get("description", "")) if horde else ""
 
 
 func _rebuild_contract_buttons(map_id: StringName) -> void:
@@ -602,6 +640,12 @@ func _on_map_selected(index: int) -> void:
 
 func _on_mode_pressed(mode: StringName) -> void:
 	if not Net.host_select_mode(mode):
+		Sfx.play(&"ui_error")
+	_refresh_roster()
+
+
+func _on_level_pressed(level: int) -> void:
+	if not Net.host_select_horde_level(level):
 		Sfx.play(&"ui_error")
 	_refresh_roster()
 

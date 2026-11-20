@@ -167,6 +167,30 @@ func get_horde_waves_cleared() -> int:         # waves whose every boar died
 	return 0
 
 
+func get_horde_level() -> int:                 ## Horde level being played (1-based); 0 = not horde
+	return 0
+
+
+func get_player_bounds() -> Rect2:             ## XZ rect the hunter is confined to; Rect2() = no limit
+	return Rect2()
+
+
+func request_revive(_target_slot: int) -> void:   ## Local hunter finished reviving target_slot; host applies, client asks
+	pass
+
+
+func get_ammo_crate_positions() -> PackedVector3Array:   ## Ground positions of the available ammo crates
+	return PackedVector3Array()
+
+
+func get_ammo_crate_in_reach(_at: Vector3) -> int:   ## Nearest available ammo crate within pickup_radius_m (XZ) of at; -1 = none
+	return -1
+
+
+func request_ammo_crate(_crate: int) -> void:   ## Local hunter pressed interact at that crate; offline/host takes, client asks
+	pass
+
+
 # --- Debug hooks (tests) ---
 func debug_kill_boar(_boar_id: int) -> void:
 	pass

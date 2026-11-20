@@ -68,6 +68,8 @@ var retreat_zones: PackedVector2Array = PackedVector2Array()
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var crop_drain_mult: float = 1.0
 var spawner: BoarSpawner = null
+## Horde (docs/plano_horda_nivel2.md C2): rectangles the boars' route goes around, from MapRoot after the props step.
+var horde_route_obstacles: Array[Dictionary] = []
 
 var _request: HuntRequest = null
 var _map: MapRoot = null
@@ -143,6 +145,17 @@ var _hw_phase: StringName = &""
 var _hw_countdown: float = 0.0
 var _hw_total: int = 0
 var _hw_killed_before: int = 0
+# Horde levels (docs/plano_horda_nivel2.md). _horde above is the resolved level (Data.get_horde_level).
+var _horde_level: int = 0               # 0 outside the horde
+var _player_bounds: Rect2 = Rect2()     # confine.enabled: the farm fence rect, inset
+var _ammo_crates: HordeAmmoCrates = null
+var _downed_slots: Dictionary = {}      # slot -> true once hunter_downed was emitted (cleared when alive again)
+
+# Counters for tests and diagnostics.
+var revives_accepted: int = 0
+var revives_rejected: int = 0
+var ammo_claims_accepted: int = 0
+var ammo_claims_rejected: int = 0
 
 @onready var _boars_root: Node3D = $Boars
 @onready var _baits_root: Node3D = $Baits
@@ -224,9 +237,12 @@ func _assemble() -> void:
 	var contract: Dictionary = Data.get_contract(_request.map_id, _request.contract_index)
 	var plan: Array = []
 	if _request.is_horde():
-		# Horde (docs/horda.md section 5.1, steps 1-2): the waves replace the contract groups.
-		_horde = Data.get_horde()
+		# Horde (docs/horda.md section 5.1, steps 1-2): the waves replace the contract groups. Every horde setting is
+		# the resolved level's (docs/plano_horda_nivel2.md section 4.2).
+		_horde_level = _resolve_horde_level()
+		_horde = Data.get_horde_level(_horde_level)
 		_result.mode = Ids.MODE_HORDE
+		_result.horde_level = _horde_level
 		_result.counts_for_progression = false
 		if _horde.is_empty():
 			push_error("HuntController: horde requested but data/horde.json is empty or invalid")
@@ -283,6 +299,7 @@ func _assemble() -> void:
 	if not await _next_frame():
 		return
 	t = Time.get_ticks_msec()
+	_map.set_horde_layout(is_horde())
 	_map.build_props_and_water()
 	if is_horde() and not _build_objective():
 		return
@@ -312,7 +329,12 @@ func _assemble() -> void:
 	t = _lap("crop", t)
 	# From here the world stays hidden until the shader warm-up shows it part by part (section 8.1).
 	if _warmup_on:
-		_warmup.hide_world(_map, crop, [_stock_visual] if _stock_visual != null else [])
+		var extra: Array = []
+		if _stock_visual != null:
+			extra.append(_stock_visual)
+		if _ammo_crates != null:
+			extra.append(_ammo_crates)
+		_warmup.hide_world(_map, crop, extra)
 	if not await _next_frame():
 		return
 
@@ -341,9 +363,15 @@ func _assemble() -> void:
 	add_child(_player)
 	var spawn: Marker3D = _map.get_player_spawn()
 	var spawn_pos: Vector3 = spawn.global_position if spawn != null else Vector3.ZERO
+	var spawn_yaw: float = spawn.global_rotation.y if spawn != null else 0.0
+	var level_spawn: Array = _horde.get("player_spawn", []) if is_horde() else []
+	if level_spawn.size() >= 3:
+		# Horde level: [x, z, yaw_deg] replaces the map's PlayerSpawn (inside the farm when confined).
+		spawn_pos = Vector3(float(level_spawn[0]), 0.0, float(level_spawn[1]))
+		spawn_yaw = deg_to_rad(float(level_spawn[2]))
 	spawn_pos.y = get_height(spawn_pos.x, spawn_pos.z)
 	_player.global_position = spawn_pos
-	_player.rotation.y = spawn.global_rotation.y if spawn != null else 0.0
+	_player.rotation.y = spawn_yaw
 	if _net_role != Net.Role.OFFLINE:
 		_spawn_base = spawn_pos
 		_spawn_right = _player.global_transform.basis.x
@@ -457,6 +485,8 @@ func _finish_assembly_client() -> void:
 	_replica.full_sync_finished.connect(_on_full_sync_finished)
 	if is_horde():
 		_replica.horde_wave_received.connect(_on_horde_wave_received)
+		_replica.hunter_revived_received.connect(_on_hunter_revived_received)
+		_replica.ammo_crate_received.connect(_on_ammo_crate_received)
 	GameEvents.net_reconnect_changed.connect(_on_net_reconnect_changed)
 	GameEvents.hunt_abandon_requested.connect(_on_abandon_requested)
 	GameEvents.item_used.connect(_on_item_used)
@@ -681,10 +711,19 @@ func _process(delta: float) -> void:
 		_finish(HuntResult.Outcome.VICTORY)
 
 
-## hunter_died(slot) once per hunter (local or remote) whose is_alive() went false (section 6.8).
+## hunter_died(slot) once per hunter (local or remote) whose is_alive() went false (section 6.8). Horde revive
+## (docs/plano_horda_nivel2.md section 4.7): a downed hunter is not dead; hunter_downed(slot) once per fall.
 func _track_deaths() -> void:
 	for h: PlayerBase in _hunters_list:
-		if is_instance_valid(h) and not h.is_alive() and not _dead_slots.has(h.slot):
+		if not is_instance_valid(h):
+			continue
+		if h.is_alive():
+			_downed_slots.erase(h.slot)
+		elif h.is_downed():
+			if not _downed_slots.has(h.slot):
+				_downed_slots[h.slot] = true
+				GameEvents.hunter_downed.emit(h.slot)
+		elif not _dead_slots.has(h.slot):
 			_dead_slots[h.slot] = true
 			GameEvents.hunter_died.emit(h.slot)
 
@@ -727,7 +766,7 @@ func _finish(outcome: HuntResult.Outcome) -> void:
 		if _net_role == Net.Role.CLIENT and _hw_count > 0:
 			_result.horde_wave_count = _hw_count
 		if outcome == HuntResult.Outcome.VICTORY:
-			_result.contract_bonus = Profile.horde_bonus(_result.crop_health_pct)
+			_result.contract_bonus = Profile.horde_bonus(_result.crop_health_pct, get_horde_level())
 			_result.horde_waves_cleared = _result.horde_wave_count
 		else:
 			_result.horde_waves_cleared = get_horde_waves_cleared()
@@ -815,7 +854,8 @@ func _on_boar_died(boar: Boar) -> void:
 	kill.one_shot = boar.is_one_shot()
 	kill.clean_kill = _clean_zones.has(String(boar.killing_zone))
 	if is_horde():
-		kill.reward_money = Profile.horde_kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot)
+		kill.reward_money = Profile.horde_kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot,
+			get_horde_level())
 	else:
 		kill.reward_money = Profile.kill_reward(boar.type_id, boar.weight_kg, boar.killing_zone, kill.one_shot,
 			_result.map_id, _result.contract_index)
@@ -1142,7 +1182,35 @@ func _build_objective() -> bool:
 	_stock_visual.set_stock_pct(100.0)
 	GameEvents.crop_health_changed.connect(_on_stock_changed)
 	GameEvents.crop_under_attack.connect(_on_stock_attack)
+	_build_horde_level(spawn)
 	return true
+
+
+## request.horde_level within 1..Data.get_horde_level_count() (warning if it was outside). 0 if there is no level.
+func _resolve_horde_level() -> int:
+	var count: int = Data.get_horde_level_count()
+	if count <= 0:
+		return 0
+	var level: int = clampi(_request.horde_level, 1, count)
+	if level != _request.horde_level:
+		push_warning("HuntController: horde level %d outside 1..%d; playing level %d" % [_request.horde_level, count, level])
+	return level
+
+
+## Every role, right after the objective (docs/plano_horda_nivel2.md sections 4.2-4.6): the boars' route
+## obstacles, the hunter bounds and the ammo crates of the level.
+func _build_horde_level(barn: PropSpawn) -> void:
+	horde_route_obstacles = _map.get_horde_route_obstacles(_horde.get("route_avoid_crops", []) as Array,
+		float(_horde.get("route_crop_margin_m", 0.0)), float(_horde.get("route_corner_out_m", 0.0)))
+	var confine: Dictionary = _horde.get("confine", {})
+	if bool(confine.get("enabled", false)):
+		_player_bounds = _map.get_farm_rect().grow(-float(confine.get("inset_m", 0.0)))
+	var crates: Dictionary = _horde.get("ammo_crates", {})
+	if not (crates.get("positions", []) as Array).is_empty():
+		_ammo_crates = HordeAmmoCrates.new()
+		_ammo_crates.name = "AmmoCrates"
+		add_child(_ammo_crates)
+		_ammo_crates.setup(self, barn.global_transform, crates, _net_role != Net.Role.CLIENT)
 
 
 func _on_stock_changed(pct: float) -> void:
@@ -1261,6 +1329,118 @@ func get_horde_waves_cleared() -> int:
 	if _over and _result != null and _result.outcome == HuntResult.Outcome.VICTORY:
 		return _hw_count
 	return maxi(_hw_wave - 1, 0)
+
+
+func get_horde_level() -> int:
+	return _horde_level if is_horde() else 0
+
+
+func get_player_bounds() -> Rect2:
+	return _player_bounds if is_horde() else Rect2()
+
+
+func get_ammo_crate_positions() -> PackedVector3Array:
+	return _ammo_crates.get_available_positions() if _ammo_crates != null else PackedVector3Array()
+
+
+## Nearest available crate within pickup_radius_m (XZ) of at; -1 = none or no crates (Player.get_ammo_crate_target).
+func get_ammo_crate_in_reach(at: Vector3) -> int:
+	return _ammo_crates.get_in_reach(at) if _ammo_crates != null else -1
+
+
+## The local hunter pressed interact at that crate (owner's Q4: crates are taken with a button). Offline / host take
+## it now; a client sends C_AMMO_CRATE and the host decides as before.
+func request_ammo_crate(crate: int) -> void:
+	if _over or not _ready_flag or _ammo_crates == null:
+		return
+	_ammo_crates.take_local(crate)
+
+
+## The ammo crates node (horde levels with crates); null otherwise. Tests.
+func debug_ammo_crates() -> HordeAmmoCrates:
+	return _ammo_crates
+
+
+# --- Horde revive (docs/plano_horda_nivel2.md sections 4.7 and 4.8) ------------------------------
+
+## The local hunter finished holding interact next to target_slot. Offline: nothing (nobody to revive);
+## host: decided here; client: C_REVIVE to the host.
+func request_revive(target_slot: int) -> void:
+	if not is_horde() or _over or not _ready_flag:
+		return
+	if _net_role == Net.Role.HOST:
+		_host_revive(target_slot, _local_slot)
+	elif _net_role == Net.Role.CLIENT and _replica != null:
+		_replica.queue_revive_claim(target_slot)
+
+
+## Host: a client's C_REVIVE (HuntHostSync).
+func claim_revive(by_slot: int, target_slot: int) -> void:
+	if not _over and _ready_flag:
+		_host_revive(target_slot, by_slot)
+
+
+## Host: target stands up if the level allows revives, it is down, the reviver is alive and both are within
+## radius_m + claim_tolerance_m (last known positions). Otherwise ignored. True if accepted.
+func _host_revive(target_slot: int, by_slot: int) -> bool:
+	var rv: Dictionary = _horde.get("revive", {})
+	var target: PlayerBase = get_hunter(target_slot)
+	var by: PlayerBase = get_hunter(by_slot)
+	var ok: bool = is_horde() and bool(rv.get("enabled", false)) and target_slot != by_slot \
+		and target != null and is_instance_valid(target) and by != null and is_instance_valid(by) \
+		and target.is_downed() and by.is_alive()
+	if ok:
+		var d: float = Vector2(target.global_position.x - by.global_position.x, target.global_position.z - by.global_position.z).length()
+		ok = d <= float(rv.get("radius_m", 0.0)) + float(rv.get("claim_tolerance_m", 0.0))
+	if not ok:
+		revives_rejected += 1
+		return false
+	revives_accepted += 1
+	if target_slot == _local_slot:
+		_player.revive(float(rv.get("health", 0.0)))
+	if _host_sync != null:
+		_host_sync.queue_hunter_revived(target_slot, by_slot)
+	GameEvents.hunter_revived.emit(target_slot, by_slot)
+	return true
+
+
+## Client: EV_HUNTER_REVIVED. This machine's hunter stands up if it is the target (no-op unless still down).
+func _on_hunter_revived_received(target_slot: int, by_slot: int) -> void:
+	if _over:
+		return
+	if target_slot == _local_slot and _player != null and is_instance_valid(_player):
+		_player.revive(float(_horde.get("revive", {}).get("health", 0.0)))
+	GameEvents.hunter_revived.emit(target_slot, by_slot)
+
+
+# --- Horde ammo crates (docs/plano_horda_nivel2.md sections 4.6 and 4.8) -------------------------
+
+## Host: a client's C_AMMO_CRATE (HuntHostSync).
+func claim_ammo_crate(by_slot: int, crate: int) -> void:
+	if _over or not _ready_flag or _ammo_crates == null:
+		return
+	if _ammo_crates.host_claim(by_slot, crate):
+		ammo_claims_accepted += 1
+	else:
+		ammo_claims_rejected += 1
+
+
+## HordeAmmoCrates (offline / host): a crate was taken or came back. The host tells every client.
+func report_ammo_crate(crate: int, available: bool, taker_slot: int) -> void:
+	if _host_sync != null:
+		_host_sync.queue_ammo_crate(crate, available, taker_slot)
+
+
+## HordeAmmoCrates (client): the local hunter pressed interact at an available crate.
+func send_ammo_crate_claim(crate: int) -> void:
+	if _replica != null and not _over:
+		_replica.queue_ammo_crate_claim(crate)
+
+
+## Client: EV_AMMO_CRATE (live or replayed by a full sync).
+func _on_ammo_crate_received(crate: int, available: bool, taker_slot: int) -> void:
+	if not _over and _ammo_crates != null:
+		_ammo_crates.apply_remote(crate, available, taker_slot)
 
 
 func debug_horde_start_next_wave() -> void:
@@ -1628,6 +1808,11 @@ func net_write_full_sync(out: StreamPeerBuffer) -> void:
 		_host_sync.write_horde_wave_replay(out, _director.get_wave(), _director.get_wave_count(), _director.get_phase(),
 			_director.get_countdown_s(), _director.get_wave_total(), _director.get_killed_before())
 		records += 1
+	if _ammo_crates != null:
+		# Horde level 2 (docs/plano_horda_nivel2.md section 4.8): every crate's state, taker 255.
+		for i: int in _ammo_crates.get_count():
+			_host_sync.write_ammo_crate_replay(out, i, _ammo_crates.is_available(i))
+			records += 1
 	if _over:
 		records += _host_sync.write_hunt_end_replay(out)
 	_host_sync.set_full_sync_count(out, sync_at, records)
@@ -1664,6 +1849,7 @@ func net_peer_left(for_slot: int) -> void:
 	_remove_dog(for_slot)
 	_remotes.erase(for_slot)
 	_away_slots.erase(for_slot)   # no hunter_away_changed for a hunter that left
+	_downed_slots.erase(for_slot)
 	_hunters_list.erase(h)
 	h.queue_free()
 	GameEvents.hunter_left.emit(for_slot)

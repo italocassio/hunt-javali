@@ -5,7 +5,7 @@ extends Node
 const ACTIONS: PackedStringArray = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 	"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
 	"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
-	"spectate_next", "pause", "help"]
+	"spectate_next", "pause", "help", "interact"]
 ## Usable item id -> its action. The insertion order is THE order of the item slots (quickbar, touch row).
 const ITEM_ACTIONS: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
 	&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
@@ -42,6 +42,9 @@ const _KEYS: Dictionary = {
 	"spectate_next": [KEY_F],
 	"pause": [KEY_ESCAPE, KEY_P],
 	"help": [KEY_H],
+	# F is shared with spectate_next on purpose (docs/plano_horda_nivel2.md 4.9): interact is only read while the
+	# player is alive, spectate_next only while the spectator camera is active, so they never act together.
+	"interact": [KEY_F],
 }
 const _LEFT_ONLY: Array[int] = [KEY_SHIFT, KEY_CTRL]
 

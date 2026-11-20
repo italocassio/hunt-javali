@@ -25,6 +25,7 @@ var scoreboard: Array[Dictionary] = []   # {slot, name, kills, money}; empty in 
 var mode: StringName = &"contract"      # Ids.MODE_CONTRACT | Ids.MODE_HORDE
 var horde_wave_count: int = 0           # waves of the plan (0 outside the horde)
 var horde_waves_cleared: int = 0        # waves whose every boar died (== horde_wave_count on VICTORY)
+var horde_level: int = 0                ## Horde level played (1-based); 0 in contract mode
 
 
 func is_victory() -> bool:
@@ -46,4 +47,5 @@ func to_dict() -> Dictionary:
 		"crop_health_pct": crop_health_pct, "duration_s": duration_s,
 		"shots_fired": shots_fired, "shots_hit": shots_hit,
 		"mode": String(mode), "horde_wave_count": horde_wave_count, "horde_waves_cleared": horde_waves_cleared,
+			"horde_level": horde_level,
 	}

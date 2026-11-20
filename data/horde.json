@@ -1,5 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
+  "route_avoid_crops": ["corn"],
+  "route_crop_margin_m": 4.0,
+  "route_corner_out_m": 2.0,
+  "route_waypoint_arrive_m": 3.0,
   "name": "Horda Javali",
   "description": "Defendam o celeiro de milho contra ondas de javalis. Todas as armas liberadas, munição sem fim. Se a horda comer o milho ou derrubar todos os caçadores, acabou.",
   "map_id": "mato_grosso",
@@ -44,5 +48,28 @@
       {"members": ["alpha", "boar", "boar"], "spawn_zone": 1, "delay_s": 0.0},
       {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 4.0},
       {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 8.0}]}
+  ],
+  "levels": [
+    {"level": 1, "name": "Nível 1",
+     "description": "Defendam o celeiro de milho contra ondas de javalis. Todas as armas liberadas, munição sem fim. Se a horda comer o milho ou derrubar todos os caçadores, acabou.",
+     "overrides": {},
+     "ammo": {"infinite": true, "start_reserve_mags": 0, "reserve_cap_mags": 0},
+     "ammo_crates": {"positions": [], "mags_per_crate": 0, "respawn_s": 0.0, "pickup_radius_m": 0.0, "claim_tolerance_m": 0.0, "claim_retry_s": 0.0},
+     "confine": {"enabled": false, "inset_m": 0.0, "hint_s": 2.5, "hint_interval_s": 5.0},
+     "player_spawn": [],
+     "revive": {"enabled": false, "health": 0.0, "hold_s": 0.0, "radius_m": 0.0, "bleed_out_s": 0.0, "claim_tolerance_m": 0.0, "retry_s": 0.0},
+     "boar_overrides": {}},
+    {"level": 2, "name": "Nível 2",
+     "description": "Munição contada: os cartuchos estão no celeiro. Ninguém sai do cercado da fazenda, os javalis investem mais, e quem cair pode ser levantado por um companheiro.",
+     "overrides": {"to_barn_speed_frac": 0.9, "kill_reward_mult": 0.5, "victory_bonus_money": 5000},
+     "ammo": {"infinite": false, "start_reserve_mags": 2, "reserve_cap_mags": 6},
+     "ammo_crates": {"positions": [[-3.0, -2.0], [0.0, -2.0], [3.0, -2.0]], "mags_per_crate": 2, "respawn_s": 60.0, "pickup_radius_m": 1.5, "claim_tolerance_m": 3.0, "claim_retry_s": 1.0},
+     "confine": {"enabled": true, "inset_m": 0.6, "hint_s": 2.5, "hint_interval_s": 5.0},
+     "player_spawn": [30.0, -74.0, 180.0],
+     "revive": {"enabled": true, "health": 50.0, "hold_s": 4.0, "radius_m": 2.0, "bleed_out_s": 60.0, "claim_tolerance_m": 3.0, "retry_s": 1.0},
+     "boar_overrides": {
+       "sow": {"aggression": "provoked", "aggro_radius_m": 10.0, "max_charges": 2, "charge_damage": 18.0, "charge_telegraph_s": 0.6, "recover_s": 1.0},
+       "boar": {"aggro_radius_m": 18.0, "max_charges": 4, "charge_damage": 30.0, "charge_speed_mps": 11.0, "charge_telegraph_s": 0.6, "recover_s": 1.1},
+       "alpha": {"aggro_radius_m": 35.0, "charge_damage": 45.0, "charge_telegraph_s": 0.6, "recover_s": 1.4}}}
   ]
 }

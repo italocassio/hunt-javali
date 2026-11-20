@@ -35,6 +35,10 @@ const HORDE_WAVE_BYTES: int = 7          # EV_HORDE_WAVE body (docs/horda.md sec
 const COUNTDOWN_WIRE_SCALE: float = 10.0 # EV_HORDE_WAVE countdown u16 in 0.1 s, rounded up
 const COUNTDOWN_EPSILON: float = 0.0001  # keeps 12.0 s from rounding up to 12.1 s
 const DEFAULT_CLAIM_TOLERANCE_M: float = 12.0
+const HUNTER_REVIVED_BYTES: int = 2      # EV_HUNTER_REVIVED body: target_slot u8, by_slot u8
+const AMMO_CRATE_BYTES: int = 3          # EV_AMMO_CRATE body: crate u8, available u8, taker_slot u8
+const REVIVE_CLAIM_BYTES: int = 1        # C_REVIVE body: target_slot u8
+const AMMO_CRATE_CLAIM_BYTES: int = 1    # C_AMMO_CRATE body: crate u8
 ## Rounding slack of the u16 fields when comparing a claim with the weapon limits.
 const DAMAGE_SLACK: float = 1.0 / DAMAGE_WIRE_SCALE
 const DIST_SLACK_M: float = 1.0 / DIST_WIRE_SCALE
@@ -64,6 +68,8 @@ var charge_claims_rejected: int = 0
 var dog_commands_applied: int = 0
 var dog_commands_ignored: int = 0
 var full_syncs_written: int = 0
+var revive_claims: int = 0
+var ammo_crate_claims: int = 0
 
 
 func setup(world: HuntController, spawner: BoarSpawner) -> void:
@@ -197,6 +203,15 @@ func write_horde_wave_replay(out: StreamPeerBuffer, wave: int, wave_count: int, 
 	_put_horde_wave(out, wave, wave_count, phase, countdown_s, wave_total, killed_before)
 
 
+## Horde level 2: replayed EV_AMMO_CRATE with a crate's state now (taker 255). One record.
+func write_ammo_crate_replay(out: StreamPeerBuffer, crate: int, available: bool) -> void:
+	out.put_u8(NetCodec.EV_AMMO_CRATE)
+	out.put_u16(AMMO_CRATE_BYTES)
+	out.put_u8(crate & MAX_U8)
+	out.put_u8(1 if available else 0)
+	out.put_u8(NetCodec.NO_SLOT)
+
+
 ## The EV_HUNT_END sent when the hunt ended, byte for byte. Returns 1 if written, 0 if the hunt is still on.
 func write_hunt_end_replay(out: StreamPeerBuffer) -> int:
 	if _hunt_end_record.is_empty():
@@ -279,6 +294,24 @@ func queue_hunt_end(outcome: int, crop_pct: float, duration_s: float, killed: in
 func queue_horde_wave(wave: int, wave_count: int, phase: StringName, countdown_s: float, wave_total: int, killed_before: int) -> void:
 	var at: int = _begin(NetCodec.EV_HORDE_WAVE)
 	_put_horde_wave(_events, wave, wave_count, phase, countdown_s, wave_total, killed_before)
+	_end(at)
+
+
+## Horde level 2, EV_HUNTER_REVIVED: target_slot u8, by_slot u8. Once per revive the host accepted.
+func queue_hunter_revived(target_slot: int, by_slot: int) -> void:
+	var at: int = _begin(NetCodec.EV_HUNTER_REVIVED)
+	_events.put_u8(target_slot & MAX_U8)
+	_events.put_u8(by_slot & MAX_U8)
+	_end(at)
+
+
+## Horde level 2, EV_AMMO_CRATE: crate u8, available u8 (0/1), taker_slot u8 (255 = nobody). A crate taken
+## (available false, taker = who) or back (available true, taker 255).
+func queue_ammo_crate(crate: int, available: bool, taker_slot: int) -> void:
+	var at: int = _begin(NetCodec.EV_AMMO_CRATE)
+	_events.put_u8(crate & MAX_U8)
+	_events.put_u8(1 if available else 0)
+	_events.put_u8(taker_slot & MAX_U8)
 	_end(at)
 
 
@@ -399,6 +432,16 @@ func apply_claim(from_slot: int, type: int, inp: StreamPeerBuffer, length: int) 
 				var xz: Vector2 = NetCodec.get_xz(inp, _rect)
 				baits_claimed += 1
 				_world.place_bait(Vector3(xz.x, 0.0, xz.y))
+		NetCodec.C_REVIVE:
+			# C_REVIVE: target_slot u8. The client finished holding interact next to a downed hunter.
+			if length >= REVIVE_CLAIM_BYTES:
+				revive_claims += 1
+				_world.claim_revive(from_slot, inp.get_u8())
+		NetCodec.C_AMMO_CRATE:
+			# C_AMMO_CRATE: crate u8. The client pressed interact at an available crate and needs ammo.
+			if length >= AMMO_CRATE_CLAIM_BYTES:
+				ammo_crate_claims += 1
+				_world.claim_ammo_crate(from_slot, inp.get_u8())
 
 
 func _apply_shot(from_slot: int, inp: StreamPeerBuffer, length: int) -> void:

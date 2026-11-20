@@ -88,6 +88,90 @@ func test_horde_mode_defaults_in_request_and_result() -> void:
 	ok(JSON.parse_string(JSON.stringify(d2)) is Dictionary, "to_dict de horda serializa em JSON")
 
 
+func test_horde_level_defaults_in_request_and_result() -> void:
+	## docs/plano_horda_nivel2.md 4.1: horde_level in the request (1) and the result (0 outside horde), make_debug 4th parameter.
+	eq(HuntRequest.new().horde_level, 1, "HuntRequest.horde_level padrao 1")
+	eq(HuntRequest.make_debug().horde_level, 1, "make_debug() padrao: nivel 1")
+	eq(HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE).horde_level, 1, "make_debug(horda) sem 4o parametro: nivel 1")
+	var two: HuntRequest = HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE, 2)
+	eq(two.horde_level, 2, "make_debug(..., 2) grava o nivel")
+	eq(two.mode, &"horde", "make_debug com nivel continua horda")
+	eq(two.map_id, &"mato_grosso", "make_debug com nivel: mapa")
+	eq(two.player_count, 1, "make_debug com nivel: solo")
+	eq(HuntRequest.make_debug(&"mato_grosso", 1, Ids.MODE_CONTRACT, 2).contract_index, 1, "o 4o parametro nao troca o contrato")
+	var res: HuntResult = HuntResult.new()
+	eq(res.horde_level, 0, "HuntResult.horde_level padrao 0 (contrato)")
+	var d: Dictionary = res.to_dict()
+	ok(d.has("horde_level"), "to_dict tem horde_level")
+	eq(d["horde_level"], 0, "to_dict: horde_level 0 no contrato")
+	res.mode = Ids.MODE_HORDE
+	res.horde_level = 2
+	var d2: Dictionary = res.to_dict()
+	eq(d2["horde_level"], 2, "to_dict horda: horde_level 2")
+	ok(JSON.parse_string(JSON.stringify(d2)) is Dictionary, "to_dict com nivel serializa em JSON")
+
+
+func test_player_base_and_hunt_world_level2_defaults() -> void:
+	## docs/plano_horda_nivel2.md 4.1: the base classes are inert (no revive, no ammo crates, no bounds).
+	var p: PlayerBase = PlayerBase.new()
+	track(p)
+	ok(not p.is_downed(), "is_downed padrao false")
+	eq(p.get_bleed_out_left_s(), 0.0, "get_bleed_out_left_s padrao 0")
+	ok(not p.needs_ammo(), "needs_ammo padrao false")
+	eq(p.add_ammo_mags(3), 0, "add_ammo_mags padrao devolve 0")
+	eq(p.get_revive_target_slot(), -1, "get_revive_target_slot padrao -1")
+	eq(p.get_revive_progress(), 0.0, "get_revive_progress padrao 0")
+	eq(p.get_ammo_crate_target(), -1, "get_ammo_crate_target padrao -1 (Q4: caixa com botao)")
+	p.revive(50.0)   # no-op
+	p.bot_set_interact(true)   # no-op
+	var w: HuntWorld = HuntWorld.new()
+	track(w)
+	eq(w.get_horde_level(), 0, "get_horde_level padrao 0")
+	eq(w.get_player_bounds(), Rect2(), "get_player_bounds padrao Rect2() (sem limite)")
+	eq(w.get_ammo_crate_positions().size(), 0, "get_ammo_crate_positions padrao vazio")
+	w.request_revive(1)   # no-op
+	eq(w.get_ammo_crate_in_reach(Vector3.ZERO), -1, "get_ammo_crate_in_reach padrao -1")
+	w.request_ammo_crate(0)   # no-op
+
+
+func test_net_codec_level2_constants() -> void:
+	eq(NetCodec.HF_DOWNED, 128, "HF_DOWNED")
+	eq(NetCodec.EV_HUNTER_REVIVED, 0x2D, "EV_HUNTER_REVIVED")
+	eq(NetCodec.EV_AMMO_CRATE, 0x2E, "EV_AMMO_CRATE")
+	eq(NetCodec.C_REVIVE, 0x45, "C_REVIVE")
+	eq(NetCodec.C_AMMO_CRATE, 0x46, "C_AMMO_CRATE")
+	# the flags byte is full now: every HF_* bit is distinct and the OR of all of them is 255
+	var flags: Array[int] = [NetCodec.HF_CROUCH, NetCodec.HF_AIM, NetCodec.HF_SPRINT, NetCodec.HF_ALIVE, NetCodec.HF_RELOAD,
+		NetCodec.HF_UNARMED, NetCodec.HF_AWAY, NetCodec.HF_DOWNED]
+	var all: int = 0
+	for f: int in flags:
+		eq(all & f, 0, "bit de flag %d unico" % f)
+		all |= f
+	eq(all, 255, "as 8 flags ocupam o byte inteiro (R6: a proxima exige byte novo)")
+	# event types stay unique and in their lanes (host events 0x21..0x3F, client claims > 0x40)
+	var events: Array[int] = [NetCodec.EV_BOAR_SPAWN, NetCodec.EV_BOAR_HIT, NetCodec.EV_BOAR_ATTACK, NetCodec.EV_BOAR_DEATH,
+		NetCodec.EV_CROP_EATEN, NetCodec.EV_BAIT, NetCodec.EV_DOG_MARK, NetCodec.EV_DOG_CMD, NetCodec.EV_MESSAGE,
+		NetCodec.EV_HUNT_END, NetCodec.EV_FULL_SYNC, NetCodec.EV_HORDE_WAVE, NetCodec.EV_HUNTER_REVIVED, NetCodec.EV_AMMO_CRATE]
+	var seen: Dictionary = {}
+	for e: int in events:
+		ok(e >= 0x21 and e <= 0x3F, "evento 0x%02X na faixa do anfitriao" % e)
+		ok(not seen.has(e), "evento 0x%02X unico" % e)
+		seen[e] = true
+	for c: int in [NetCodec.C_STATE, NetCodec.C_SHOT, NetCodec.C_CHARGE_HIT, NetCodec.C_BAIT, NetCodec.C_DOG_CMD, NetCodec.C_REVIVE, NetCodec.C_AMMO_CRATE]:
+		ok(c >= 0x40 and c <= 0x7F, "pedido 0x%02X na faixa do cliente" % c)
+		ok(not seen.has(c), "pedido 0x%02X nao colide com evento" % c)
+		seen[c] = true
+
+
+func test_fence_layer_blocks_only_the_player_body() -> void:
+	eq(Layers.FENCE, 16, "FENCE e a camada 5 (bit 16)")
+	eq(Layers.MASK_PLAYER_BODY, 19, "corpo do jogador: terreno | estatico | cerca")
+	eq(Layers.MASK_WEAPON_RAY & Layers.FENCE, 0, "o raio da arma nao enxerga a cerca de horda")
+	eq(Layers.MASK_LINE_OF_SIGHT & Layers.FENCE, 0, "a linha de visao nao enxerga a cerca de horda")
+	eq(Layers.MASK_GROUND & Layers.FENCE, 0, "o chao nao enxerga a cerca de horda")
+	eq(ScenePaths.AMMO_CRATE, "res://assets/models/props/ammo_crate.tscn", "ScenePaths.AMMO_CRATE")
+
+
 func test_hunt_world_base_horde_getters_are_contract_defaults() -> void:
 	var w: HuntWorld = HuntWorld.new()
 	track(w)

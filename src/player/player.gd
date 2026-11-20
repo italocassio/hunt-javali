@@ -28,6 +28,11 @@ const HEARTBEAT_INTERVAL_S: float = 0.9
 const DEATH_FALL_S: float = 0.8
 const DEATH_EYE_HEIGHT_M: float = 0.3
 const DEATH_ROLL_DEG: float = 70.0
+const DOWNED_FALL_S: float = 0.6              # horde revive: camera drop to the ground when going down
+const DOWNED_EYE_HEIGHT_M: float = 0.45       # docs/plano_horda_nivel2.md 4.7
+const DOWNED_ROLL_DEG: float = 20.0
+const REVIVE_ROLL_RECOVER_S: float = 0.5      # the downed roll fades out over this after a revive
+const CONFINE_HINT_TEXT: String = "Fique dentro do cercado da fazenda."
 const BOT_AIM_TIME_FALLBACK_S: float = 0.2
 const SPEED_QUANT_MPS: float = 0.05           # wire: speed u8 in steps of 0.05 m/s (docs/multiplayer.md 4.5)
 const NO_WEAPON_INDEX: int = 255
@@ -87,6 +92,30 @@ var _bot: bool = false
 var _bot_move: Vector2 = Vector2.ZERO
 var _bot_sprint: bool = false
 var _bot_aim: bool = false
+var _bot_interact: bool = false
+var _bot_interact_pressed: bool = false       # latched by bot_set_interact(true): a one-frame press is never missed
+
+# Horde level rules (docs/plano_horda_nivel2.md section 2). Empty level config = contract / horde level 1 behaviour.
+var _ammo_infinite: bool = true               # horde only: has_infinite_reserve() = is_horde() and this
+var _ammo_counted: bool = false               # horde with counted ammo: crates refill up to the cap
+var _reserve_cap_mags: int = 0
+var _start_reserve_mags: int = 0
+var _revive_cfg: Dictionary = {}
+var _confine_cfg: Dictionary = {}
+var _downed: bool = false
+var _down_t: float = 0.0
+var _down_from_eye: float = 1.65
+var _bleed_left: float = 0.0
+var _hunt_over: bool = false
+var _death_roll_from: float = 0.0
+var _roll_extra: float = 0.0                  # leftover downed roll, fading after a revive
+var _revive_target: int = -1
+var _revive_progress: float = 0.0
+var _reviving: bool = false                   # holding interact on a target: no move, fire, aim, reload or switch
+var _revive_retry: Dictionary = {}            # slot -> seconds during which that target is ignored
+var _interact_was_held: bool = false          # interact last frame: a press (edge) takes an ammo crate
+var _crate_target: int = -1                   # ammo crate a press of interact takes now; -1 = none
+var _confine_hint_wait: float = 0.0
 
 
 func _ready() -> void:
@@ -97,6 +126,7 @@ func _ready() -> void:
 	_eye_height = float(_cfg.get("standing_eye_height_m", 1.65))
 	_head.position.y = _eye_height
 	_camera.fov = float(_cfg.get("base_fov_deg", 75.0))
+	collision_mask = Layers.MASK_PLAYER_BODY   # terrain, props and the horde fence (docs/plano_horda_nivel2.md C1)
 	_shape_node.shape = _shape_node.shape.duplicate()
 	_apply_capsule(float(_cfg.get("capsule_height_m", 1.8)))
 	floor_snap_length = 0.4
@@ -129,6 +159,7 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 	_items.use_finished.connect(_on_item_use_finished)
 	_items.binoculars_changed.connect(_on_binoculars_changed)
 
+	_read_level_rules(request, world)
 	var ids: Array[StringName] = request.weapon_ids.duplicate()
 	if request.is_horde():
 		ids = Data.get_weapon_ids()   # horde: every weapon, in file order (docs/horda.md section 7)
@@ -138,10 +169,12 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		var weapon: Weapon = Weapon.new()
 		weapon.name = "Weapon_%s" % weapon_id
 		add_child(weapon)
-		if not weapon.setup(weapon_id, _items.reserve_mult, request.is_horde()):
+		if not weapon.setup(weapon_id, _items.reserve_mult, request.is_horde() and _ammo_infinite):
 			push_error("Player.setup: unknown weapon '%s'" % weapon_id)
 			weapon.queue_free()
 			continue
+		if _ammo_counted:
+			weapon.ammo_reserve = roundi(float(weapon.def["mag_size"]) * float(_start_reserve_mags) * _items.reserve_mult)
 		weapon.fired.connect(_on_weapon_fired.bind(weapon))
 		weapon.dry_fired.connect(_on_weapon_dry_fired.bind(weapon))
 		weapon.cycle_started.connect(_on_weapon_cycle.bind(weapon))
@@ -165,6 +198,20 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		GameEvents.hunt_ended.connect(_on_hunt_ended)
 	if not GameEvents.player_died.is_connected(_on_local_died):
 		GameEvents.player_died.connect(_on_local_died)
+
+
+## Horde level rules: ammo, revive and confinement blocks of Data.get_horde_level(world.get_horde_level()).
+func _read_level_rules(request: HuntRequest, world: HuntWorld) -> void:
+	var level_cfg: Dictionary = {}
+	if request.is_horde() and world != null:
+		level_cfg = Data.get_horde_level(world.get_horde_level())
+	var ammo: Dictionary = level_cfg.get("ammo", {})
+	_ammo_infinite = bool(ammo.get("infinite", true))
+	_ammo_counted = request.is_horde() and not _ammo_infinite
+	_reserve_cap_mags = int(ammo.get("reserve_cap_mags", 0)) if _ammo_counted else 0
+	_start_reserve_mags = int(ammo.get("start_reserve_mags", 0)) if _ammo_counted else 0
+	_revive_cfg = level_cfg.get("revive", {})
+	_confine_cfg = level_cfg.get("confine", {})
 
 
 func _resolve_view_distance(request: HuntRequest) -> float:
@@ -213,7 +260,10 @@ func apply_damage(amount: float, source_position: Vector3, knockback_mps: float 
 	_shake = maxf(_shake, final_amount * 0.1)
 	GameEvents.player_damaged.emit(final_amount, source_position, _health)
 	if _health <= 0.0:
-		_die()
+		if _can_go_down():
+			_go_down()
+		else:
+			_die()
 	else:
 		Sfx.play(&"player_hurt")
 
@@ -290,6 +340,8 @@ func net_write_state(out: StreamPeerBuffer) -> void:
 		flags |= NetCodec.HF_SPRINT
 	if _alive:
 		flags |= NetCodec.HF_ALIVE
+	if _downed:
+		flags |= NetCodec.HF_DOWNED
 	if is_reloading():
 		flags |= NetCodec.HF_RELOAD
 	if is_binocular_view() or _items_busy():
@@ -378,7 +430,82 @@ func debug_set_health(hp: float) -> void:
 
 
 func has_infinite_reserve() -> bool:
-	return _request != null and _request.is_horde()
+	return _request != null and _request.is_horde() and _ammo_infinite
+
+
+## True if some weapon's reserve is below mag_size x reserve_cap_mags (counted-ammo horde level only).
+func needs_ammo() -> bool:
+	if not _ammo_counted:
+		return false
+	for weapon: Weapon in _weapons:
+		if weapon.ammo_reserve < _reserve_cap(weapon):
+			return true
+	return false
+
+
+## Ammo crate: every weapon gets mags magazines into its reserve, up to the cap. Returns the rounds added.
+func add_ammo_mags(mags: int) -> int:
+	if not _ammo_counted or mags <= 0:
+		return 0
+	var total: int = 0
+	for weapon: Weapon in _weapons:
+		var added: int = mini(mags * int(weapon.def["mag_size"]), _reserve_cap(weapon) - weapon.ammo_reserve)
+		if added <= 0:
+			continue
+		weapon.ammo_reserve += added
+		total += added
+		weapon.ammo_changed.emit()
+	if total > 0:
+		GameEvents.ammo_picked_up.emit(total)
+		Sfx.play(&"ammo_pickup")
+	return total
+
+
+func _reserve_cap(weapon: Weapon) -> int:
+	return int(weapon.def["mag_size"]) * _reserve_cap_mags
+
+
+func is_downed() -> bool:
+	return _downed
+
+
+## Stands a downed hunter up with that health. No-op unless downed (a bleed-out that won the race stays dead).
+func revive(health: float) -> void:
+	if not _downed:
+		return
+	_downed = false
+	_alive = true
+	_health = clampf(health, 1.0, _max_health)
+	_bleed_left = 0.0
+	_eye_height = _head.position.y          # rises back from the ground at the crouch rate
+	_roll_extra = _camera.rotation.z
+	_heartbeat_t = 0.0
+	_ignore_fire_until_release = true       # a fire button still held must not shoot on the way up
+	_fire_buffer = 0.0
+	_bot_interact_pressed = false           # a press made while down takes no crate on the way up
+	for weapon: Weapon in _weapons:
+		weapon.set_process(true)
+	_switch_left = DRAW_TIME_S
+	_holder.set_weapon_hidden(false)
+	_holder.play_draw(DRAW_TIME_S)
+	Sfx.play(&"revive_done")
+	GameEvents.player_revived.emit(_health)
+
+
+func get_bleed_out_left_s() -> float:
+	return _bleed_left if _downed and _bleed_out_s() > 0.0 else 0.0
+
+
+func get_revive_target_slot() -> int:
+	return _revive_target if _alive else -1
+
+
+func get_revive_progress() -> float:
+	return _revive_progress if _alive else 0.0
+
+
+func get_ammo_crate_target() -> int:
+	return _crate_target if _alive else -1
 
 
 func get_weapon_slot() -> int:
@@ -503,7 +630,7 @@ func apply_touch_look(rel_px: Vector2) -> void:
 
 
 func request_pause() -> void:
-	if _hud != null and _alive and not _bot:
+	if _hud != null and (_alive or _downed) and not _bot:
 		_hud.call("open_pause")
 
 
@@ -512,7 +639,7 @@ func request_pause() -> void:
 # ---------------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
-	if _bot or not _input_open() or not _alive:
+	if _bot or not _input_open() or not (_alive or _downed):
 		return
 	if event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
@@ -530,7 +657,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _can_look() -> bool:
-	return _alive and _input_open() and not _bot
+	return (_alive or _downed) and _input_open() and not _bot
 
 
 func _apply_look(rel_rad: Vector2) -> void:
@@ -549,6 +676,8 @@ func _sensitivity_scale() -> float:
 
 
 func _read_move() -> Vector2:
+	if _downed or _reviving:
+		return Vector2.ZERO
 	if _bot:
 		return _bot_move
 	if not _input_open() or not _alive:
@@ -558,7 +687,7 @@ func _read_move() -> Vector2:
 
 
 func _want_aim() -> bool:
-	if not _alive:
+	if not _alive or _reviving:
 		return false
 	if _bot:
 		return _bot_aim
@@ -579,7 +708,13 @@ func _process(delta: float) -> void:
 	if _death_t >= 0.0:
 		_update_death(delta)
 		return
+	if _downed:
+		_update_downed(delta)
+		_update_web_pause()
+		return
 	_pump_discrete_input(delta)
+	_update_revive(delta)
+	_update_ammo_crate()
 	_update_aim(delta)
 	_update_camera(delta)
 	_update_web_pause()
@@ -601,6 +736,8 @@ func _pump_discrete_input(delta: float) -> void:
 	if fire_down and not _fire_was_down and _fire_allowed_by_input():   # edge detect: robust to event order
 		_fire_buffer = FIRE_BUFFER_S
 	_fire_was_down = fire_down
+	if _reviving:
+		_fire_buffer = 0.0
 	if _fire_buffer > 0.0 and _fire_allowed_by_input() and _try_fire():
 		_fire_buffer = 0.0
 	if Input.is_action_just_pressed(&"reload"):
@@ -617,7 +754,7 @@ func _pump_discrete_input(delta: float) -> void:
 		_select_weapon(4)
 	if Input.is_action_just_pressed(&"weapon_swap"):
 		_select_weapon((_slot + 1) % maxi(_weapons.size(), 1))
-	if _items != null:
+	if _items != null and not _reviving:
 		for item_id: StringName in InputSetup.ITEM_ACTIONS:
 			if Input.is_action_just_pressed(InputSetup.ITEM_ACTIONS[item_id] as StringName):
 				_items.use_item(item_id)
@@ -697,7 +834,8 @@ func _update_camera(delta: float) -> void:
 	_shake = lerpf(_shake, 0.0, 1.0 - exp(-CAMERA_SHAKE_RATE * delta))
 	_head.rotation.x = _pitch + _recoil_pitch
 	_head.rotation.y = _recoil_yaw
-	_camera.rotation.z = deg_to_rad(_shake * CAMERA_ROLL_PER_DEG) * sin(Time.get_ticks_msec() * 0.05)
+	_roll_extra = move_toward(_roll_extra, 0.0, deg_to_rad(DOWNED_ROLL_DEG) / REVIVE_ROLL_RECOVER_S * delta)
+	_camera.rotation.z = deg_to_rad(_shake * CAMERA_ROLL_PER_DEG) * sin(Time.get_ticks_msec() * 0.05) + _roll_extra
 	_camera.position.z = _shake * CAMERA_PUNCH_PER_DEG
 	# Eye height follows the crouch.
 	var stand_h: float = float(_cfg.get("standing_eye_height_m", 1.65))
@@ -721,7 +859,7 @@ func _update_web_pause() -> void:
 	if _bot or not _set_up:
 		return
 	var captured: bool = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	if _was_captured and not captured and _alive and _input_enabled and not InputSetup.is_touch_mode() \
+	if _was_captured and not captured and (_alive or _downed) and _input_enabled and not InputSetup.is_touch_mode() \
 			and not get_tree().paused:
 		request_pause()   # browser released the pointer lock (docs §11)
 	_was_captured = captured
@@ -740,7 +878,7 @@ func _update_heartbeat(delta: float) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and _set_up and not _bot and _alive and _input_enabled:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and _set_up and not _bot and (_alive or _downed) and _input_enabled:
 		request_pause()
 
 
@@ -771,8 +909,41 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y -= _gravity * delta
 	move_and_slide()
+	h = _apply_confine(delta, h)
 	_speed_h = Vector2(h.x, h.z).length()
 	_update_footsteps(delta)
+
+
+## Horde level confinement (N2): after move_and_slide the feet are clamped into world.get_player_bounds() (this also
+## closes the gate, which has no collision). Pushing against the edge asks the HUD for a hint at most every
+## confine.hint_interval_s. Returns the wished velocity without the blocked components.
+func _apply_confine(delta: float, h: Vector3) -> Vector3:
+	_confine_hint_wait = maxf(_confine_hint_wait - delta, 0.0)
+	if _world == null or _request == null or not _request.is_horde():
+		return h
+	var bounds: Rect2 = _world.get_player_bounds()
+	if not bounds.has_area():
+		return h
+	var x: float = clampf(global_position.x, bounds.position.x, bounds.end.x)
+	var z: float = clampf(global_position.z, bounds.position.y, bounds.end.y)
+	var clamped: bool = false
+	if x != global_position.x:
+		velocity.x = 0.0
+		_knock.x = 0.0
+		h.x = 0.0
+		clamped = true
+	if z != global_position.z:
+		velocity.z = 0.0
+		_knock.z = 0.0
+		h.z = 0.0
+		clamped = true
+	if not clamped:
+		return h
+	global_position = Vector3(x, global_position.y, z)
+	if _alive and _confine_hint_wait <= 0.0:
+		_confine_hint_wait = float(_confine_cfg.get("hint_interval_s", 0.0))
+		GameEvents.hud_message_requested.emit(CONFINE_HINT_TEXT, float(_confine_cfg.get("hint_s", 0.0)))
+	return h
 
 
 func _move_frac() -> float:
@@ -804,7 +975,7 @@ func _reset_zoom() -> void:
 
 func _try_fire() -> bool:
 	var w: Weapon = _weapon()
-	if w == null or not _alive or not _input_open() and not _bot:
+	if w == null or not _alive or _reviving or not _input_open() and not _bot:
 		return false
 	if _switch_left > 0.0 or _items_busy() or is_binocular_view():
 		return false
@@ -814,13 +985,13 @@ func _try_fire() -> bool:
 
 func _start_reload() -> void:
 	var w: Weapon = _weapon()
-	if w == null or not _alive or _items_busy() or _switch_left > 0.0:
+	if w == null or not _alive or _reviving or _items_busy() or _switch_left > 0.0:
 		return
 	w.start_reload()
 
 
 func _select_weapon(slot: int) -> void:
-	if slot == _slot or slot < 0 or slot >= _weapons.size() or not _alive or _items_busy():
+	if slot == _slot or slot < 0 or slot >= _weapons.size() or not _alive or _reviving or _items_busy():
 		return
 	_weapon().holster()
 	_holder.stop_reload()
@@ -899,12 +1070,159 @@ func _on_binoculars_changed(active: bool) -> void:
 # Death and end of hunt
 # ---------------------------------------------------------------------------
 
-func _die() -> void:
+## Horde level with revive (N4): health 0 goes down instead of dying when revive is enabled and the hunt has at least
+## two hunters. A one-hunter room dies as before (nobody could revive).
+func _can_go_down() -> bool:
+	return _request != null and _request.is_horde() and bool(_revive_cfg.get("enabled", false)) \
+		and _world != null and _world.get_hunters().size() >= 2
+
+
+func _bleed_out_s() -> float:
+	return float(_revive_cfg.get("bleed_out_s", 0.0))
+
+
+func _go_down() -> void:
 	if not _alive:
 		return
 	_alive = false
+	_downed = true
+	_down_t = 0.0
+	_down_from_eye = _head.position.y
+	_bleed_left = _bleed_out_s()
+	_crouching = false
+	_sprinting = false
+	_ads_t = 0.0
+	_recoil_pitch = 0.0
+	_recoil_yaw = 0.0
+	_fire_buffer = 0.0
+	_reset_revive()
+	if _aim_active:
+		_aim_active = false
+		aim_changed.emit(false)
+	if _items != null:
+		_items.cancel_use()
+		_items.set_binoculars(false)
+	var w: Weapon = _weapon()
+	if w != null:
+		w.holster()
+	for weapon: Weapon in _weapons:
+		weapon.set_process(false)   # no auto reload while down
+	_holder.stop_reload()
+	_holder.set_weapon_hidden(true)
+	if _thermal_emitted:
+		_thermal_emitted = false
+		GameEvents.thermal_vision_changed.emit(false)
+	InputSetup.release_all_actions()
+	Sfx.play(&"player_death")
+	GameEvents.player_downed.emit(_bleed_left)
+
+
+## Down: camera on the ground, can look and pause; bleeds out after revive.bleed_out_s (0 = never).
+func _update_downed(delta: float) -> void:
+	_down_t = minf(_down_t + delta, DOWNED_FALL_S)
+	var t: float = smoothstep(0.0, 1.0, _down_t / DOWNED_FALL_S)
+	_head.position.y = lerpf(_down_from_eye, DOWNED_EYE_HEIGHT_M, t)
+	_head.rotation = Vector3(_pitch, 0.0, 0.0)
+	_camera.rotation.z = deg_to_rad(DOWNED_ROLL_DEG) * t
+	_camera.position.z = 0.0
+	_camera.fov = lerpf(_camera.fov, float(_cfg.get("base_fov_deg", 75.0)), t)
+	if _hunt_over or _bleed_out_s() <= 0.0:
+		return
+	_bleed_left = maxf(_bleed_left - delta, 0.0)
+	if _bleed_left <= 0.0:
+		_die()
+
+
+## Reviving a downed ally (N4): nearest downed hunter within revive.radius_m (XZ); holding interact fills the
+## progress over revive.hold_s, then world.request_revive(slot) and that slot is ignored for revive.retry_s.
+func _update_revive(delta: float) -> void:
+	for s: int in _revive_retry.keys():
+		var left: float = float(_revive_retry[s]) - delta
+		if left <= 0.0:
+			_revive_retry.erase(s)
+		else:
+			_revive_retry[s] = left
+	var target: int = _find_revive_target()
+	var held: bool = _interact_held()
+	if target != _revive_target or not held or target < 0:
+		_revive_progress = 0.0
+	_revive_target = target
+	_reviving = held and target >= 0
+	if not _reviving:
+		return
+	_revive_progress += delta / maxf(float(_revive_cfg.get("hold_s", 0.0)), 0.001)
+	if _revive_progress < 1.0:
+		return
+	_revive_progress = 0.0
+	_reviving = false
+	_revive_retry[target] = float(_revive_cfg.get("retry_s", 0.0))
+	_world.request_revive(target)
+
+
+func _find_revive_target() -> int:
+	if not _alive or _world == null or not bool(_revive_cfg.get("enabled", false)):
+		return -1
+	var radius: float = float(_revive_cfg.get("radius_m", 0.0))
+	var best: int = -1
+	var best_d2: float = radius * radius
+	for hunter: PlayerBase in _world.get_hunters():
+		if hunter == self or not is_instance_valid(hunter) or not hunter.is_downed() or _revive_retry.has(hunter.slot):
+			continue
+		var d2: float = Vector2(hunter.global_position.x - global_position.x,
+			hunter.global_position.z - global_position.z).length_squared()
+		if d2 <= best_d2 and (best < 0 or d2 < best_d2):
+			best = hunter.slot
+			best_d2 = d2
+	return best
+
+
+## Ammo crate (owner's Q4: taken with a button): with no revive target, a press of interact (edge, not a hold) next to
+## an available crate while some weapon is below its cap asks world.request_ammo_crate(crate). The world validates.
+func _update_ammo_crate() -> void:
+	var held: bool = _interact_held()
+	var pressed: bool = held and not _interact_was_held
+	if _bot:
+		pressed = pressed or _bot_interact_pressed
+	elif _input_open() and Input.is_action_just_pressed(&"interact"):
+		pressed = true   # a tap pressed and released inside one frame
+	_bot_interact_pressed = false
+	_interact_was_held = held
+	_crate_target = _find_ammo_crate_target()
+	if pressed and _crate_target >= 0:
+		_world.request_ammo_crate(_crate_target)
+
+
+func _find_ammo_crate_target() -> int:
+	if not _alive or _world == null or _revive_target >= 0 or not needs_ammo():
+		return -1
+	return _world.get_ammo_crate_in_reach(global_position)
+
+
+func _interact_held() -> bool:
+	if _bot:
+		return _bot_interact
+	return _input_open() and Input.is_action_pressed(&"interact")
+
+
+func _reset_revive() -> void:
+	_revive_target = -1
+	_revive_progress = 0.0
+	_reviving = false
+	_crate_target = -1
+
+
+func _die() -> void:
+	if _death_t >= 0.0:
+		return
+	var was_downed: bool = _downed
+	_alive = false
+	_downed = false
+	_bleed_left = 0.0
 	_input_enabled = false
 	_death_t = 0.0
+	_death_roll_from = _camera.rotation.z if was_downed else 0.0
+	_eye_height = _head.position.y
+	_reset_revive()
 	_crouching = false
 	_ads_t = 0.0
 	if _items != null:
@@ -945,11 +1263,12 @@ func _update_death(delta: float) -> void:
 	_death_t = minf(_death_t + delta, DEATH_FALL_S)
 	var t: float = smoothstep(0.0, 1.0, _death_t / DEATH_FALL_S)
 	_head.position.y = lerpf(_eye_height, DEATH_EYE_HEIGHT_M, t)
-	_camera.rotation.z = deg_to_rad(DEATH_ROLL_DEG) * t
+	_camera.rotation.z = lerpf(_death_roll_from, deg_to_rad(DEATH_ROLL_DEG), t)
 	_camera.fov = lerpf(_camera.fov, float(_cfg.get("base_fov_deg", 75.0)), t)
 
 
 func _on_hunt_ended(_result: HuntResult) -> void:
+	_hunt_over = true   # a downed hunter stops bleeding out: no death after the result
 	set_input_enabled(false)
 	_aim_active = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -968,6 +1287,8 @@ func bot_set_enabled(enabled: bool) -> void:
 		_bot_move = Vector2.ZERO
 		_bot_sprint = false
 		_bot_aim = false
+		_bot_interact = false
+		_bot_interact_pressed = false
 
 
 func bot_set_move(direction: Vector2, sprint: bool) -> void:
@@ -1013,4 +1334,12 @@ func bot_use_item(item_id: StringName) -> bool:
 
 
 func bot_dog_command() -> void:
+	if _downed:
+		return
 	GameEvents.dog_command_requested.emit()
+
+
+func bot_set_interact(held: bool) -> void:
+	if held and not _bot_interact:
+		_bot_interact_pressed = true
+	_bot_interact = held

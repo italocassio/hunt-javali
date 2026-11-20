@@ -24,6 +24,8 @@ extends Node
 ##                     scoreboard on both, away/back on the host, VICTORY on both
 ##   relay_horde       net_e2e --horde (docs/horda.md 9.1): the host picks "Horda Javali" in the room; the client sees the
 ##                     mode in its lobby before L_START and both HuntRequests come out horde / mato_grosso / contract 0
+##   relay_horde2     net_e2e --level2 (docs/plano_horda_nivel2.md 4.8): the host picks horde mode AND level 2 in the room; the
+##                     client sees the level in its lobby (L_LOBBY) and both HuntRequests come out horde_level 2
 ##   horde             net_hunt_e2e --scenario=horde (docs/horda.md 14): 8 waves with two players over the relay -> VICTORY
 ##                     on both, result.mode == horde on both, kills add up to the planned total
 ## Without Bun (PATH, $BUN, ~/.bun/bin or -- --bun=<path>) every selected scenario is reported as SKIP, explicitly.
@@ -62,6 +64,7 @@ const SCENARIOS: Array[Dictionary] = [
 	{"name": "dogs", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=dogs"], "limit_s": 200.0},
 	{"name": "rejoin", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=rejoin"], "limit_s": 150.0},
 	{"name": "relay_horde", "group": "relay", "scene": E2E_SCENE, "args": ["--horde"], "limit_s": 60.0},
+	{"name": "relay_horde2", "group": "relay", "scene": E2E_SCENE, "args": ["--level2"], "limit_s": 60.0},
 	{"name": "horde", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=horde"], "limit_s": 400.0},
 ]
 

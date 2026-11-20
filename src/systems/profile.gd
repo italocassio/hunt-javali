@@ -245,19 +245,20 @@ func contract_bonus(map_id: StringName, contract_index: int, crop_health_pct: fl
 	return RewardCalculator.contract_bonus(_contract(map_id, contract_index), crop_health_pct)
 
 
-## Horde mode prize per kill (docs/horda.md §10.1): same formula, scaled by horde.kill_reward_mult.
-func horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool) -> int:
+## Horde mode prize per kill (docs/horda.md §10.1): same formula, scaled by the level's kill_reward_mult.
+## 0 when the level does not exist.
+func horde_kill_reward(type_id: StringName, weight_kg: float, killing_zone: StringName, one_shot: bool, level: int = 1) -> int:
 	if not Data.get_boar_type_ids().has(type_id):
 		return 0
-	var horde: Dictionary = Data.get_horde()
+	var horde: Dictionary = Data.get_horde_level(level)
 	if horde.is_empty():
 		return 0
 	return RewardCalculator.kill_reward(Data.get_boar_type(type_id), Data.get_boar_rules(), weight_kg, killing_zone, one_shot, {"reward_mult": float(horde.get("kill_reward_mult", 0.0))})
 
 
-## Horde victory bonus: horde.victory_bonus_money scaled by the preserved corn stock (%).
-func horde_bonus(stock_pct: float) -> int:
-	var horde: Dictionary = Data.get_horde()
+## Horde victory bonus: the level's victory_bonus_money scaled by the preserved corn stock (%).
+func horde_bonus(stock_pct: float, level: int = 1) -> int:
+	var horde: Dictionary = Data.get_horde_level(level)
 	if horde.is_empty():
 		return 0
 	return RewardCalculator.contract_bonus({"bonus_money": float(horde.get("victory_bonus_money", 0))}, stock_pct)

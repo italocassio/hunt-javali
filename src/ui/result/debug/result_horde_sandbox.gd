@@ -27,6 +27,7 @@ func _run() -> void:
 	var saved_result: HuntResult = Router.last_result
 	for outcome: int in EXPECTED_TITLES:
 		await _check_horde(outcome)
+	await _check_level_2()
 	await _check_contract_unchanged()
 	Router.last_result = saved_result
 	for path: String in [SAVE_PATH, SAVE_PATH.replace(".json", ".bak.json")]:
@@ -102,7 +103,7 @@ func _check_horde(outcome: int) -> void:
 	_ok(text.contains("Ondas vencidas") and text.contains(expected_waves), "%s Ondas vencidas: %s" % [tag, expected_waves])
 	_ok(text.contains("Celeiro preservado") and not text.contains("Lavoura preservada"), "%s Celeiro preservado" % tag)
 	_ok(text.contains("Bônus de defesa") and not text.contains("Bônus do contrato"), "%s Bônus de defesa" % tag)
-	_ok(text.contains("Horda Javali  |  "), "%s cabecalho Horda Javali  |  mapa" % tag)
+	_ok(text.contains("Horda Javali · Nível 1  |  "), "%s cabecalho Horda Javali · Nível 1  |  mapa" % tag)
 	_ok(text.contains("Abates: 3") and not text.contains(" de 20 javalis"), "%s abates sem 'de N'" % tag)
 	_ok(not text.contains("Próximo contrato liberado") and not text.contains("ainda não estava liberado"), "%s sem meta de proximo contrato" % tag)
 	var retry: Button = screen.get_node_or_null("%RetryButton") as Button
@@ -113,6 +114,19 @@ func _check_horde(outcome: int) -> void:
 		_ok(text.contains("Celeiro em 87% de "), "%s Celeiro em 87%% de ..." % tag)
 	elif outcome != HuntResult.Outcome.DISCONNECTED:
 		_ok(text.contains("Só na vitória (até "), "%s Só na vitória (até ...)" % tag)
+	screen.queue_free()
+	await get_tree().process_frame
+
+
+func _check_level_2() -> void:
+	var r: HuntResult = _make_result(HuntResult.Outcome.VICTORY, true)
+	r.horde_level = 2
+	var screen: Control = await _screen(r)
+	var text: String = _joined(screen)
+	_ok(text.contains("Horda Javali · Nível 2  |  "), "nivel 2: cabecalho Horda Javali · Nível 2")
+	var max_text: String = UiKit.money_text(Profile.horde_bonus(100.0, 2))
+	_ok(text.contains("Celeiro em 87% de " + max_text), "nivel 2: bonus maximo %s" % max_text)
+	_ok(Profile.horde_bonus(100.0, 2) > Profile.horde_bonus(100.0, 1), "nivel 2: bonus maior que o do nivel 1")
 	screen.queue_free()
 	await get_tree().process_frame
 

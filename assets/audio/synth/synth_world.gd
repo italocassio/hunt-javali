@@ -4,7 +4,8 @@ extends RefCounted
 ## see Sfx). Loops are built lazily (LAZY_IDS).
 
 ## Synthesized on first use (loops and the horde stings), never at startup.
-const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop", &"horde_wave_start", &"horde_wave_clear"]
+const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop", &"horde_wave_start", &"horde_wave_clear",
+	&"ammo_pickup", &"revive_done"]
 ## Ids written by build().
 const IDS: Array[StringName] = [&"bait_drop", &"victory_sting", &"defeat_sting", &"ui_click", &"ui_buy",
 	&"ui_error", &"ui_coin"]
@@ -26,6 +27,8 @@ static func build_lazy(id: StringName) -> AudioStreamWAV:
 		&"amb_wind_loop": return _wind()
 		&"horde_wave_start": return _horde_wave_start()
 		&"horde_wave_clear": return _horde_wave_clear()
+		&"ammo_pickup": return _ammo_pickup()
+		&"revive_done": return _revive_done()
 	return null
 
 
@@ -36,6 +39,31 @@ static func _bait() -> AudioStreamWAV:
 	for i in 5:
 		SynthDsp.noise(b, 0.1 + i * 0.05, 0.03, 0.5, 0.01, 0.7, 0.2, 0.001)
 	return SynthDsp.to_stream(b, 0.65)
+
+
+## Ammo crate pickup, ~0.4 s: wooden lid knock, then a few brass cartridges rattling and settling.
+static func _ammo_pickup() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.42)
+	SynthDsp.noise(b, 0.0, 0.07, 0.7, 0.02, 0.35, 0.05, 0.001)
+	SynthDsp.tone(b, 0.0, 0.1, 180.0, 110.0, 0.6, 0.04, SynthDsp.SHAPE_SINE, 0.002)
+	var times: Array[float] = [0.09, 0.14, 0.18, 0.235, 0.27, 0.32]
+	for i: int in times.size():
+		var f: float = 2600.0 + float(i % 3) * 520.0
+		SynthDsp.tone(b, times[i], 0.07, f, f * 0.93, 0.28, 0.02, SynthDsp.SHAPE_TRI, 0.001)
+		SynthDsp.noise(b, times[i], 0.02, 0.3, 0.008, 0.9, 0.6, 0.001)
+	return SynthDsp.to_stream(b, 0.65)
+
+
+## Revive finished, ~0.8 s: a short relieved breath and two soft rising notes.
+static func _revive_done() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.85)
+	SynthDsp.noise(b, 0.0, 0.3, 0.18, 0.12, 0.3, 0.0, 0.08)
+	var notes: Array[float] = [-5.0, 0.0, 4.0]
+	for i: int in notes.size():
+		var f: float = SynthDsp.note(notes[i])
+		SynthDsp.tone(b, 0.12 + float(i) * 0.15, 0.5, f, f, 0.38, 0.22, SynthDsp.SHAPE_TRI, 0.01)
+		SynthDsp.tone(b, 0.12 + float(i) * 0.15, 0.4, f * 2.0, f * 2.0, 0.1, 0.15, SynthDsp.SHAPE_SINE, 0.01)
+	return SynthDsp.to_stream(b, 0.6)
 
 
 static func _chord(b: PackedFloat32Array, t: float, notes: Array, dur: float, amp: float, shape: int) -> void:

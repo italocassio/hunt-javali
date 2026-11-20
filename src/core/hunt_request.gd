@@ -12,13 +12,15 @@ var quality: StringName = &""                         # &"" = resolve from setti
 var rng_seed: int = 0                                 # 0 = randomize
 var player_count: int = 1
 var mode: StringName = &"contract"                    # Ids.MODE_CONTRACT | Ids.MODE_HORDE (docs/horda.md)
+var horde_level: int = 1                              ## Horde level (1-based); only read in horde mode
 
 
-static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0, p_mode: StringName = &"contract") -> HuntRequest:
+static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0, p_mode: StringName = &"contract", p_horde_level: int = 1) -> HuntRequest:
 	var r: HuntRequest = HuntRequest.new()
 	r.map_id = p_map_id
 	r.contract_index = p_contract_index
 	r.mode = p_mode
+	r.horde_level = p_horde_level
 	return r
 
 

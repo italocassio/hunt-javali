@@ -363,6 +363,59 @@ func test_horde_economy_vectors() -> void:
 	ok(Profile.horde_kill_reward(&"boar", -40.0, &"vital", true) >= 0, "peso negativo nunca paga negativo")
 
 
+func test_horde_level2_economy_vectors() -> void:
+	## docs/plano_horda_nivel2.md 3: level 2 pays half the kill prize (kill_reward_mult 0.5) and a bigger bonus.
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true, 2), 309, "nivel 2: macho 132 kg, vital, um tiro = R$ 309")
+	eq(Profile.horde_bonus(87.0, 2), 4350, "nivel 2: bonus com 87% = R$ 4350")
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true, 1), 217, "nivel 1 explicito = R$ 217")
+	eq(Profile.horde_bonus(87.0, 1), 2610, "nivel 1 explicito = R$ 2610")
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true), 217, "sem o parametro = nivel 1 (chamadas de hoje nao mudam)")
+	eq(Profile.horde_bonus(87.0), 2610, "sem o parametro = nivel 1")
+	eq(Profile.horde_bonus(100.0, 2), 5000, "nivel 2: 100% = bonus cheio")
+	eq(Profile.horde_bonus(0.0, 2), 0, "nivel 2: 0% = nada")
+	eq(Profile.horde_bonus(-5.0, 2), 0, "nivel 2: negativo = nada")
+	eq(Profile.horde_bonus(300.0, 2), 5000, "nivel 2: satura em 100%")
+	eq(Profile.horde_kill_reward(&"nao_existe", 100.0, &"vital", true, 2), 0, "nivel 2: tipo desconhecido = 0")
+	eq(Profile.horde_kill_reward(&"boar", 0.0, &"vital", true, 2), 0, "nivel 2: peso 0 = 0")
+	ok(Profile.horde_kill_reward(&"boar", -40.0, &"vital", true, 2) >= 0, "nivel 2: peso negativo nunca paga negativo")
+	# levels that do not exist pay nothing (and do not crash)
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true, 0), 0, "nivel 0 = 0")
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true, 3), 0, "nivel 3 = 0")
+	eq(Profile.horde_kill_reward(&"boar", 132.0, &"vital", true, -1), 0, "nivel negativo = 0")
+	eq(Profile.horde_bonus(87.0, 0), 0, "bonus do nivel 0 = 0")
+	eq(Profile.horde_bonus(87.0, 3), 0, "bonus do nivel 3 = 0")
+	for type_id: StringName in Data.get_boar_type_ids():
+		var w: float = float(Data.get_boar_type(type_id)["weight_max_kg"])
+		var l1: int = Profile.horde_kill_reward(type_id, w, Ids.ZONE_VITAL, true, 1)
+		var l2: int = Profile.horde_kill_reward(type_id, w, Ids.ZONE_VITAL, true, 2)
+		# kill_reward_mult: 0.35 (level 1) -> 0.5 (level 2); the bonus and the multiplier are the level's own
+		ok(l2 > l1, "%s: o abate do nivel 2 paga mais que o do nivel 1 (kill_reward_mult 0,5 contra 0,35): %d > %d" % [type_id, l2, l1])
+		near(float(l2) / float(l1), 0.5 / 0.35, 0.05, "%s: razao entre os niveis acompanha kill_reward_mult" % type_id)
+
+
+func test_horde_level2_victory_credits_once_and_never_progresses() -> void:
+	fresh_profile()
+	var before_unlocked: int = Profile.get_unlocked_contract_count(&"mato_grosso")
+	var r: HuntResult = HuntResult.new()
+	r.outcome = HuntResult.Outcome.VICTORY
+	r.mode = Ids.MODE_HORDE
+	r.horde_level = 2
+	r.map_id = &"mato_grosso"
+	r.counts_for_progression = false
+	r.horde_wave_count = 8
+	r.horde_waves_cleared = 8
+	r.money_from_kills = 309
+	r.contract_bonus = Profile.horde_bonus(87.0, 2)
+	r.total_money = r.money_from_kills + r.contract_bonus
+	var money0: int = Profile.get_money()
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 309 + 4350, "nivel 2: credita abates + bonus")
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_money(), money0 + 309 + 4350, "o mesmo resultado nao paga duas vezes")
+	eq(Profile.get_unlocked_contract_count(&"mato_grosso"), before_unlocked, "horda nivel 2 nao libera contratos")
+	eq(int(Profile.get_stats()["hunts_won"]), 1, "vitoria em horda nivel 2 conta em hunts_won")
+
+
 func test_horde_kill_reward_is_a_fraction_of_the_contract_reward() -> void:
 	## Contract-0 reward uses reward_mult; the horde multiplies by kill_reward_mult < 1: never pays more than a
 	## contract kill at reward_mult 1 and scales like the same formula.

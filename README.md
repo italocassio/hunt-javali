@@ -37,6 +37,25 @@ tools/godot.sh --headless --path . --export-release "Windows Desktop" build/wind
 # Linux (x86_64)
 mkdir -p build/linux
 tools/godot.sh --headless --path . --export-release "Linux" build/linux/CacadaAoJavali.x86_64
+
+# Android (APK arm64, assinado com a chave de debug; instala por cabo ou copiando o arquivo)
+mkdir -p build/android
+tools/godot.sh --headless --path . --export-debug "Android" build/android/CacadaAoJavali.apk
+```
+
+Android exige, além dos export templates: JDK 17, Android SDK (`platform-tools` e `build-tools;35.0.1`),
+e a keystore de debug do Godot em `%APPDATA%\Godot\keystores\debug.keystore`. Em Editor → Configurações do Editor →
+Exportar → Android, aponte o caminho do JDK e do SDK. Para instalar com o celular plugado (Depuração USB ligada):
+
+```bash
+adb install -r build/android/CacadaAoJavali.apk
+```
+
+No PowerShell (o Windows não executa `.sh`), a mesma exportação é:
+
+```powershell
+New-Item -ItemType Directory -Force build\android
+tools\godot.ps1 --headless --path . --export-debug "Android" build\android\CacadaAoJavali.apk
 ```
 
 As predefinições de exportação estão em `export_presets.cfg`. A pasta `build/` não é versionada.

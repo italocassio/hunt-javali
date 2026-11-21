@@ -3,6 +3,15 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.2 — 21/11/2026
+
+**iPhone: tela cortada e aparelho quente.**
+- Jogo salvo na tela inicial do iPhone: ao girar o celular de em pé para deitado, a tela não fica mais com uma faixa
+  preta em cima empurrando o jogo para baixo. Apague o ícone e adicione de novo para valer.
+- Nova opção nas configurações: "Economia de bateria (30 fps)". Vem ligada no celular e desligada no computador.
+  Limita o jogo a 30 quadros por segundo, o que esquenta bem menos o aparelho.
+- Os menus usam menos resolução em telas muito densas (como a do iPhone), sem perder nitidez visível.
+
 ## 0.9.1 — 20/11/2026
 
 **Celular: botões no lugar do PUBG.** No computador nada muda.

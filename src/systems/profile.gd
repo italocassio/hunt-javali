@@ -20,6 +20,24 @@ var _flush_pending: bool = false
 
 func _ready() -> void:
 	load_or_create()
+	GameEvents.settings_changed.connect(_on_power_setting_changed)
+	GameEvents.touch_mode_changed.connect(_on_power_touch_mode_changed)
+	# InputSetup is registered after Profile: its touch mode is only resolved once every autoload is ready.
+	_apply_power.call_deferred()
+	PowerManager.apply_menu_pixel_ratio(Data.get_game().get("power", {}))
+
+
+func _apply_power() -> void:
+	PowerManager.apply(_settings.get("battery_saver", "auto"), InputSetup.is_touch_mode(), Data.get_game().get("power", {}))
+
+
+func _on_power_setting_changed(key: String, _value: Variant) -> void:
+	if key == "battery_saver" or key == "touch_controls":
+		_apply_power()
+
+
+func _on_power_touch_mode_changed(_is_touch: bool) -> void:
+	_apply_power()
 
 
 func _notification(what: int) -> void:

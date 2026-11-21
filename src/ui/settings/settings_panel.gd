@@ -60,6 +60,7 @@ func _ready() -> void:
 	list.add_child(_option_row("touch_controls", "Controles de toque", TOUCH_OPTIONS, ""))
 	list.add_child(_check_row("invert_y", "Inverter o eixo vertical da mira"))
 	list.add_child(_check_row("show_fps", "Mostrar quadros por segundo"))
+	list.add_child(_battery_row())
 
 	if show_close_button:
 		var close: Button = UiKit.button("Fechar", "PrimaryButton", 72)
@@ -127,11 +128,11 @@ func _option_row(key: String, title: String, options: Array[Dictionary], note: S
 	return card
 
 
-func _check_row(key: String, title: String) -> Control:
+func _check_row(key: String, title: String, initial: Variant = null, on_toggled: Callable = Callable()) -> Control:
 	var check: CheckButton = CheckButton.new()
 	check.text = title
 	check.custom_minimum_size = Vector2(0, UiKit.MIN_TOUCH_PX)
-	check.button_pressed = bool(Profile.get_setting(key))
+	check.button_pressed = bool(Profile.get_setting(key)) if initial == null else bool(initial)
 	check.name = "Check_%s" % key
 	if not UiKit.has_global_theme():
 		check.add_theme_font_size_override("font_size", 22)
@@ -140,10 +141,21 @@ func _check_row(key: String, title: String) -> Control:
 	var empty: StyleBoxEmpty = StyleBoxEmpty.new()
 	for style: String in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
 		check.add_theme_stylebox_override(style, empty)
-	check.toggled.connect(func(on: bool) -> void: Profile.set_setting(key, on))
+	if on_toggled.is_valid():
+		check.toggled.connect(on_toggled)
+	else:
+		check.toggled.connect(func(on: bool) -> void: Profile.set_setting(key, on))
 	var card: PanelContainer = UiKit.card()
 	card.add_child(check)
 	return card
+
+
+## Battery saver: shows the resolved state ("auto" follows the touch mode); a change stores an explicit "on"/"off".
+func _battery_row() -> Control:
+	var fps: int = int(Data.get_game().get("power", {}).get("battery_saver_fps", 0))
+	var resolved: bool = PowerManager.resolve_battery_saver(Profile.get_setting("battery_saver"), InputSetup.is_touch_mode())
+	return _check_row("battery_saver", "Economia de bateria (%d fps)" % fps, resolved,
+		func(on: bool) -> void: Profile.set_setting("battery_saver", "on" if on else "off"))
 
 
 func _format_value(value: float, kind: String) -> String:

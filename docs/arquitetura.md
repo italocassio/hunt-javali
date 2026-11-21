@@ -2597,11 +2597,16 @@ Esquema (versão 2):
     "player_name": ""
   }
 }
+    "battery_saver": "auto",
 ```
 `best_crop_pct[i] = -1` = nunca vencido; `is_contract_completed` = `>= 0`. `items` guarda quantidade de
 consumíveis e `1` para passivos/ativos possuídos. Settings: `mouse_sensitivity`/`touch_sensitivity` 0,1–3,0
 (multiplicam `player.mouse_deg_per_px`/`touch_deg_per_px`); volumes 0–1; `quality` ∈ `auto|low|medium|high`;
-`touch_controls` ∈ `auto|on|off`; `player_name` String (até `net.name_max_chars`, sem caracteres de controle;
+`touch_controls` ∈ `auto|on|off`; `battery_saver` ∈ `auto|on|off` (`auto` = ligado em modo toque; ligado fixa
+`Engine.max_fps = game.json power.battery_saver_fps`, desligado = 0). Quem aplica é `Profile` via `PowerManager`
+(`src/systems/power_manager.gd`): no boot, em `settings_changed` e em `touch_mode_changed`. Só na Web, os menus
+limitam `devicePixelRatio` a `power.menu_max_pixel_ratio` pelo mesmo `window.__huntMaxDpr` da caçada (que lê o valor
+anterior e o restaura ao sair); `player_name` String (até `net.name_max_chars`, sem caracteres de controle;
 vazio aparece como "Caçador N", N = slot + 1). A versão do save continua 2: save antigo ganha
 `player_name = ""` pelo `sanitize`. Nada de sala, código ou resultado pendente é gravado.
 

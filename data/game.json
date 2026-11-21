@@ -91,6 +91,7 @@
     "fade_in_s": 1.5,
     "fade_out_s": 1.0
   },
+  "power": {"battery_saver_fps": 30, "menu_max_pixel_ratio": 2.0},
   "loadout": {"weapon_slots": 2, "item_slots": 3},
   "shop": {"max_consumable_owned": 9},
   "onboarding": {

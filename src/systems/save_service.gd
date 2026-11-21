@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: Dictionary = {
 	"quality": "auto",
 	"touch_controls": "auto",
 	"show_fps": false,
+	"battery_saver": "auto",
 	"player_name": "",
 }
 const DEFAULT_NAME_MAX_CHARS: int = 12   # fallback only when data/net.json failed to load
@@ -232,7 +233,7 @@ static func sanitize_setting(key: String, value: Variant) -> Variant:
 		"quality":
 			if value is String and QUALITY_VALUES.has(value):
 				return value
-		"touch_controls":
+		"touch_controls", "battery_saver":
 			if value is String and TOUCH_VALUES.has(value):
 				return value
 		"invert_y", "show_fps":

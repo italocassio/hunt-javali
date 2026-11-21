@@ -14,18 +14,7 @@ const AMBIENCE_DB: float = -6.0
 ## Web only: caps window.devicePixelRatio while hunting (preset "max_pixel_ratio"). Godot Web sizes the canvas from it
 ## every loop iteration, so this is cheaper than scaling_3d_scale (which adds a fixed intermediate target + blit).
 ## The getter is installed once and keeps the browser's real value; window.__huntMaxDpr <= 0 means no cap.
-const JS_DPR_CAP_INSTALL: String = """
-(function () {
-	if (window.__huntDprInstalled) { return; }
-	var d = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
-	var real = function () { return (d && d.get) ? d.get.call(window) : (d ? d.value : 1); };
-	Object.defineProperty(window, 'devicePixelRatio', {
-		configurable: true, enumerable: true,
-		get: function () { var m = window.__huntMaxDpr; return (m > 0) ? Math.min(real(), m) : real(); }
-	});
-	window.__huntDprInstalled = true;
-})();
-"""
+const JS_DPR_CAP_INSTALL: String = PowerManager.JS_DPR_CAP_INSTALL
 const JS_DPR_CAP_READ: String = "(window.__huntMaxDpr > 0) ? window.__huntMaxDpr : 0"
 const MSG_GROUP: String = "Uma vara saiu da mata!"
 const MSG_LONER: String = "Um javali solitário saiu da mata!"

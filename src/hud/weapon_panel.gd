@@ -4,6 +4,9 @@ extends VBoxContainer
 ## magazine and reserve counts, the reload bar and, with two weapons or more, a row of chips (one per carried weapon,
 ## with the key of its slot on keyboard/mouse). Pure display: the Hud feeds it every frame, nothing here reads the
 ## player, and nothing is clickable.
+## Touch (HF7): the same panel shows weapon cards instead (portrait, name, "10 | 50", amber border and reload bar on the
+## weapon in hand, the other one dimmed). The cards are still only drawn here; the taps are handled by TouchControls
+## from the rectangles the Hud gives it.
 
 const CONTENT_W_PX: float = 224.0
 const SEPARATION_PX: int = 4
@@ -35,6 +38,25 @@ const COLOR_CHIP_BG: Color = Color(0.0, 0.0, 0.0, 0.35)
 const COLOR_KEY_BG: Color = Color(0.0, 0.0, 0.0, 0.7)
 const COLOR_OUTLINE: Color = Color(0.0, 0.0, 0.0, 0.9)
 const COLOR_BAR_BG: Color = Color(0.0, 0.0, 0.0, 0.55)
+## Touch cards (HF7).
+const CARD_H_PX: float = 55.0
+const CARD_W_DEFAULT_PX: float = 167.0
+const CARD_GAP_PX: int = 8
+const CARD_PAD_PX: float = 6.0
+const CARD_PORTRAIT_FRAC: float = 0.36        # of the card width; the picture is 2:1
+const CARD_TEXT_GAP_PX: float = 6.0
+const CARD_NAME_FONT_PX: int = 13
+const CARD_MAG_FONT_PX: int = 24
+const CARD_RESERVE_FONT_PX: int = 15
+const CARD_NAME_BASELINE_PX: float = 17.0
+const CARD_AMMO_BASELINE_PX: float = 41.0
+const CARD_RESERVE_GAP_PX: float = 4.0
+const CARD_RELOAD_H_PX: float = 4.0
+const CARD_RELOAD_BOTTOM_PX: float = 4.0
+const CARD_RADIUS_PX: int = 8
+const CARD_OUTLINE_PX: int = 4
+const CARD_MAX_SHOWN: int = 2
+const COLOR_CARD_BG: Color = Color(0.12, 0.10, 0.086, 0.72)
 
 
 ## One weapon chip of the row. Children: Portrait, Key. The border of the active one is drawn here.
@@ -82,6 +104,84 @@ class Chip extends Control:
 		_style.set_border_width_all(border)
 		draw_style_box(_style, Rect2(Vector2.ZERO, size))
 
+## One weapon card of the touch layout, everything drawn in `_draw` (no child nodes). Border of the weapon in hand in
+## amber; the others are dimmed through `modulate`.
+class Card extends Control:
+	var weapon_index: int = -1
+	var portrait: Texture2D = null
+	var name_text: String = ""
+	var mag_text: String = ""
+	var reserve_text: String = ""
+	var ammo_low: bool = false
+	var active: bool = false
+	var reload: float = -1.0          # 0-1 while reloading (weapon in hand only), -1 = none
+	var _style: StyleBoxFlat = StyleBoxFlat.new()
+	var _name_shown: String = ""
+	var _name_for_width: float = -1.0
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		_style.bg_color = WeaponPanel.COLOR_CARD_BG
+		_style.set_corner_radius_all(WeaponPanel.CARD_RADIUS_PX)
+		_style.border_color = WeaponPanel.COLOR_AMBER
+
+	func set_active(on: bool) -> void:
+		active = on
+		modulate.a = 1.0 if on else WeaponPanel.INACTIVE_ALPHA
+		queue_redraw()
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_RESIZED:
+			_name_for_width = -1.0
+			queue_redraw()
+
+	func _draw() -> void:
+		var font: Font = get_theme_font(&"font", &"HudBigLabel")
+		_style.set_border_width_all(int(WeaponPanel.CHIP_BORDER_PX) if active else 0)
+		draw_style_box(_style, Rect2(Vector2.ZERO, size))
+		var pad: float = WeaponPanel.CARD_PAD_PX
+		var art_w: float = size.x * WeaponPanel.CARD_PORTRAIT_FRAC
+		if portrait != null:
+			var box: Rect2 = Rect2(Vector2(pad, 0.0), Vector2(art_w, size.y))
+			var tex_size: Vector2 = portrait.get_size()
+			var fit: float = minf(box.size.x / tex_size.x, (size.y - 2.0 * pad) / tex_size.y)
+			var fitted: Vector2 = tex_size * fit
+			draw_texture_rect(portrait, Rect2(box.position + (box.size - fitted) * 0.5, fitted), false)
+		var text_x: float = pad + art_w + WeaponPanel.CARD_TEXT_GAP_PX
+		var text_w: float = size.x - text_x - pad
+		if _name_for_width != text_w:
+			_name_for_width = text_w
+			_name_shown = _trim(font, name_text, text_w)
+		_text(font, _name_shown, Vector2(text_x, WeaponPanel.CARD_NAME_BASELINE_PX), WeaponPanel.CARD_NAME_FONT_PX,
+			WeaponPanel.COLOR_TEXT)
+		var mag_color: Color = WeaponPanel.COLOR_DANGER if ammo_low else WeaponPanel.COLOR_TEXT
+		_text(font, mag_text, Vector2(text_x, WeaponPanel.CARD_AMMO_BASELINE_PX), WeaponPanel.CARD_MAG_FONT_PX, mag_color)
+		var mag_w: float = font.get_string_size(mag_text, HORIZONTAL_ALIGNMENT_LEFT, -1, WeaponPanel.CARD_MAG_FONT_PX).x
+		_text(font, reserve_text, Vector2(text_x + mag_w + WeaponPanel.CARD_RESERVE_GAP_PX, WeaponPanel.CARD_AMMO_BASELINE_PX),
+			WeaponPanel.CARD_RESERVE_FONT_PX, WeaponPanel.COLOR_TEXT)
+		if active and reload >= 0.0:
+			var bar: Rect2 = Rect2(Vector2(pad, size.y - WeaponPanel.CARD_RELOAD_BOTTOM_PX - WeaponPanel.CARD_RELOAD_H_PX),
+				Vector2(size.x - 2.0 * pad, WeaponPanel.CARD_RELOAD_H_PX))
+			draw_rect(bar, WeaponPanel.COLOR_BAR_BG)
+			draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(reload, 0.0, 1.0), bar.size.y)), WeaponPanel.COLOR_AMBER)
+
+	func _text(font: Font, text: String, baseline: Vector2, font_px: int, color: Color) -> void:
+		if text == "":
+			return
+		draw_string_outline(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_px, WeaponPanel.CARD_OUTLINE_PX,
+			WeaponPanel.COLOR_OUTLINE)
+		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_px, color)
+
+	## Cuts the name with an ellipsis so it fits `width` (the names never change: this runs once per card size).
+	func _trim(font: Font, text: String, width: float) -> String:
+		if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, WeaponPanel.CARD_NAME_FONT_PX).x <= width:
+			return text
+		var cut: String = text
+		while cut.length() > 1 and font.get_string_size(cut + "…", HORIZONTAL_ALIGNMENT_LEFT, -1, WeaponPanel.CARD_NAME_FONT_PX).x > width:
+			cut = cut.substr(0, cut.length() - 1)
+		return cut + "…"
+
 
 var _weapon_ids: Array[StringName] = []
 var _names: Array[String] = []
@@ -98,6 +198,15 @@ var _last_mag: int = -1
 var _last_reserve: int = -1
 var _last_infinite: bool = false
 var _last_mag_size: int = -1
+var _w_mag: Array[int] = []            # per weapon (touch cards): magazine, reserve, infinite flag, magazine size
+var _w_reserve: Array[int] = []
+var _w_infinite: Array[bool] = []
+var _w_mag_size: Array[int] = []
+var _cards: Array[Card] = []
+var _shown: Array[int] = []            # weapon index of each card on screen
+var _card_w: float = CARD_W_DEFAULT_PX
+var _reload_on: bool = false
+var _reload_progress: float = 0.0
 
 var _name_label: Label = Label.new()
 var _main: HBoxContainer = HBoxContainer.new()
@@ -107,6 +216,7 @@ var _mag_label: Label = Label.new()
 var _reserve_label: Label = Label.new()
 var _reload_bar: ProgressBar = ProgressBar.new()
 var _row: HBoxContainer = HBoxContainer.new()
+var _cards_box: HBoxContainer = HBoxContainer.new()
 
 
 ## Portrait look shared by the big picture and the chips: mipmapped (the thin barrel aliases without), 2:1 kept.
@@ -166,6 +276,13 @@ func _init() -> void:
 	_row.visible = false
 	add_child(_row)
 
+	_cards_box.name = "Cards"
+	_cards_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cards_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	_cards_box.add_theme_constant_override("separation", CARD_GAP_PX)
+	_cards_box.visible = false
+	add_child(_cards_box)
+
 
 ## Once per hunt (Hud.bind): one chip per carried weapon, the portraits loaded here and never again. Calling it again
 ## rebuilds everything. The first weapon becomes the active one; an empty list leaves the panel without a weapon.
@@ -178,6 +295,11 @@ func set_weapons(weapon_ids: Array[StringName]) -> void:
 	_names.clear()
 	_textures.clear()
 	_paths.clear()
+	_w_mag.clear()
+	_w_reserve.clear()
+	_w_infinite.clear()
+	_w_mag_size.clear()
+	_shown.clear()   # the touch cards are rebuilt for the new list
 	for i: int in _weapon_ids.size():
 		var weapon_id: StringName = _weapon_ids[i]
 		_names.append(String(Data.get_weapon(weapon_id).get("name", String(weapon_id))))
@@ -195,7 +317,10 @@ func set_weapons(weapon_ids: Array[StringName]) -> void:
 		chip.set_active(false)
 		_row.add_child(chip)
 		_chips.append(chip)
-	_row.visible = _weapon_ids.size() >= ROW_MIN_WEAPONS
+		_w_mag.append(0)
+		_w_reserve.append(0)
+		_w_infinite.append(false)
+		_w_mag_size.append(1)
 	_active = -1
 	_refresh_keys()
 	if _weapon_ids.is_empty():
@@ -203,6 +328,7 @@ func set_weapons(weapon_ids: Array[StringName]) -> void:
 		_portrait.texture = null
 	else:
 		set_active(0)
+	_apply_mode()
 
 
 ## Portrait, name and highlighted chip of weapon `index`. Out of range: nothing changes.
@@ -214,6 +340,7 @@ func set_active(index: int) -> void:
 	_portrait.texture = _textures[index]
 	for i: int in _chips.size():
 		_chips[i].set_active(i == index)
+	_rebuild_cards()
 
 
 ## Magazine and reserve. Text and colour are touched only when a value changes.
@@ -236,15 +363,60 @@ func set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void:
 
 ## The amber bar under the ammunition: visible only while reloading. `progress` is 0-1.
 func set_reload(active: bool, progress: float) -> void:
-	_reload_bar.visible = active
+	_reload_bar.visible = active and not _touch
 	if active:
 		_reload_bar.value = progress * 100.0
+	if active != _reload_on or (active and not is_equal_approx(progress, _reload_progress)):
+		_reload_on = active
+		_reload_progress = progress
+		_refresh_card_reload()
 
 
-## Touch hides the key of every chip (there is no keyboard); the row stays, informative only.
+## Touch (HF7) swaps the name / portrait / ammo block and the chip row for the weapon cards; the keys of the chips
+## only exist on keyboard/mouse. In touch the panel is as wide as its cards.
 func set_touch(touch: bool) -> void:
 	_touch = touch
+	_apply_mode()
 	_refresh_keys()
+	_reload_bar.visible = _reload_on and not _touch
+
+
+## Width of each touch card (the Hud derives it from the free width at the bottom of the screen).
+func set_card_width(width_px: float) -> void:
+	_card_w = width_px
+	for card: Card in _cards:
+		card.custom_minimum_size = Vector2(_card_w, CARD_H_PX)
+
+
+## Magazine and reserve of weapon `index` for its touch card (the weapon in the pocket only comes through here).
+## Text is rewritten only when a value changes.
+func set_weapon_ammo(index: int, in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void:
+	if index < 0 or index >= _weapon_ids.size():
+		return
+	if _w_mag[index] == in_mag and _w_reserve[index] == reserve and _w_infinite[index] == infinite \
+			and _w_mag_size[index] == mag_size and _has_card_text(index):
+		return
+	_w_mag[index] = in_mag
+	_w_reserve[index] = reserve
+	_w_infinite[index] = infinite
+	_w_mag_size[index] = mag_size
+	for card: Card in _cards:
+		if card.weapon_index == index:
+			_fill_card_ammo(card)
+
+
+## Number of cards on screen (0 outside touch mode; 1 with a single weapon, otherwise 2).
+func get_card_count() -> int:
+	return _cards.size() if _touch else 0
+
+
+## Weapon index shown by each card, left to right. With 3+ weapons (horde): the one in hand and the next in the cycle.
+func get_card_weapon_indices() -> Array[int]:
+	return _shown.duplicate() if _touch else ([] as Array[int])
+
+
+func is_cards_visible() -> bool:
+	return _cards_box.visible
 
 
 func get_weapon_ids() -> Array[StringName]:
@@ -285,6 +457,72 @@ func get_portrait_path() -> String:
 
 func is_row_visible() -> bool:
 	return _row.visible
+
+
+func _apply_mode() -> void:
+	_name_label.visible = not _touch
+	_main.visible = not _touch
+	_row.visible = not _touch and _weapon_ids.size() >= ROW_MIN_WEAPONS
+	custom_minimum_size = Vector2(0.0 if _touch else CONTENT_W_PX, CARD_H_PX if _touch else 0.0)
+	_rebuild_cards()
+
+
+## Cards of the touch layout: every weapon up to CARD_MAX_SHOWN in slot order; with more (horde), the weapon in hand
+## and the next one in the cycle (tapping it takes the place of the old swap button).
+func _rebuild_cards() -> void:
+	if not _touch:
+		_cards_box.visible = false
+		return
+	var wanted: Array[int] = []
+	if _weapon_ids.size() <= CARD_MAX_SHOWN:
+		for i: int in _weapon_ids.size():
+			wanted.append(i)
+	elif _active >= 0:
+		wanted.append(_active)
+		wanted.append((_active + 1) % _weapon_ids.size())
+	if wanted != _shown or _cards.size() != wanted.size():
+		for old: Card in _cards:
+			_cards_box.remove_child(old)
+			old.queue_free()
+		_cards.clear()
+		_shown = wanted
+		for index: int in _shown:
+			var card: Card = Card.new()
+			card.name = "Card_%d" % (index + 1)
+			card.weapon_index = index
+			card.portrait = _textures[index]
+			card.name_text = _names[index]
+			card.custom_minimum_size = Vector2(_card_w, CARD_H_PX)
+			_cards_box.add_child(card)
+			_cards.append(card)
+			_fill_card_ammo(card)
+	for card: Card in _cards:
+		card.set_active(card.weapon_index == _active)
+	_cards_box.visible = not _cards.is_empty()
+	_refresh_card_reload()
+
+
+func _has_card_text(index: int) -> bool:
+	for card: Card in _cards:
+		if card.weapon_index == index:
+			return card.mag_text != ""
+	return true
+
+
+func _fill_card_ammo(card: Card) -> void:
+	var index: int = card.weapon_index
+	card.mag_text = str(_w_mag[index])
+	card.reserve_text = INFINITE_RESERVE_TEXT if _w_infinite[index] else RESERVE_FORMAT % _w_reserve[index]
+	card.ammo_low = _w_mag[index] <= 0 or float(_w_mag[index]) <= float(_w_mag_size[index]) * LOW_AMMO_FRAC
+	card.queue_redraw()
+
+
+func _refresh_card_reload() -> void:
+	for card: Card in _cards:
+		var value: float = _reload_progress if (_reload_on and card.weapon_index == _active) else -1.0
+		if not is_equal_approx(card.reload, value):
+			card.reload = value
+			card.queue_redraw()
 
 
 func _refresh_keys() -> void:

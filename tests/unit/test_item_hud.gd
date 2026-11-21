@@ -576,30 +576,65 @@ func _screen(tc: TouchControls) -> Vector2:
 	return tc.get_viewport().get_visible_rect().size
 
 
-func test_touch_item_buttons_positions_and_removed_buttons() -> void:
+func _touch_at(tc: TouchControls, index: int, pos: Vector2, pressed: bool) -> void:
+	var ev: InputEventScreenTouch = InputEventScreenTouch.new()
+	ev.index = index
+	ev.pressed = pressed
+	ev.position = pos
+	tc._input(ev)
+
+
+func _tap(tc: TouchControls, index: int, pos: Vector2) -> void:
+	_touch_at(tc, index, pos, true)
+	_touch_at(tc, index, pos, false)
+
+
+func _block_cura(tc: TouchControls) -> Vector2:
+	var b: Dictionary = tc.get_bottom_block()
+	return Vector2(float(b["cura_x"]), _screen(tc).y - TouchControls.BLOCK_BOTTOM_PX)
+
+
+func _block_acc(tc: TouchControls) -> Vector2:
+	var b: Dictionary = tc.get_bottom_block()
+	return Vector2(float(b["acc_x"]), _screen(tc).y - TouchControls.BLOCK_BOTTOM_PX)
+
+
+func test_touch_cura_and_accessory_buttons_positions_and_removed_buttons() -> void:
 	var tc: TouchControls = _touch(_belt([&"medkit", &"scout_drone"]))
-	var s: Vector2 = _screen(tc)
-	eq(tc.get_button_center(&"use_medkit"), Vector2(s.x - 380.0, s.y - 250.0), "kit: (largura - 380, altura - 250)")
-	eq(tc.get_button_center(&"use_scout_drone"), Vector2(s.x - 476.0, s.y - 250.0), "drone: (largura - 476, altura - 250)")
-	near(tc.get_button_radius(&"use_medkit"), 38.0, 0.001, "botao de item de 76 px")
-	for gone: StringName in [&"use_item", &"item_next"]:
+	eq(tc.get_button_center(&"use_medkit"), _block_cura(tc), "kit: botao Cura no bloco de baixo")
+	near(tc.get_button_radius(&"use_medkit"), 32.0, 0.001, "Cura de 64 px")
+	eq(tc.get_button_center(&"use_scout_drone"), _block_acc(tc), "drone: botao Acessorios no bloco de baixo")
+	near(tc.get_button_radius(&"use_scout_drone"), 35.0, 0.001, "Acessorios de 70 px")
+	for gone: StringName in [&"use_item", &"item_next", &"weapon_swap"]:
 		eq(tc.get_button_center(gone), Vector2.INF, "%s sem botao" % gone)
 		eq(tc.get_button_radius(gone), 0.0, "%s sem raio" % gone)
 	eq(tc.get_button_center(&"use_corn_bait"), Vector2.INF, "ceva nao trazida: sem botao")
 	eq(tc.get_button_center(&"use_binoculars"), Vector2.INF, "binoculo nao trazido: sem botao")
 	eq(tc.get_button_center(&"dog_command"), Vector2.INF, "sem cao: sem botao")
-	for fixed: StringName in [&"fire", &"aim", &"reload", &"weapon_swap", &"crouch", &"pause"]:
+	for fixed: StringName in [&"fire", &"fire_left", &"aim", &"reload", &"crouch", &"pause"]:
 		ne(tc.get_button_center(fixed), Vector2.INF, "botao fixo %s continua" % fixed)
+	var s: Vector2 = _screen(tc)
+	eq(tc.get_button_center(&"fire"), Vector2(s.x - 245.0, s.y - 181.0), "Tiro direito: br (245, 181)")
+	near(tc.get_button_radius(&"fire"), 60.0, 0.001, "Tiro direito de 120 px")
+	eq(tc.get_button_center(&"fire_left"), Vector2(69.0, s.y - 355.0), "Tiro esquerdo: 69 da esquerda, 355 de baixo")
+	near(tc.get_button_radius(&"fire_left"), 50.0, 0.001, "Tiro esquerdo de 100 px")
+	eq(tc.get_button_center(&"aim"), Vector2(s.x - 108.0, s.y - 342.0), "Mira: br (108, 342)")
+	eq(tc.get_button_center(&"reload"), Vector2(s.x - 359.0, s.y - 47.0), "Recarregar: br (359, 47)")
+	eq(tc.get_button_center(&"crouch"), Vector2(s.x - 253.0, s.y - 53.0), "Agachar: br (253, 53)")
+	near(tc.joystick.rest_center.x, 242.0, 0.001, "joystick: 242 da esquerda")
+	near(tc.joystick.rest_center.y, s.y - 220.0, 0.001, "joystick: 220 do fundo")
 	InputSetup.set_touch_override("auto")
 	_free_belts()
 
 
-func test_touch_no_usable_item_and_no_dog_means_no_item_or_dog_buttons() -> void:
+func test_touch_no_usable_item_and_no_dog_means_only_the_fixed_buttons() -> void:
 	var tc: TouchControls = _touch(_belt([&"leather_vest", &"extra_ammo"]))
 	for action: StringName in [&"use_medkit", &"use_corn_bait", &"use_scout_drone", &"use_binoculars", &"dog_command"]:
 		eq(tc.get_button_center(action), Vector2.INF, "%s sem botao" % action)
 	var keys: Array = tc.get_button_diameters().keys()
 	eq(keys.size(), 6, "so os 6 botoes fixos: %s" % str(keys))
+	eq(tc.get_accessory_current(), &"", "sem acessorio: nenhum atual")
+	ok(not tc.get_probe_buttons().has("accessory_menu"), "sem acessorio: sem seta")
 	InputSetup.set_touch_override("auto")
 	_free_belts()
 
@@ -608,10 +643,10 @@ func test_touch_dog_button_comes_and_goes() -> void:
 	var tc: TouchControls = _touch(_belt([&"medkit"]))
 	var s: Vector2 = _screen(tc)
 	tc.set_dog_present(true)
-	eq(tc.get_button_center(&"dog_command"), Vector2(s.x - 235.0, s.y - 350.0), "botao do cao no lugar de sempre")
+	eq(tc.get_button_center(&"dog_command"), Vector2(s.x - 235.0, s.y - 346.0), "botao do cao no lugar de sempre")
 	near(tc.get_button_radius(&"dog_command"), 38.0, 0.001, "76 px")
 	tc.set_dog_present(true)
-	eq(tc.get_button_center(&"dog_command"), Vector2(s.x - 235.0, s.y - 350.0), "idempotente")
+	eq(tc.get_button_center(&"dog_command"), Vector2(s.x - 235.0, s.y - 346.0), "idempotente")
 	tc.set_dog_state(Ids.DS_RETREAT)
 	tc.flash_slot(&"dog_command", true)
 	tc.flash_slot(&"nada", true)   # unknown ids are harmless
@@ -623,24 +658,183 @@ func test_touch_dog_button_comes_and_goes() -> void:
 	_free_belts()
 
 
-func test_touch_buttons_do_not_overlap_each_other_or_the_stick() -> void:
-	## Three items + dog (the largest layout): hit circles (radius + padding) never touch, and the item row
-	## stays clear of the fixed stick's active area.
+## Every button of the largest layout (kit, accessories, dog, interact) against each other, the weapon cards and the
+## stick, on the three reference screens: hit circles (radius + padding) never touch.
+func test_touch_buttons_do_not_overlap_each_other_the_cards_or_the_stick() -> void:
 	var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"]))
 	tc.set_dog_present(true)
+	tc._revive_on = true
+	tc._rebuild_buttons()
 	var pad: float = TouchControls.HIT_PADDING_PX
-	var actions: Array = tc.get_button_diameters().keys()
-	ok(actions.has(&"use_binoculars"), "os 4 itens ganharam botao (a barra nao limita; o loadout sim)")
-	for i: int in actions.size():
-		for j: int in range(i + 1, actions.size()):
-			var a: StringName = actions[i]
-			var b: StringName = actions[j]
-			var gap: float = tc.get_button_center(a).distance_to(tc.get_button_center(b)) \
-				- (tc.get_button_radius(a) + pad) - (tc.get_button_radius(b) + pad)
-			ok(gap >= 0.0, "%s e %s se sobrepoem (folga %.1f px)" % [a, b, gap])
-	var stick_right: float = tc.joystick.rest_center.x + tc.joystick.radius_px * tc.joystick.active_mult
-	for action: StringName in [&"use_medkit", &"use_corn_bait", &"use_scout_drone"]:
-		ok(tc.get_button_center(action).x - tc.get_button_radius(action) > stick_right,
-			"%s fora da area ativa do joystick (x ate %.0f)" % [action, stick_right])
+	for size_px: Vector2 in [Vector2(1532.0, 720.0), Vector2(1280.0, 720.0), Vector2(1280.0, 960.0)]:
+		var block: Dictionary = TouchControls.compute_bottom_block(size_px, 242.0 + 90.0)
+		var card_w: float = float(block["card_w"])
+		var rects: Array[Rect2] = []
+		for i: int in 2:
+			rects.append(Rect2(Vector2(float(block["center_x"]) - card_w - 4.0 + float(i) * (card_w + 8.0),
+				size_px.y - 8.0 - 28.0 - 6.0 - 55.0), Vector2(card_w, 55.0)))
+		var centers: Dictionary = {}
+		var reach: Dictionary = {}   # id -> radius + padding
+		for def: Dictionary in tc._defs:
+			var center: Vector2
+			match String(def["from"]):
+				"br":
+					center = Vector2(size_px.x - float(def["ox"]), size_px.y - float(def["oy"]))
+				"bl":
+					center = Vector2(float(def["ox"]), size_px.y - float(def["oy"]))
+				"cura":
+					center = Vector2(float(block["cura_x"]), size_px.y - TouchControls.BLOCK_BOTTOM_PX)
+				"acc":
+					center = Vector2(float(block["acc_x"]), size_px.y - TouchControls.BLOCK_BOTTOM_PX)
+				_:
+					center = Vector2(float(def["ox"]), float(def["oy"]))
+			centers[def["id"]] = center
+			reach[def["id"]] = float(def["d"]) * 0.5 + pad
+		var ids: Array = centers.keys()
+		for i: int in ids.size():
+			for j: int in range(i + 1, ids.size()):
+				var gap: float = (centers[ids[i]] as Vector2).distance_to(centers[ids[j]] as Vector2) - float(reach[ids[i]]) - float(reach[ids[j]])
+				ok(gap >= -0.01, "%s: %s e %s se sobrepoem (folga %.1f px)" % [size_px, ids[i], ids[j], gap])
+		for id: StringName in ids:
+			var box: Rect2 = Rect2((centers[id] as Vector2) - Vector2.ONE * float(reach[id]), Vector2.ONE * float(reach[id]) * 2.0)
+			for card: Rect2 in rects:
+				ok(not box.intersects(card), "%s: o botao %s toca um cartao" % [size_px, id])
+			ok(Rect2(Vector2.ZERO, size_px).encloses(box.grow(-pad)), "%s: %s sai da tela" % [size_px, id])
+		var stick: Vector2 = Vector2(242.0, size_px.y - 220.0)
+		for id: StringName in [&"use_medkit", &"use_corn_bait"]:
+			ok((centers[id] as Vector2).distance_to(stick) - float(reach[id]) >= 90.0 * 1.7 - 0.01,
+				"%s: %s dentro da area ativa do joystick" % [size_px, id])
+		ok(card_w >= TouchControls.CARD_W_MIN_PX - 0.01 and card_w <= TouchControls.CARD_W_MAX_PX + 0.01,
+			"%s: largura do cartao %.1f" % [size_px, card_w])
+		ok(float(block["acc_x"]) + 35.0 + 2.0 * pad <= size_px.x - 359.0 - 32.0 + 0.01, "%s: Acessorios antes do Recarregar" % size_px)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_bottom_block_matches_the_mockup_at_1532() -> void:
+	var block: Dictionary = TouchControls.compute_bottom_block(Vector2(1532.0, 720.0), 332.0)
+	near(float(block["card_w"]), 167.0, 0.001, "1532: cartoes de 167")
+	near(float(block["center_x"]), 766.0, 0.001, "1532: centro da tela")
+	near(float(block["cura_x"]) - 766.0, -277.0, 0.5, "Cura a 277 px a esquerda do centro")
+	near(float(block["acc_x"]) - 766.0, 216.0, 0.5, "Acessorios a 216 px a direita do centro (214 na foto, +2 de folga)")
+	var narrow: Dictionary = TouchControls.compute_bottom_block(Vector2(1280.0, 720.0), 332.0)
+	ok(float(narrow["card_w"]) < 167.0 and float(narrow["card_w"]) >= 130.0, "1280: cartoes mais estreitos (%.1f)" % float(narrow["card_w"]))
+
+
+func test_touch_two_fire_buttons_share_the_action_by_finger_count() -> void:
+	var tc: TouchControls = _touch(_belt([&"medkit"]))
+	var right: Vector2 = tc.get_button_center(&"fire")
+	var left: Vector2 = tc.get_button_center(&"fire_left")
+	ok(not Input.is_action_pressed(&"fire"), "pre-condicao: fire solto")
+	_touch_at(tc, 1, right, true)
+	ok(Input.is_action_pressed(&"fire"), "Tiro direito aperta fire")
+	_touch_at(tc, 2, left, true)
+	ok(Input.is_action_pressed(&"fire"), "os dois dedos: fire apertado")
+	_touch_at(tc, 1, right, false)
+	ok(Input.is_action_pressed(&"fire"), "soltar um nao solta fire enquanto o outro segue")
+	_touch_at(tc, 2, left, false)
+	ok(not Input.is_action_pressed(&"fire"), "soltar o ultimo solta fire")
+	_touch_at(tc, 3, left, true)
+	ok(Input.is_action_pressed(&"fire"), "Tiro esquerdo sozinho aperta fire")
+	_touch_at(tc, 3, left, false)
+	ok(not Input.is_action_pressed(&"fire"), "soltou")
+	ok(TouchControls.LOOK_BUTTONS.has(&"fire") and TouchControls.LOOK_BUTTONS.has(&"fire_left"), "os dois Tiros giram a camera ao arrastar")
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_accessory_button_default_switch_and_list() -> void:
+	var belt: ItemBelt = _belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"], {&"corn_bait": 0})
+	var tc: TouchControls = _touch(belt)
+	eq(tc.get_accessory_ids(), [&"corn_bait", &"scout_drone", &"binoculars"] as Array[StringName], "ordem de ITEM_ACTIONS, sem o kit")
+	eq(tc.get_accessory_current(), &"scout_drone", "padrao: o primeiro com contagem > 0 (a ceva esta zerada)")
+	ne(tc.get_button_center(&"use_scout_drone"), Vector2.INF, "o botao usa a acao do acessorio atual")
+	eq(tc.get_button_center(&"use_corn_bait"), Vector2.INF, "a ceva nao tem botao proprio")
+	var probe: Dictionary = tc.get_probe_buttons()
+	ok(probe.has("accessory_menu"), "3 acessorios: a seta aparece")
+	ok(probe.has("use_scout_drone") and probe.has("fire_left"), "probe traz o acessorio atual e o Tiro esquerdo")
+	var arrow: Vector3 = probe["accessory_menu"]
+	_tap(tc, 1, Vector2(arrow.x, arrow.y))
+	ok(tc.is_accessory_menu_open(), "tocar na seta abre a lista")
+	var rows: Dictionary = tc.get_probe_buttons()
+	var acc_y: float = tc.get_button_center(&"use_scout_drone").y
+	for id: StringName in [&"corn_bait", &"scout_drone", &"binoculars"]:
+		var row: Vector3 = rows["accessory_item_%s" % id]
+		ok(row.y < acc_y - 70.0, "a lista sobe: %s acima do botao" % id)
+		near(row.z, 30.0, 0.001, "linha de 60 px")
+	var count_before: int = belt.get_count(&"scout_drone")
+	var bino: Vector3 = rows["accessory_item_binoculars"]
+	_tap(tc, 1, Vector2(bino.x, bino.y))
+	ok(not tc.is_accessory_menu_open(), "escolher um item fecha a lista")
+	eq(tc.get_accessory_current(), &"binoculars", "o item escolhido virou o atual")
+	ok(not belt.is_binoculars_active(), "escolher nao usa: o binoculo continua apagado")
+	eq(belt.get_count(&"scout_drone"), count_before, "escolher nao gasta o drone")
+	ne(tc.get_button_center(&"use_binoculars"), Vector2.INF, "o botao agora aperta use_binoculars")
+	eq(tc.get_button_center(&"use_scout_drone"), Vector2.INF, "o botao do drone sumiu (e o mesmo botao)")
+	arrow = tc.get_probe_buttons()["accessory_menu"]
+	_tap(tc, 1, Vector2(arrow.x, arrow.y))
+	ok(tc.is_accessory_menu_open(), "reabre")
+	_tap(tc, 1, Vector2(700.0, 200.0))
+	ok(not tc.is_accessory_menu_open(), "tocar fora fecha a lista")
+	var main: Vector2 = tc.get_button_center(&"use_binoculars")
+	_touch_at(tc, 2, main, true)
+	ok(Input.is_action_pressed(&"use_binoculars"), "tocar no botao aperta a acao do acessorio atual")
+	_touch_at(tc, 2, main, false)
+	ok(not Input.is_action_pressed(&"use_binoculars"), "soltar libera")
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_accessory_switches_by_itself_when_the_current_runs_out() -> void:
+	var belt: ItemBelt = _belt([&"corn_bait", &"scout_drone"], {&"corn_bait": 1, &"scout_drone": 2})
+	var tc: TouchControls = _touch(belt)
+	eq(tc.get_accessory_current(), &"corn_bait", "comeca na ceva")
+	belt._counts[&"corn_bait"] = 0
+	tc._process(0.016)
+	eq(tc.get_accessory_current(), &"scout_drone", "a ceva acabou: troca sozinha para o drone")
+	tc._select_accessory(&"corn_bait")
+	tc._process(0.016)
+	eq(tc.get_accessory_current(), &"corn_bait", "escolhida a mao: nao volta sozinha")
+	var single: TouchControls = _touch(_belt([&"scout_drone"]))
+	ok(not single.get_probe_buttons().has("accessory_menu"), "um acessorio so: sem seta")
+	ne(single.get_button_center(&"use_scout_drone"), Vector2.INF, "mas o botao existe")
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_accessory_flash_goes_to_the_button_or_the_tab() -> void:
+	var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"scout_drone"]))
+	eq(tc.get_accessory_current(), &"corn_bait", "atual: a ceva")
+	tc.flash_slot(&"scout_drone", true)
+	ok(tc._other_accessory_flashing(), "drone nao e o atual: a seta pisca")
+	tc.flash_slot(&"scout_drone", false)
+	ok(not tc._other_accessory_flashing(), "apagou")
+	tc.flash_slot(&"corn_bait", true)
+	ok(not tc._other_accessory_flashing(), "ceva e o atual: pisca o botao, nao a seta")
+	tc.flash_slot(&"corn_bait", false)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_weapon_cards_tap_selects_with_button_priority() -> void:
+	var tc: TouchControls = _touch(_belt([&"medkit"]))
+	var rects: Array[Rect2] = [Rect2(600.0, 600.0, 160.0, 55.0), Rect2(768.0, 600.0, 160.0, 55.0)]
+	tc.set_weapon_card_rects(rects, [&"", &"weapon_2"] as Array[StringName])
+	var probe: Dictionary = tc.get_probe_buttons()
+	ok(probe.has("weapon_card_1") and probe.has("weapon_card_2"), "o probe traz os dois cartoes")
+	_touch_at(tc, 1, Vector2(850.0, 630.0), true)
+	ok(Input.is_action_pressed(&"weapon_2"), "tocar no cartao da outra arma aperta weapon_2")
+	_touch_at(tc, 1, Vector2(850.0, 630.0), false)
+	ok(not Input.is_action_pressed(&"weapon_2"), "soltar libera")
+	_touch_at(tc, 1, Vector2(680.0, 630.0), true)
+	ok(not Input.is_action_pressed(&"weapon_1") and not tc.look_pad.is_active(), "tocar no cartao da arma na mao nao faz nada (e nao vira olhar)")
+	_touch_at(tc, 1, Vector2(680.0, 630.0), false)
+	var button: Vector2 = tc.get_button_center(&"use_medkit")
+	tc.set_weapon_card_rects([Rect2(button - Vector2(80.0, 30.0), Vector2(160.0, 60.0))] as Array[Rect2])
+	_touch_at(tc, 2, button, true)
+	ok(Input.is_action_pressed(&"use_medkit") and not Input.is_action_pressed(&"weapon_1"), "o botao tem prioridade sobre o cartao")
+	_touch_at(tc, 2, button, false)
+	tc.set_weapon_card_rects([] as Array[Rect2])
+	eq(tc.get_weapon_card_rects().size(), 0, "sem cartoes")
 	InputSetup.set_touch_override("auto")
 	_free_belts()

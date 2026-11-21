@@ -6,7 +6,9 @@ extends Control
 
 const HEIGHT_PX: float = 28.0
 const WIDTH_PX: float = 400.0
-const TOUCH_WIDTH_PX: float = 300.0
+const TOUCH_WIDTH_PX: float = 342.0   # default touch width; the Hud sets the real one (the two weapon cards, HF7)
+const VEST_CHIP_W_PX: float = 62.0     # touch: the vest chip beside the bar (icon + "35%")
+const VEST_CHIP_GAP_PX: float = 6.0    # touch: chip to the bar
 const PAD_X_PX: float = 10.0
 const GAP_PX: float = 8.0
 const BAR_HEIGHT_PX: float = 14.0
@@ -31,6 +33,8 @@ const COLOR_BAR_BG: Color = Color(0.0, 0.0, 0.0, 0.55)
 
 var _vest_on: bool = false
 var _touch: bool = false
+var _touch_width_px: float = TOUCH_WIDTH_PX
+var _vest_reduction: float = 0.0
 var _shown_hp: int = -1
 var _panel_style: StyleBox = null
 
@@ -95,6 +99,8 @@ func _ready() -> void:
 func _draw() -> void:
 	if _panel_style != null:
 		draw_style_box(_panel_style, Rect2(Vector2.ZERO, size))
+		if _touch and _vest_on:
+			draw_style_box(_panel_style, _chip_rect())
 
 
 func _notification(what: int) -> void:
@@ -119,13 +125,49 @@ func set_vest(on: bool) -> void:
 	_vest_on = on
 	_vest.visible = on
 	_layout()
+	queue_redraw()
 
 
-## Touch layout: 400 -> 300 px wide (the height is the same).
+## Touch layout (HF7): the width is the one the Hud gives (the two weapon cards) and the vest leaves the bar for a
+## chip of its own beside it, to the left ("35%" instead of "Colete"). The height is the same.
 func set_touch(touch: bool) -> void:
 	_touch = touch
-	custom_minimum_size = Vector2(TOUCH_WIDTH_PX if touch else WIDTH_PX, HEIGHT_PX)
+	custom_minimum_size = Vector2(_touch_width_px if touch else WIDTH_PX, HEIGHT_PX)
+	_refresh_vest_text()
 	_layout()
+	queue_redraw()
+
+
+## Width of the strip in touch mode (the Hud passes the total width of the weapon cards).
+func set_touch_width(width_px: float) -> void:
+	_touch_width_px = width_px
+	if _touch:
+		custom_minimum_size = Vector2(width_px, HEIGHT_PX)
+		_layout()
+
+
+## Damage reduction of the vest (0.35 = 35%) for the touch chip; 0 keeps the word "Colete".
+func set_vest_reduction(fraction: float) -> void:
+	_vest_reduction = fraction
+	_refresh_vest_text()
+	_layout()
+
+
+func get_vest_text() -> String:
+	return _vest_text.text
+
+
+## Where the vest chip is drawn (touch only): left of the strip, same height.
+func get_chip_rect() -> Rect2:
+	return _chip_rect()
+
+
+func _chip_rect() -> Rect2:
+	return Rect2(Vector2(-(VEST_CHIP_GAP_PX + VEST_CHIP_W_PX), 0.0), Vector2(VEST_CHIP_W_PX, size.y))
+
+
+func _refresh_vest_text() -> void:
+	_vest_text.text = "%d%%" % roundi(_vest_reduction * 100.0) if (_touch and _vest_reduction > 0.0) else VEST_TEXT
 
 
 func get_value_text() -> String:
@@ -152,8 +194,12 @@ func _layout() -> void:
 	if _vest_on:
 		var vest_size: Vector2 = _vest.get_combined_minimum_size()
 		_vest.size = vest_size
-		_vest.position = Vector2(x, (size.y - vest_size.y) * 0.5)
-		x += vest_size.x + GAP_PX
+		if _touch:   # chip outside the bar, centred in its own rectangle
+			var chip: Rect2 = _chip_rect()
+			_vest.position = chip.position + (chip.size - vest_size) * 0.5
+		else:
+			_vest.position = Vector2(x, (size.y - vest_size.y) * 0.5)
+			x += vest_size.x + GAP_PX
 	var value_w: float = maxf(VALUE_MIN_W_PX, _value.get_combined_minimum_size().x)
 	var value_h: float = _value.get_combined_minimum_size().y
 	_value.size = Vector2(value_w, value_h)

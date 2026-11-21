@@ -16,7 +16,8 @@ Groups (each starts a fresh hunt so the crop timer never ends the run):
   g1 hook, fixed joystick, sensitivity, two-finger pitch stability
   g2 run lock, fire-drag, reload, aim, natural/fast drag speed
   g3 finger ids 0, 1, -1      g4 finger ids 7, -5, 99999      g5 multitouch pairs, pause/resume
-  g7 item buttons (1.3): layout from the probe, no overlap, tap the drone (-1), kit at full health (no spend)
+  g7 Cura / Accessories buttons, tab and list, weapon cards, two Tiro buttons (HF7, was the item row of 1.3): layout
+     from the probe, no overlap, pick and tap the drone (-1), kit at full health (no spend), card swap, both Tiro buttons
 Not in the default run (g6): ids above ~100000 are rejected or wedge Chrome's touch emulation.
 """
 import json
@@ -34,13 +35,14 @@ from phone import Phone, SHOTS_DIR  # noqa: E402
 # 1 css px = 720/390 viewport px.
 VP_PER_CSS = 720.0 / 390.0
 K = 1.0 / VP_PER_CSS
-JOY = (190 * K, 303.0)                 # fixed stick centre: 190 px from left, 160 px from bottom (viewport px)
+JOY = (242 * K, (720 - 220) * K)       # fixed stick centre: 242 px from left, 220 px from bottom (viewport px)
 JOY_RADIUS_CSS = 90 * K                # 48.8 css px
 JOY_ACTIVE_CSS = 90 * 1.7 * K          # 82.9 css px
 LOOK_A = (450.0, 200.0)                # free spot (no button within ~60 css px), horizontal / vertical drags
-FIRE = ((1558 - 125) * K, (720 - 130) * K)
-AIM = ((1558 - 290) * K, (720 - 105) * K)
-RELOAD = ((1558 - 100) * K, (720 - 285) * K)
+FIRE = ((1558 - 245) * K, (720 - 181) * K)         # right Tiro, d 120
+FIRE_LEFT = (69 * K, (720 - 355) * K)              # left Tiro, d 100 (same action)
+AIM = ((1558 - 108) * K, (720 - 342) * K)
+RELOAD = ((1558 - 359) * K, (720 - 47) * K)
 PAUSE = (56 * K, 56 * K)
 RESUME = (422.0, 166.0)
 
@@ -49,20 +51,23 @@ DEG_PER_VP_PX = 0.115
 PITCH_MULT = 0.65
 DEG_PER_CSS_PX = DEG_PER_VP_PX * VP_PER_CSS
 
-# Item and dog buttons (docs/arquitetura.md 8.4). Positions are READ from window.huntProbe.touch_buttons; these
-# constants only say what the layout must be.  Centre of item i = (width - (380 + 96 i), height - 250).
+# Item, dog and weapon-card controls (docs/arquitetura.md 8.4, HF7 PUBG-style layout). Positions are READ from
+# window.huntProbe.touch_buttons; these constants only say what the layout must be.  The kit is the Cura button and the
+# other items share ONE Accessories button (named by the action of the current accessory) with a tab and an upward list;
+# both sit on the line 50 px above the bottom edge.
 URL_QUERY = "?probe=1&hints=0"
-ITEM_ROW_RIGHT = 380.0
-ITEM_ROW_STEP = 96.0
-ITEM_ROW_BOTTOM = 250.0
-ITEM_RADIUS = 38.0
+CURA_RADIUS, ACC_RADIUS = 32.0, 35.0
+BLOCK_BOTTOM = 50.0
 HIT_PADDING = 8.0                      # TouchControls.HIT_PADDING_PX: a finger within radius + 8 presses the button
 MIN_ITEM_TO_LOOK_CSS = 60.0            # LOOK_A must stay at least this far (css px) from every item button
-FIRE_FROM_RIGHT, FIRE_FROM_BOTTOM = 125.0, 130.0    # Tiro button offsets (viewport px): gives the viewport size
-JOY_FROM_LEFT = 190.0                  # fixed stick centre x (viewport px)
+FIRE_FROM_RIGHT, FIRE_FROM_BOTTOM = 245.0, 181.0    # right Tiro button offsets (viewport px): gives the viewport size
+JOY_FROM_LEFT = 242.0                  # fixed stick centre x (viewport px)
+JOY_FROM_BOTTOM = 220.0
 JOY_ACTIVE_VP = 90.0 * 1.7             # joystick radius x active_mult (viewport px)
-ITEM_ACTIONS = ("use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars")
-REMOVED_ACTIONS = ("use_item", "item_next")
+ACCESSORY_ACTIONS = ("use_corn_bait", "use_scout_drone", "use_binoculars")   # InputSetup.ITEM_ACTIONS without the kit
+ITEM_ACTIONS = ("use_medkit",) + ACCESSORY_ACTIONS
+REMOVED_ACTIONS = ("use_item", "item_next", "weapon_swap")
+NON_CIRCLES = ("accessory_menu",)      # touch_buttons entries that are a tab, a list row or a card, not a round button
 
 SCENE = (85, 65, 260, 115)             # half-resolution PNG box (aim zoom)
 RESULTS = []
@@ -410,7 +415,7 @@ def t_pause(p):
 
 
 def viewport_from_probe(tb):
-    """Viewport size (px) derived from the Tiro button, which sits at (w - 125, h - 130)."""
+    """Viewport size (px) derived from the right Tiro button, which sits at (w - 245, h - 181)."""
     fire = tb.get("fire")
     if not fire:
         return None
@@ -422,13 +427,17 @@ def tap_vp(p, x_vp, y_vp, hold=0.15, fid=1):
     p.tap(x_vp * K, y_vp * K, hold=hold, fid=fid)
 
 
+def is_round_button(name):
+    return name not in NON_CIRCLES and not name.startswith("accessory_item_") and not name.startswith("weapon_card_")
+
+
 def t_items(p):
-    log("--- item buttons (layout from the probe, no overlap, tap behaviour)")
+    log("--- Cura / Accessories buttons, tab and list, weapon cards, two Tiro buttons (layout from the probe, taps)")
     s = st(p, 0.3)
-    fields = ("items", "busy_item", "binoculars", "touch_buttons")
+    fields = ("items", "busy_item", "binoculars", "touch_buttons", "weapon_slot", "accessory", "accessory_menu_open")
     missing = [f for f in fields if f not in s]
-    record("probe publishes items, busy_item, binoculars, touch_buttons", not missing,
-           f"missing={missing}" if missing else f"items={s.get('items')} busy_item={s.get('busy_item')!r} binoculars={s.get('binoculars')}")
+    record("probe publishes items, busy_item, binoculars, touch_buttons, weapon_slot, accessory, accessory_menu_open", not missing,
+           f"missing={missing}" if missing else f"items={s.get('items')} busy_item={s.get('busy_item')!r} accessory={s.get('accessory')!r}")
     if missing:
         return
     tb = s["touch_buttons"]
@@ -442,52 +451,64 @@ def t_items(p):
     w, h = size
 
     # --- layout: which buttons exist, and where
-    carried = [a for a in ITEM_ACTIONS if a.replace("use_", "", 1) in items]
-    present = [a for a in ITEM_ACTIONS if a in tb]
-    record("a button for every usable item carried and for none of the others", present == carried,
-           f"items={sorted(items)} item buttons={present}")
-    record("no button for the removed actions use_item / item_next", not any(a in tb for a in REMOVED_ACTIONS),
+    carried_acc = [a for a in ACCESSORY_ACTIONS if a.replace("use_", "", 1) in items]
+    present_acc = [a for a in ACCESSORY_ACTIONS if a in tb]
+    record("one Accessories button (the current accessory) when any accessory is carried, none otherwise",
+           len(present_acc) == (1 if carried_acc else 0) and (not present_acc or present_acc[0] in carried_acc),
+           f"items={sorted(items)} accessory buttons={present_acc} current={s['accessory']!r}")
+    record("Cura button exists only with the kit", ("use_medkit" in tb) == ("medkit" in items),
+           f"medkit in items={'medkit' in items} use_medkit in touch_buttons={'use_medkit' in tb}")
+    record("no button for the removed actions use_item / item_next / weapon_swap", not any(a in tb for a in REMOVED_ACTIONS),
            f"present={[a for a in REMOVED_ACTIONS if a in tb]}")
     record("no dog button when the hunt has no dog (default loadout)", "dog_command" not in tb,
            f"dog_command in touch_buttons={'dog_command' in tb}")
     bad = []
-    for i, action in enumerate(carried):          # carried keeps ITEM_ACTIONS order = slot order
-        want = (w - (ITEM_ROW_RIGHT + ITEM_ROW_STEP * i), h - ITEM_ROW_BOTTOM)
-        got = tb.get(action)
+    for name, want in (("fire_left", (69.0, h - 355.0, 50.0)), ("fire", (w - 245.0, h - 181.0, 60.0)),
+                       ("aim", (w - 108.0, h - 342.0, 38.0)), ("reload", (w - 359.0, h - 47.0, 32.0)),
+                       ("crouch", (w - 253.0, h - 53.0, 36.0))):
+        got = tb.get(name)
         if not got:
-            bad.append(f"{action}: no button")
-        elif abs(got[0] - want[0]) > 1.0 or abs(got[1] - want[1]) > 1.0 or abs(got[2] - ITEM_RADIUS) > 0.5:
-            bad.append(f"{action}: got ({got[0]:.1f}, {got[1]:.1f}, r {got[2]:.1f}) want ({want[0]:.1f}, {want[1]:.1f}, r {ITEM_RADIUS})")
-    record("item buttons sit at (w - (380 + 96 i), h - 250), radius 38", not bad and bool(carried),
-           "; ".join(bad) if bad else f"viewport {w:.0f}x{h:.0f}, buttons={carried}")
+            bad.append(f"{name}: no button")
+        elif abs(got[0] - want[0]) > 1.0 or abs(got[1] - want[1]) > 1.0 or abs(got[2] - want[2]) > 0.5:
+            bad.append(f"{name}: got ({got[0]:.1f}, {got[1]:.1f}, r {got[2]:.1f}) want ({want[0]:.1f}, {want[1]:.1f}, r {want[2]})")
+    for name, radius in [("use_medkit", CURA_RADIUS)] + [(a, ACC_RADIUS) for a in present_acc]:
+        got = tb.get(name)
+        if got and (abs(got[1] - (h - BLOCK_BOTTOM)) > 1.0 or abs(got[2] - radius) > 0.5):
+            bad.append(f"{name}: got ({got[0]:.1f}, {got[1]:.1f}, r {got[2]:.1f}) want y {h - BLOCK_BOTTOM:.1f} r {radius}")
+    record("fixed buttons, Cura and Accessories sit where the layout table says", not bad,
+           "; ".join(bad) if bad else f"viewport {w:.0f}x{h:.0f}")
+    cards = sorted(a for a in tb if a.startswith("weapon_card_"))
+    record("weapon cards are published (one per weapon carried, at most 2)", 1 <= len(cards) <= 2, f"cards={cards}")
 
-    # --- no overlap: item and dog buttons against every other button (hit circle = radius + padding)
+    # --- tab: only with two or more accessories
+    record("the tab (accessory_menu) exists only with 2+ accessories", ("accessory_menu" in tb) == (len(carried_acc) >= 2),
+           f"accessories carried={carried_acc} accessory_menu in touch_buttons={'accessory_menu' in tb}")
+
+    # --- no overlap: every round button against every other (hit circle = radius + padding)
     close = []
-    names = list(tb)
-    mine = [a for a in names if a in ITEM_ACTIONS or a == "dog_command"]
-    for a in mine:
-        for b in names:
-            if a == b or (b in mine and names.index(b) < names.index(a)):
-                continue   # each pair of item/dog buttons is checked once
+    names = [n for n in tb if is_round_button(n)]
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
             ax, ay, ar = tb[a]
             bx, by, br = tb[b]
             gap = math.hypot(ax - bx, ay - by) - (ar + HIT_PADDING) - (br + HIT_PADDING)
             if gap < 0.0:
                 close.append(f"{a}/{b} overlap by {-gap:.1f} px")
-    record("item and dog buttons do not overlap any other button", not close,
-           "; ".join(close) or f"{len(mine)} item/dog buttons against {len(names)} buttons")
-    stick_right = JOY_FROM_LEFT + JOY_ACTIVE_VP
-    inside = [a for a in carried if a in tb and tb[a][0] - tb[a][2] <= stick_right]
-    record("item buttons stay outside the joystick active area", not inside,
-           f"stick active area ends at x={stick_right:.0f}; inside: {inside}" if inside else f"stick area ends at x={stick_right:.0f}")
+    record("no round button overlaps another (radius + hit padding)", not close,
+           "; ".join(close) or f"{len(names)} round buttons")
+    stick = (JOY_FROM_LEFT, h - JOY_FROM_BOTTOM)
+    inside = [a for a in ("use_medkit",) + tuple(present_acc) if a in tb
+              and math.hypot(tb[a][0] - stick[0], tb[a][1] - stick[1]) - tb[a][2] <= JOY_ACTIVE_VP]
+    record("Cura and Accessories stay outside the joystick active area", not inside,
+           f"stick active radius {JOY_ACTIVE_VP:.0f} px; inside: {inside}" if inside else f"stick active radius {JOY_ACTIVE_VP:.0f} px")
     near_look = []
-    for a in carried:
+    for a in ("use_medkit",) + tuple(present_acc):
         if a not in tb:
             continue
         d_css = math.hypot(tb[a][0] * K - LOOK_A[0], tb[a][1] * K - LOOK_A[1])
         if d_css < MIN_ITEM_TO_LOOK_CSS:
             near_look.append(f"{a} {d_css:.0f} css px")
-    record("free look spot LOOK_A is at least 60 css px from every item button", not near_look,
+    record("free look spot LOOK_A is at least 60 css px from Cura and Accessories", not near_look,
            "; ".join(near_look) or f"LOOK_A={LOOK_A}")
 
     # --- tap the kit at full health: nothing is spent and nothing starts
@@ -504,33 +525,84 @@ def t_items(p):
         record("kit tapped at full health (precondition: kit carried, count > 0, full health)", False,
                f"use_medkit in touch_buttons={'use_medkit' in tb} items={items} health={s['health']}")
 
-    # --- tap the drone: -1 per tap down to 0, then it stays at 0 (never negative)
-    if "use_scout_drone" in tb and items.get("scout_drone", 0) > 0:
+    # --- the drone: when it is not the current accessory, open the list from the tab and pick it (it must NOT be used),
+    #     then tap the main button: -1 per tap down to 0, then it stays at 0 (never negative).  The default profile
+    #     carries a single accessory (the drone), so the list flow only runs with a bigger loadout.
+    if "scout_drone" in items and items.get("scout_drone", 0) > 0 and (s["accessory"] == "scout_drone" or "accessory_menu" in tb):
         n0 = int(items["scout_drone"])
-        cx, cy = tb["use_scout_drone"][0], tb["use_scout_drone"][1]
         a = st(p, 0.2)
-        seen = [n0]
-        for _ in range(n0 + 1):
-            tap_vp(p, cx, cy)
-            seen.append(int(st(p, 0.7)["items"].get("scout_drone", -99)))
-            time.sleep(0.2)
-        b = st(p, 0.2)
-        expected = [max(n0 - k, 0) for k in range(n0 + 2)]
-        record("drone tapped: count drops by 1 per tap, stops at 0 and never goes negative", seen == expected,
-               f"counts {seen} expected {expected}")
-        record("drone taps do not move the camera and keep touch mode",
-               abs(dyaw(a, b)) < 0.3 and abs(dpitch(a, b)) < 0.3 and b["touch_mode"],
-               f"d_yaw={dyaw(a, b):.2f} d_pitch={dpitch(a, b):.2f} touch_mode={b['touch_mode']}")
+        if s["accessory"] != "scout_drone":
+            tap_vp(p, tb["accessory_menu"][0], tb["accessory_menu"][1])
+            m = st(p, 0.8)
+            row = m["touch_buttons"].get("accessory_item_scout_drone")
+            record("tab tapped: the list opens upward with a row for the drone", bool(m["accessory_menu_open"]) and bool(row)
+                   and row[1] < tb[present_acc[0]][1] - 60.0, f"open={m['accessory_menu_open']} row={row}")
+            if row:
+                tap_vp(p, row[0], row[1])
+            c = st(p, 0.8)
+            record("picking the drone in the list closes it, makes it current and does not use it",
+                   c["accessory"] == "scout_drone" and not c["accessory_menu_open"] and c["items"].get("scout_drone") == n0,
+                   f"accessory={c['accessory']!r} open={c['accessory_menu_open']} drone {n0} -> {c['items'].get('scout_drone')}")
+            tb = c["touch_buttons"]
+        if "use_scout_drone" in tb:
+            cx, cy = tb["use_scout_drone"][0], tb["use_scout_drone"][1]
+            seen = [n0]
+            for _ in range(n0 + 1):
+                tap_vp(p, cx, cy)
+                seen.append(int(st(p, 0.7)["items"].get("scout_drone", -99)))
+                time.sleep(0.2)
+            b = st(p, 0.2)
+            expected = [max(n0 - k, 0) for k in range(n0 + 2)]
+            record("drone tapped: count drops by 1 per tap, stops at 0 and never goes negative", seen == expected,
+                   f"counts {seen} expected {expected}")
+            record("drone taps do not move the camera and keep touch mode",
+                   abs(dyaw(a, b)) < 0.3 and abs(dpitch(a, b)) < 0.3 and b["touch_mode"],
+                   f"d_yaw={dyaw(a, b):.2f} d_pitch={dpitch(a, b):.2f} touch_mode={b['touch_mode']}")
+        else:
+            record("drone button after picking it from the list", False, f"touch_buttons={sorted(tb)}")
     else:
-        record("drone tapped (precondition: drone carried with count > 0)", False,
-               f"use_scout_drone in touch_buttons={'use_scout_drone' in tb} items={items}")
+        record("drone tapped (precondition: drone carried with count > 0, current or reachable from the tab)", False,
+               f"items={items} accessory={s['accessory']!r} accessory_menu in touch_buttons={'accessory_menu' in tb}")
 
-    # --- Tiro still works with the row present (Mira and Recarregar are covered by g2)
-    a = st(p, 0.2)
-    p.tap(*FIRE, hold=0.15, fid=1)
-    b = st(p, 0.6)
-    record("Tiro still fires with the item row present", b["ammo_mag"] < a["ammo_mag"],
-           f"ammo {a['ammo_mag']} -> {b['ammo_mag']}")
+    # --- tapping outside the open list closes it (only with 2+ accessories: the default loadout has none to pick)
+    s2 = st(p, 0.3)
+    if "accessory_menu" not in s2["touch_buttons"]:
+        record("tab and list: not exercised (the default loadout carries a single accessory; unit tests cover them)", True,
+               f"accessory={s2['accessory']!r}")
+    else:
+        t = s2["touch_buttons"]["accessory_menu"]
+        tap_vp(p, t[0], t[1])
+        o = st(p, 0.8)
+        p.tap(*LOOK_A, hold=0.15, fid=1)
+        c2 = st(p, 0.8)
+        record("tap on the tab opens the list, a tap elsewhere closes it", bool(o["accessory_menu_open"]) and not c2["accessory_menu_open"],
+               f"open={o['accessory_menu_open']} after outside tap={c2['accessory_menu_open']}")
+
+    # --- weapon card: tapping the card of the other weapon takes it (and back)
+    s3 = st(p, 0.3)
+    cards3 = sorted(a for a in s3["touch_buttons"] if a.startswith("weapon_card_"))
+    if len(cards3) == 2:
+        slot0 = s3["weapon_slot"]
+        other = cards3[1] if slot0 == 0 else cards3[0]
+        tap_vp(p, s3["touch_buttons"][other][0], s3["touch_buttons"][other][1])
+        w1 = st(p, 0.9)
+        record("tap on the card of the other weapon takes that weapon", w1["weapon_slot"] != slot0,
+               f"weapon_slot {slot0} -> {w1['weapon_slot']} (tapped {other})")
+        back = sorted(a for a in w1["touch_buttons"] if a.startswith("weapon_card_"))
+        back_card = back[0] if w1["weapon_slot"] != 0 else back[1]
+        tap_vp(p, w1["touch_buttons"][back_card][0], w1["touch_buttons"][back_card][1])
+        w2 = st(p, 0.9)
+        record("and back again", w2["weapon_slot"] == slot0, f"weapon_slot {w1['weapon_slot']} -> {w2['weapon_slot']}")
+    else:
+        record("weapon card swap: not exercised (the default loadout carries one weapon; unit tests cover the taps)", True,
+               f"cards={cards3}")
+
+    # --- both Tiro buttons fire (the second one is new)
+    for label, pos in (("right", FIRE), ("left", FIRE_LEFT)):
+        a = st(p, 0.2)
+        p.tap(*pos, hold=0.15, fid=1)
+        b = st(p, 0.6)
+        record(f"{label} Tiro button fires", b["ammo_mag"] < a["ammo_mag"], f"ammo {a['ammo_mag']} -> {b['ammo_mag']}")
 
 
 GROUPS = {

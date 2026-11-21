@@ -285,11 +285,18 @@ const CLASSES: Array[Dictionary] = [
 			"set_reload(active: bool, progress: float) -> void", "set_touch(touch: bool) -> void",
 			"get_weapon_ids() -> Array[StringName]", "get_active_index() -> int", "get_name_text() -> String",
 			"get_mag_text() -> String", "get_reserve_text() -> String", "is_ammo_low() -> bool",
-			"get_chip_key_text(index: int) -> String", "get_portrait_path() -> String", "is_row_visible() -> bool"]},
+			"get_chip_key_text(index: int) -> String", "get_portrait_path() -> String", "is_row_visible() -> bool",
+			# HF7: touch cards (the Hud feeds them, TouchControls handles the taps)
+			"set_card_width(width_px: float) -> void",
+			"set_weapon_ammo(index: int, in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void",
+			"get_card_count() -> int", "get_card_weapon_indices() -> Array[int]", "is_cards_visible() -> bool"]},
 	{"name": "HealthStrip", "path": "res://src/hud/health_strip.gd", "base": "Control", "pkg": "A",
 		"methods": ["set_health(hp: float, max_hp: float) -> void", "set_vest(on: bool) -> void",
 			"set_touch(touch: bool) -> void", "get_value_text() -> String", "get_fill_pct() -> float",
-			"get_fill_color() -> Color", "has_vest() -> bool"]},
+			"get_fill_color() -> Color", "has_vest() -> bool",
+			# HF7: touch chip of the vest and the width the Hud gives the strip
+			"set_touch_width(width_px: float) -> void", "set_vest_reduction(fraction: float) -> void",
+			"get_vest_text() -> String", "get_chip_rect() -> Rect2"]},
 	# docs/arquitetura.md sections 6.8 and 8.4 (1.3, HF4): objectives and key legend of the first hunts (views, the Hud feeds them).
 	{"name": "ObjectivesPanel", "path": "res://src/hud/objectives_panel.gd", "base": "VBoxContainer", "pkg": "A",
 		"methods": ["set_dog_present(present: bool) -> void", "set_drone_present(present: bool) -> void",
@@ -325,7 +332,13 @@ const CLASSES: Array[Dictionary] = [
 			"set_dog_state(state: StringName) -> void", "flash_slot(slot_id: StringName, on: bool) -> void",
 			"get_button_center(action_name: StringName) -> Vector2", "get_button_radius(action_name: StringName) -> float",
 			# docs/arquitetura.md section 8.4 (1.3, HF4)
-			"set_action_labels(on: bool) -> void", "has_action_labels() -> bool"]},
+			"set_action_labels(on: bool) -> void", "has_action_labels() -> bool",
+			# HF7: PUBG-style layout (the Hud places the weapon cards and hands the rectangles over)
+			"set_weapon_card_rects(rects: Array[Rect2], actions: Array[StringName] = []) -> void",
+			"get_weapon_card_rects() -> Array[Rect2]", "get_bottom_block() -> Dictionary",
+			"get_probe_buttons() -> Dictionary", "get_accessory_current() -> StringName",
+			"get_accessory_ids() -> Array[StringName]", "is_accessory_menu_open() -> bool"],
+		"signals": ["layout_changed()"]},
 	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
 	# docs/multiplayer.md section 3.3 / 3.6: an ally in the world. The PlayerBase virtuals it overrides.
 	{"name": "RemoteHunter", "path": "res://src/player/remote_hunter.gd", "base": "PlayerBase", "pkg": "A",

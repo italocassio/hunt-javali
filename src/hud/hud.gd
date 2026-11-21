@@ -11,7 +11,10 @@ const TOUCH_OBJECTIVES_LEFT_PX: int = 128     # right of the touch zoom slider (
 const HEALTH_BOTTOM_PX: float = 14.0          # gap between the health strip and the bottom edge
 const BOTTOM_STACK_GAP_PX: float = 8.0        # gap between the health strip and the item bar above it
 const QUICKBAR_BOTTOM_PX: float = HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX + BOTTOM_STACK_GAP_PX
-const TOUCH_WEAPON_BOTTOM_PX: float = 320.0   # touch: the weapon panel sits in the left column, base 320 px above the bottom
+## Touch (HF7): the health bar sits 8 px above the bottom edge and the weapon cards 6 px above the bar, centred in the
+## block TouchControls derives from the free width (cards 167 px wide, down to 130 px on a 1280 px screen).
+const TOUCH_HEALTH_BOTTOM_PX: float = 8.0
+const TOUCH_CARDS_GAP_PX: float = 6.0
 const ALARM_REPEAT_S: float = 3.0
 const PROBE_INTERVAL_S: float = 0.1
 const PROBE_ROLES: Array[String] = ["offline", "host", "client"]   # Net.Role order
@@ -197,6 +200,9 @@ var _legend_panel: PanelContainer = null
 var _dog_breed: StringName = &""      # breed the card shows (from the hunt request)
 var _weapon_panel: WeaponPanel = WeaponPanel.new()
 var _weapon_frame: PanelContainer = null
+var _frame_fallback_style: StyleBox = null   # the "panel" override _panel() sets when the theme has no HudPanel
+var _weapon_nodes: Array[Weapon] = []        # the Weapon nodes of the player, slot order (cards show the pocket weapon too)
+var _touch_layout: bool = false              # the touch layout is applied (cards, wide health bar)
 var _health: HealthStrip = HealthStrip.new()
 var _quickbar: Quickbar = Quickbar.new()
 var _hint_banner: HintBanner = HintBanner.new()
@@ -241,6 +247,7 @@ func _ready() -> void:
 		_touch = TouchControls.new()
 	_touch.name = "TouchControls"
 	add_child(_touch)
+	_touch.layout_changed.connect(_on_touch_layout_changed)
 	_pause = AssetLoader.instantiate("res://src/hud/pause_overlay.tscn") as PauseOverlay
 	if _pause == null:
 		_pause = PauseOverlay.new()
@@ -266,7 +273,13 @@ func bind(player: PlayerBase, world: HuntWorld) -> void:
 	_weapon_panel.set_weapons(_player.get_weapon_ids())
 	_weapon_panel.set_active(_player.get_weapon_slot())
 	_last_weapon_slot = _player.get_weapon_slot()
+	_weapon_nodes.clear()
+	for weapon_id: StringName in _player.get_weapon_ids():
+		_weapon_nodes.append(_player.get_node_or_null("Weapon_%s" % weapon_id) as Weapon)
 	_health.set_vest(items != null and items.damage_reduction > 0.0)
+	_health.set_vest_reduction(items.damage_reduction if items != null else 0.0)
+	_apply_touch_bottom()
+	_feed_card_ammo()
 	if _world != null:
 		_minimap.map_rect = _world.get_map_rect()
 		_minimap.map_texture = _world.get_minimap_texture()
@@ -446,11 +459,13 @@ func _build_objectives() -> void:
 	box.add_child(_objectives_panel)
 
 
-## Weapon panel (docs §8.4): a HudPanel frame placed by _place_weapon_frame, bottom right on the desktop and in the left
-## column on touch.
+## Weapon panel (docs §8.4): a HudPanel frame placed by _place_weapon_frame, bottom right on the desktop; on touch the
+## frame loses its background and holds the weapon cards, bottom centre above the health bar.
 func _build_weapon_panel() -> void:
 	_weapon_frame = _panel(_weapon_panel, 8)
 	_weapon_frame.name = "WeaponFrame"
+	if _weapon_frame.has_theme_stylebox_override(&"panel"):
+		_frame_fallback_style = _weapon_frame.get_theme_stylebox(&"panel")
 	_root.add_child(_weapon_frame)
 
 
@@ -646,9 +661,9 @@ func _connect_events() -> void:
 func _apply_touch_layout(is_touch: bool) -> void:
 	if _topleft_margin != null:
 		_topleft_margin.add_theme_constant_override("margin_left", TOUCH_TOPLEFT_MARGIN_PX if is_touch else MARGIN_PX)
-	_health.set_touch(is_touch)
+	_touch_layout = is_touch
 	_weapon_panel.set_touch(is_touch)
-	_place_weapon_frame(is_touch)
+	_apply_touch_bottom()
 	_dog_card.set_touch(is_touch)
 	if _left_margin != null:
 		_left_margin.add_theme_constant_override("margin_left", TOUCH_OBJECTIVES_LEFT_PX if is_touch else MARGIN_PX)
@@ -657,22 +672,66 @@ func _apply_touch_layout(is_touch: bool) -> void:
 		_spectate_hint.text = SPECTATE_HINT_TOUCH if is_touch else SPECTATE_HINT_KEYS % InputSetup.get_key_label(&"spectate_next")
 
 
+## The bottom of the screen (docs §8.4): health bar, vest chip and weapon frame. Redone when the layout changes (touch
+## mode, window size, TouchControls laying out again).
+func _apply_touch_bottom() -> void:
+	var block: Dictionary = _touch.get_bottom_block() if _touch != null else {}
+	var touch_block: bool = _touch_layout and not block.is_empty()
+	var card_w: float = float(block.get("card_w", WeaponPanel.CARD_W_DEFAULT_PX))
+	_weapon_panel.set_card_width(card_w)
+	_health.set_touch(_touch_layout)
+	if touch_block:
+		_health.set_touch_width(card_w * 2.0 + float(WeaponPanel.CARD_GAP_PX))
+	_place_health(touch_block, block)
+	_place_weapon_frame(touch_block, block)
+	_sync_touch_cards()
+
+
+## Health strip anchors: bottom centre, HEALTH_BOTTOM_PX above the edge, growing from its centre (desktop); on touch,
+## as wide as the two cards, centred where the touch block says, TOUCH_HEALTH_BOTTOM_PX above the edge.
+func _place_health(touch: bool, block: Dictionary) -> void:
+	if touch:
+		var width: float = float(block["card_w"]) * 2.0 + float(WeaponPanel.CARD_GAP_PX)
+		_health.anchor_left = 0.0
+		_health.anchor_right = 0.0
+		_health.offset_left = float(block["center_x"]) - width * 0.5
+		_health.offset_right = float(block["center_x"]) + width * 0.5
+		_health.offset_top = -(TOUCH_HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX)
+		_health.offset_bottom = -TOUCH_HEALTH_BOTTOM_PX
+		_health.grow_horizontal = Control.GROW_DIRECTION_END
+	else:
+		_health.anchor_left = 0.5
+		_health.anchor_right = 0.5
+		_health.offset_left = 0.0
+		_health.offset_right = 0.0
+		_health.offset_top = -(HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX)
+		_health.offset_bottom = -HEALTH_BOTTOM_PX
+		_health.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_health.grow_vertical = Control.GROW_DIRECTION_BEGIN
+
+
 ## Weapon frame anchors (docs §8.4): bottom right with MARGIN_PX on the desktop (grows up and to the left); on touch,
-## the left column right of the zoom slider, base TOUCH_WEAPON_BOTTOM_PX above the bottom (grows up and to the right).
-func _place_weapon_frame(is_touch: bool) -> void:
+## no background, exactly over its cards: above the health bar, centred where the touch block says.
+func _place_weapon_frame(touch: bool, block: Dictionary) -> void:
 	if _weapon_frame == null:
 		return
-	if is_touch:
+	if touch:
+		var rect: Rect2 = _touch_cards_frame_rect(block)
+		_weapon_frame.add_theme_stylebox_override(&"panel", StyleBoxEmpty.new())
 		_weapon_frame.anchor_left = 0.0
 		_weapon_frame.anchor_right = 0.0
 		_weapon_frame.anchor_top = 1.0
 		_weapon_frame.anchor_bottom = 1.0
-		_weapon_frame.offset_left = float(TOUCH_OBJECTIVES_LEFT_PX)
-		_weapon_frame.offset_right = float(TOUCH_OBJECTIVES_LEFT_PX)
-		_weapon_frame.offset_top = -TOUCH_WEAPON_BOTTOM_PX
-		_weapon_frame.offset_bottom = -TOUCH_WEAPON_BOTTOM_PX
+		_weapon_frame.offset_left = rect.position.x
+		_weapon_frame.offset_right = rect.end.x
+		_weapon_frame.offset_top = rect.position.y
+		_weapon_frame.offset_bottom = rect.end.y
 		_weapon_frame.grow_horizontal = Control.GROW_DIRECTION_END
 	else:
+		if _frame_fallback_style != null:
+			_weapon_frame.add_theme_stylebox_override(&"panel", _frame_fallback_style)
+		else:
+			_weapon_frame.remove_theme_stylebox_override(&"panel")
 		_weapon_frame.anchor_left = 1.0
 		_weapon_frame.anchor_right = 1.0
 		_weapon_frame.anchor_top = 1.0
@@ -683,6 +742,42 @@ func _place_weapon_frame(is_touch: bool) -> void:
 		_weapon_frame.offset_bottom = -float(MARGIN_PX)
 		_weapon_frame.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_weapon_frame.grow_vertical = Control.GROW_DIRECTION_BEGIN
+
+
+## Rectangle of the weapon frame on touch (x absolute, y relative to the bottom edge, so negative): as many cards as
+## the panel shows (one or two), centred on the block.
+func _touch_cards_frame_rect(block: Dictionary) -> Rect2:
+	var card_w: float = float(block["card_w"])
+	var count: int = maxi(_weapon_panel.get_card_count(), 1)
+	var width: float = card_w * float(count) + float(WeaponPanel.CARD_GAP_PX) * float(count - 1)
+	var bottom: float = -(TOUCH_HEALTH_BOTTOM_PX + HealthStrip.HEIGHT_PX + TOUCH_CARDS_GAP_PX)
+	return Rect2(Vector2(float(block["center_x"]) - width * 0.5, bottom - WeaponPanel.CARD_H_PX),
+		Vector2(width, WeaponPanel.CARD_H_PX))
+
+
+## Tells TouchControls where the weapon cards are (this is the single source of the rectangles) and what a tap on
+## each one presses: `weapon_<n>` of its weapon, nothing for the weapon in hand. No cards: outside touch mode, in the
+## spectator view, or without a weapon.
+func _sync_touch_cards() -> void:
+	if _touch == null or not is_inside_tree():
+		return
+	var rects: Array[Rect2] = []
+	var actions: Array[StringName] = []
+	var block: Dictionary = _touch.get_bottom_block()
+	if _touch_layout and not block.is_empty() and _weapon_frame != null and _weapon_frame.visible:
+		var frame: Rect2 = _touch_cards_frame_rect(block)
+		var screen_h: float = get_viewport().get_visible_rect().size.y
+		var indices: Array[int] = _weapon_panel.get_card_weapon_indices()
+		for i: int in indices.size():
+			rects.append(Rect2(Vector2(frame.position.x + float(i) * (float(block["card_w"]) + float(WeaponPanel.CARD_GAP_PX)),
+				screen_h + frame.position.y), Vector2(float(block["card_w"]), WeaponPanel.CARD_H_PX)))
+			actions.append(&"" if indices[i] == _weapon_panel.get_active_index() else StringName("weapon_%d" % (indices[i] + 1)))
+	_touch.set_weapon_card_rects(rects, actions)
+
+
+func _on_touch_layout_changed() -> void:
+	if _touch_layout:
+		_apply_touch_bottom()
 
 
 # ---------------------------------------------------------------------------
@@ -733,8 +828,10 @@ func _process(delta: float) -> void:
 
 ## QA hook for the Web build: window.huntProbe = {x, z, yaw_deg, pitch_deg, touch_mode, ammo_mag, health,
 ## joystick_active, sprinting, look_active, run_locked, t_ms, slot, role, path, boars_alive,
-## allies: [{slot, x, z}], items: {item_id: count}, busy_item, binoculars, hint, touch_buttons: {action: [x, y, r]}},
-## refreshed 10 times per second. Solo: slot 0, role "offline", path "none", no allies.
+## allies: [{slot, x, z}], items: {item_id: count}, busy_item, binoculars, hint, touch_buttons: {id: [x, y, r]},
+## weapon_slot, accessory (item id of the Accessories button, "" = none), accessory_menu_open}, refreshed 10 times per second.
+## touch_buttons ids: the action of each button (`fire`, `use_medkit`, ...) plus `fire_left`, `accessory_menu` (the tab),
+## `accessory_item_<id>` (rows of the open list) and `weapon_card_<n>` (radius = half the card height). Solo: slot 0, role "offline", path "none", no allies.
 func _publish_probe() -> void:
 	var allies: Array[Dictionary] = []
 	var link_slot: int = -1
@@ -759,11 +856,11 @@ func _publish_probe() -> void:
 			item_counts[String(item_id)] = items.get_count(item_id)
 		busy_item = items.get_busy_item()
 		binoculars = items.is_binoculars_active()
-	var touch_buttons: Dictionary = {}    # action -> [x, y, radius] in viewport px, every button that exists now
-	for action_name: StringName in _touch.get_button_diameters():
-		var center: Vector2 = _touch.get_button_center(action_name)
-		touch_buttons[String(action_name)] = [snappedf(center.x, 0.1), snappedf(center.y, 0.1),
-			snappedf(_touch.get_button_radius(action_name), 0.1)]
+	var touch_buttons: Dictionary = {}    # id -> [x, y, radius] in viewport px: buttons, accessory tab / list, weapon cards
+	var probe_buttons: Dictionary = _touch.get_probe_buttons()
+	for button_id: String in probe_buttons:
+		var circle: Vector3 = probe_buttons[button_id]
+		touch_buttons[button_id] = [snappedf(circle.x, 0.1), snappedf(circle.y, 0.1), snappedf(circle.z, 0.1)]
 	var state: Dictionary = {
 		"x": snappedf(_player.global_position.x, 0.001),
 		"z": snappedf(_player.global_position.z, 0.001),
@@ -787,6 +884,9 @@ func _publish_probe() -> void:
 		"binoculars": binoculars,
 		"hint": String(_director.get_current_hint()),
 		"touch_buttons": touch_buttons,
+		"weapon_slot": _player.get_weapon_slot(),
+		"accessory": String(_touch.get_accessory_current()),
+		"accessory_menu_open": _touch.is_accessory_menu_open(),
 	}
 	JavaScriptBridge.eval("window.huntProbe = " + JSON.stringify(state) + ";", true)
 
@@ -803,9 +903,23 @@ func _update_weapon() -> void:
 	if slot != _last_weapon_slot:
 		_last_weapon_slot = slot
 		_weapon_panel.set_active(slot)
+		_apply_touch_bottom()   # the cards, the frame and the touch hit rectangles follow the weapon in hand
+	_feed_card_ammo()
 	_weapon_panel.set_ammo(w.ammo_in_mag, w.ammo_reserve, _player.has_infinite_reserve(), int(w.def.get("mag_size", 1)))
 	_weapon_panel.set_reload(w.is_reloading(), w.get_reload_progress())
 	_update_ammo_warning(w, slot)
+
+
+## Touch cards show the magazine and reserve of every weapon carried, the one in the pocket too (read from the Weapon
+## nodes of the player; the panel rewrites text only when a value changes).
+func _feed_card_ammo() -> void:
+	if not _touch_layout or _player == null:
+		return
+	var infinite: bool = _player.has_infinite_reserve()
+	for i: int in _weapon_nodes.size():
+		var carried: Weapon = _weapon_nodes[i]
+		if carried != null:
+			_weapon_panel.set_weapon_ammo(i, carried.ammo_in_mag, carried.ammo_reserve, infinite, int(carried.def.get("mag_size", 1)))
 
 
 ## Counted ammo (horde level 2 only): one message when the weapon in hand has only the magazine left ("Última carga",
@@ -1320,6 +1434,7 @@ func _on_spectate_changed(slot: int) -> void:
 		_spectate_banner.add_theme_color_override("font_color", HunterVisualBase.slot_color(slot))
 	_down_banner.visible = _local_down and not on and not _ended
 	_weapon_frame.visible = not on
+	_sync_touch_cards()
 	_crosshair.visible = not on
 	_minimap.center_color = HunterVisualBase.slot_color(slot) if slot != NO_SLOT else Minimap.COLOR_PLAYER
 	if _world != null:

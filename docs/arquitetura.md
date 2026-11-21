@@ -1,6 +1,6 @@
 # Caçada ao Javali — Contrato de Arquitetura
 
-Versão do contrato: **1.5** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
+Versão do contrato: **1.6** (1.2 = jogo 0.5.0: modo Horda Javali, contrato em `docs/horda.md`; 1.3 = frente
 HUD/onboarding, fases 1 e 2: teclas fixas por item, barra de itens, botões de item no toque, dicas das primeiras
 caçadas; §4, §6.3, §6.8, §8.4, §8.11, §9.1, §9.3, §10, §11, §14; fase 4, jogo 0.8.2: ação `help`, objetivos e
 legenda de teclas, nomes nos botões de toque; §4, §6.8, §8.4, §9.1, §14; 1.4 = fase 5, jogo 0.8.3: bússola com
@@ -11,7 +11,8 @@ jogo 0.8.4: painel da arma com retrato, munição grande e fileira de armas 1–
 embaixo no centro (`HealthStrip`), barra de itens sobe 26 px, FPS sozinho no canto superior esquerdo, painel da arma
 na coluna da esquerda no toque; §2, §4, §6.8, §7.9, §8.4, §12, §13.1, §14; 1.5 (implementado para 0.8.4):
 divergências aceitas pelo coordenador registradas em §6.8, §8.4, §12 e §14, e as folgas do toque refeitas no canvas
-virtual (4:3 = 1280×960, não 960×720)) · Godot **4.7.2** ·
+virtual (4:3 = 1280×960, não 960×720); 1.6 = HF7, só modo toque: layout estilo PUBG Mobile, dois botões de Tiro, botão
+Cura, botão Acessórios com lista, cartões de arma, chip do colete; §6.8, §8.4, §14) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
@@ -630,10 +631,10 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `Compass` | `src/hud/compass.gd` | Control | faixa da bússola (§8.4; 1.4: graus, colaterais, rumo no centro). `update_state(origin: Vector3, yaw_rad: float, marks: Array[Dictionary]) -> void` (assinatura de antes; `marks` = `{pos: Vector3, kind: StringName}`, `kind` de `MapMarkers`; `&"ally"` também tem `color: Color` e `down: bool`); `var objective: Vector3`, `var objective_icon: Texture2D` (horda, como antes); `static func bearing_of(dx: float, dz: float) -> float` (como antes); 1.4: `static func heading_deg_of(yaw_rad: float) -> int` (= `posmod(roundi(rad_to_deg(-yaw_rad)), 360)`), `static func label_for(deg: int) -> String` (múltiplo de 45 → "N", "NE", "L", "SE", "S", "SO", "O", "NO"; outro múltiplo de 15 → o número, ex. "105"; demais → ""), `get_heading_deg() -> int`, `get_heading_text() -> String` (ex. "135°") |
 | `Minimap` | `src/hud/minimap.gd` | Control | minimapa 180×180, centrado no caçador, norte para cima (§8.4). Membros de antes (`map_rect`, `crop_rects`, `dog_position`, `dog_target`, `marked`, `revealed`, `baits`, `objective`, `objective_icon`, `allies`, `ally_colors`, `ally_yaws`, `ally_down`, `center_color`, `update_player`, `is_in_view`); 1.4: `var map_texture: Texture2D = null` (imagem do mapa inteiro; `null` = fundo liso de antes), `get_map_src_rect() -> Rect2` (fatia da textura em texels) e `get_map_dst_rect() -> Rect2` (onde ela é desenhada, px do controle), recalculadas em `update_player` e quando `map_texture`/`map_rect` mudam; `Rect2()` sem textura ou fora do mapa |
 | `MapMarkers` | `src/hud/map_markers.gd` | RefCounted (static) | 1.4: única fonte das formas e cores dos marcadores da bússola e do minimapa (tabela em §8.4). Constantes `KIND_*` (StringName), `COLOR_*`, `OUTLINE_PX`, `DRAW_ORDER: Array[StringName]`; `static func draw(ci: CanvasItem, kind: StringName, at: Vector2, color: Color, half_px: float) -> void` (desenha a forma do tipo, com contorno preto, centrada em `at`; `half_px` = meia-largura / raio); `static func color_of(kind: StringName) -> Color` (implementado em 0.8.3: a cor do tipo pela tabela de §8.4; `&"ally"` não tem cor própria, a cor é a do slot); anel `dog_target`: `RING_WIDTH_FRAC = 0.25` (largura = 0,25 × `half_px`) e `RING_OUTLINE_LESS_PX = 0.5` (contorno = largura − 0,5). `&"ally"` não passa por aqui (losango na bússola, seta no minimapa, como antes) |
-| `WeaponPanel` | `src/hud/weapon_panel.gd` | VBoxContainer | 1.5, jogo 0.8.4: painel da arma (§8.4, "Painel da arma e barra de vida"); só vista, quem o alimenta é o `Hud`, que o põe dentro de um `HudPanel` (`Hud/Root/WeaponFrame`). `set_weapons(weapon_ids: Array[StringName]) -> void` (uma vez, no `bind`: cria `Row/Chip_<n>` para cada id, `n` = índice + 1, e carrega os retratos; chamar de novo refaz tudo; lista vazia = painel sem arma, sem fileira; lista não vazia ativa o índice 0 sozinha, como `set_active(0)`, implementado em 0.8.4), `set_active(index: int) -> void` (retrato e nome da arma `index`, chip realçado; fora da faixa = nada), `set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void` (só reescreve texto quando algum valor muda), `set_reload(active: bool, progress: float) -> void` (`progress` 0–1), `set_touch(touch: bool) -> void` (esconde/mostra as teclas dos chips); para tests: `get_weapon_ids() -> Array[StringName]` (cópia), `get_active_index() -> int` (-1 sem arma), `get_name_text() -> String`, `get_mag_text() -> String`, `get_reserve_text() -> String`, `is_ammo_low() -> bool`, `get_chip_key_text(index: int) -> String` (`""` no toque, fora da faixa ou sem tecla), `get_portrait_path() -> String` (caminho da textura do retrato ativo: o PNG, o SVG de fallback ou `""`), `is_row_visible() -> bool`. Filhos: `Name` (Label), `Main/Portrait` (TextureRect), `Main/Ammo/Mag`, `Main/Ammo/Reserve` (Labels), `ReloadBar` (ProgressBar), `Row` (HBoxContainer) com `Chip_<n>`, cada um com `Portrait` e `Key` |
-| `HealthStrip` | `src/hud/health_strip.gd` | Control | 1.5, jogo 0.8.4: barra de vida larga (§8.4); só vista. `const HEIGHT_PX: float = 28.0`; `set_health(hp: float, max_hp: float) -> void` (barra = `hp / maxf(max_hp, 1) × 100`, cor pela fração, número `ceili(hp)`; texto só reescrito quando o inteiro muda), `set_vest(on: bool) -> void`, `set_touch(touch: bool) -> void` (largura 400 → 300 px); para tests: `get_value_text() -> String`, `get_fill_pct() -> float` (0–100), `get_fill_color() -> Color`, `has_vest() -> bool`. Filhos: `Vest` (HBoxContainer com `Icon` e `Text`), `Bar` (ProgressBar, variação `HealthBar`), `Value` (Label). Comportamento (0.8.4): recém-criada mostra "1", barra cheia e verde (`_init` chama `set_health(1.0, 1.0)`) até o primeiro `set_health`; o `Hud.bind` a atualiza antes do primeiro quadro, então o jogador nunca vê esse "1" |
+| `WeaponPanel` | `src/hud/weapon_panel.gd` | VBoxContainer | 1.5, jogo 0.8.4: painel da arma (§8.4, "Painel da arma e barra de vida"); só vista, quem o alimenta é o `Hud`, que o põe dentro de um `HudPanel` (`Hud/Root/WeaponFrame`). `set_weapons(weapon_ids: Array[StringName]) -> void` (uma vez, no `bind`: cria `Row/Chip_<n>` para cada id, `n` = índice + 1, e carrega os retratos; chamar de novo refaz tudo; lista vazia = painel sem arma, sem fileira; lista não vazia ativa o índice 0 sozinha, como `set_active(0)`, implementado em 0.8.4), `set_active(index: int) -> void` (retrato e nome da arma `index`, chip realçado; fora da faixa = nada), `set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void` (só reescreve texto quando algum valor muda), `set_reload(active: bool, progress: float) -> void` (`progress` 0–1), `set_touch(touch: bool) -> void` (esconde as teclas dos chips; 1.6: no toque, dois cartões de arma no lugar de nome, retrato, munição, recarga e fileira); para tests: `get_weapon_ids() -> Array[StringName]` (cópia), `get_active_index() -> int` (-1 sem arma), `get_name_text() -> String`, `get_mag_text() -> String`, `get_reserve_text() -> String`, `is_ammo_low() -> bool`, `get_chip_key_text(index: int) -> String` (`""` no toque, fora da faixa ou sem tecla), `get_portrait_path() -> String` (caminho da textura do retrato ativo: o PNG, o SVG de fallback ou `""`), `is_row_visible() -> bool`; 1.6 (HF7, toque): `set_card_width(width_px: float) -> void`, `set_weapon_ammo(index: int, in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void` (munição da arma do bolso, para o cartão), `get_card_count() -> int`, `get_card_weapon_indices() -> Array[int]`, `is_cards_visible() -> bool`. Filhos: `Cards` (HBoxContainer, só no toque) com `Card_<n>` (classe interna `Card`, desenhada em `_draw`), `Name` (Label), `Main/Portrait` (TextureRect), `Main/Ammo/Mag`, `Main/Ammo/Reserve` (Labels), `ReloadBar` (ProgressBar), `Row` (HBoxContainer) com `Chip_<n>`, cada um com `Portrait` e `Key` |
+| `HealthStrip` | `src/hud/health_strip.gd` | Control | 1.5, jogo 0.8.4: barra de vida larga (§8.4); só vista. `const HEIGHT_PX: float = 28.0`; `set_health(hp: float, max_hp: float) -> void` (barra = `hp / maxf(max_hp, 1) × 100`, cor pela fração, número `ceili(hp)`; texto só reescrito quando o inteiro muda), `set_vest(on: bool) -> void`, `set_touch(touch: bool) -> void` (largura 400 → a do `set_touch_width`, padrão 342 px; no toque o colete sai da barra e vira um chip à esquerda dela, 1.6), `set_touch_width(width_px: float) -> void`, `set_vest_reduction(fraction: float) -> void` (chip "35%" no toque; sem redução, "Colete"), `get_vest_text() -> String`, `get_chip_rect() -> Rect2`; para tests: `get_value_text() -> String`, `get_fill_pct() -> float` (0–100), `get_fill_color() -> Color`, `has_vest() -> bool`. Filhos: `Vest` (HBoxContainer com `Icon` e `Text`), `Bar` (ProgressBar, variação `HealthBar`), `Value` (Label). Comportamento (0.8.4): recém-criada mostra "1", barra cheia e verde (`_init` chama `set_health(1.0, 1.0)`) até o primeiro `set_health`; o `Hud.bind` a atualiza antes do primeiro quadro, então o jogador nunca vê esse "1" |
 | `PauseOverlay` | `src/hud/pause_overlay.gd` (cena `.tscn`) | CanvasLayer | interna |
-| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria um botão por item usável, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `set_action_labels(on: bool) -> void` / `has_action_labels() -> bool` (jogo 0.8.2: com `true`, Tiro, Mira, Recarga, Troca e Agachar mostram o nome abaixo do círculo, como os botões de item e o do cão já mostram; o botão Pausa nunca; padrão `false`, quem liga é o `Hud`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe) |
+| `TouchControls` | `src/hud/touch/touch_controls.gd` (cena `.tscn`) | CanvasLayer | interna ao A. Públicos (1.3): `bind(player: Player)` (cria o botão Cura e o botão Acessórios, §8.4), `set_dog_present(present: bool) -> void`, `set_dog_state(state: StringName) -> void`, `flash_slot(slot_id: StringName, on: bool) -> void` (mesmos ids da `Quickbar`), `set_action_labels(on: bool) -> void` / `has_action_labels() -> bool` (jogo 0.8.2: com `true`, Tiro, Mira, Recarga e Agachar mostram o nome junto do círculo (acima dele perto da borda de baixo), como os botões de item e o do cão já mostram; o botão Pausa nunca; padrão `false`, quem liga é o `Hud`), `get_button_center(action_name: StringName) -> Vector2` / `get_button_radius(...)` (o argumento é o **id do botão**: a ação, ou `fire_left` para o segundo Tiro; valem para `use_*` e `dog_command`; `Vector2.INF` / 0 se o botão não existe); 1.6 (HF7, §8.4 "Layout de toque estilo PUBG"): `signal layout_changed()`, `set_weapon_card_rects(rects: Array[Rect2], actions: Array[StringName] = []) -> void`, `get_weapon_card_rects() -> Array[Rect2]`, `get_bottom_block() -> Dictionary` e `static compute_bottom_block(screen: Vector2, left_limit: float) -> Dictionary` (`{center_x, card_w, cura_x, acc_x}`), `get_probe_buttons() -> Dictionary` (`{id: Vector3(x, y, raio)}`), `get_accessory_current() -> StringName`, `get_accessory_ids() -> Array[StringName]`, `is_accessory_menu_open() -> bool` |
 | `VirtualJoystick` | `src/hud/touch/virtual_joystick.gd` | Control | interna |
 | `RemoteHunter` | `src/player/remote_hunter.gd` (cena `src/player/remote_hunter.tscn`, `ScenePaths.REMOTE_HUNTER`) | PlayerBase | caçador de outro jogador; API de `PlayerBase` (`setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld)`, `net_apply_state`…); `net_write_state` devolve os últimos 14 bytes recebidos (`NetCodec.HUNTER_STATE_BYTES`), então o anfitrião reenvia todos os caçadores sem caso especial; sem corpo e sem forma de colisão |
 | `SpectatorCamera` | `src/player/spectator_camera.gd` | Node3D | interna |
@@ -1242,14 +1243,13 @@ topo-esquerda contador de FPS (1.5; antes vida + colete, que desceram) + botão 
 15°, cardeais e colaterais, rumo em graus no centro, marcadores da tabela abaixo) com barra "Lavoura 87%" abaixo e
 aviso "Javalis na lavoura!" piscando; topo-direita minimapa 180×180 (1.4: sobre a imagem do mapa) e "Javalis 3/8"; centro mira; centro-baixo mensagem de abate ("Macho abatido — 132 kg ·
 R$ 990 · Tiro limpo! · Um tiro só!", 3 s); baixo-direita o painel da arma (1.5: retrato, nome, munição grande
-"5 | 30", barra de recarga e fileira de armas; no toque ele vai para a coluna da esquerda; a linha de item
+"5 | 30", barra de recarga e fileira de armas; no toque (1.6) são dois cartões embaixo no centro, ver "Layout de toque estilo PUBG"; a linha de item
 "Kit de primeiros socorros x2 [Q] [F]" desse painel **saiu** em 1.3); baixo-centro, de baixo para cima, a barra de
 vida larga (1.5, nos dois modos) e a barra de itens (só desktop) — ver "Painel da arma e barra de vida" abaixo; faixa
 de dica (abaixo); anel de dano direcional em torno do centro (1,2 s); cartão do cão abaixo do minimapa (abaixo).
 Toque (CanvasLayer 11, visível só em modo toque): joystick fixo à esquerda, arrastar fora dos botões para olhar
-(por índice de toque), botões desenhados pelo `TouchControls` que apertam a ação: Tiro, Mira, Recarregar,
-Trocar, Agachar, Pausa (posições de hoje, `TouchControls.BUTTONS`), o botão do cão e um botão por item
-(abaixo). Slider vertical de zoom quando mirando com `ads_zoom_max > ads_zoom_min`. Pausa (CanvasLayer 20,
+(por índice de toque), botões desenhados pelo `TouchControls` que apertam a ação: dois Tiros, Mira, Recarregar,
+Agachar, Pausa, o botão do cão, Cura e Acessórios (1.6, "Layout de toque estilo PUBG" abaixo; o botão Troca saiu). Slider vertical de zoom quando mirando com `ads_zoom_max > ads_zoom_min`. Pausa (CanvasLayer 20,
 `process_mode = ALWAYS`): "Retomar", "Configurações" (instancia `ScenePaths.SETTINGS_PANEL` se existir; sinal
 `closed`), "Desistir da caçada".
 
@@ -1276,25 +1276,77 @@ etiqueta escura no canto superior esquerdo, separação 8 px. No máximo 4 espa�
 desenho no próprio script (não são balanceamento). Desenho com `draw_*` em `_draw`; `queue_redraw` só quando
 um sinal muda o estado e a cada frame apenas enquanto há espaço em uso ou piscando.
 
-**Botões de item (toque)** — `TouchControls`. Saem o botão Item e a seta "»". Botões redondos de 76 px,
-modo "hold" (apertam a ação `use_<id>` do item; `use_binoculars` alterna no próprio `ItemBelt`). Fileira
-horizontal na altura do antigo botão Item: centro do i-ésimo item (i = índice em `get_usable_ids()`, 0 = o mais
-perto do polegar) em `(largura − (380 + 96·i), altura − 250)`. No máximo 3 itens (`loadout.item_slots`), então
-x vai de `largura − 572` a `largura − 380`: com 96 px de passo, os raios de toque (38 + 8) não se sobrepõem; a
-1280×720 o mais à esquerda fica em x = 708 (correção 1.5: uma janela 960×720, iPad 4:3, tem canvas virtual
-1280×960, ver "Posições" em "Painel da arma e barra de vida", então também x = 708; a largura virtual nunca fica abaixo
-de 1280), fora da área ativa do joystick (acaba em x ≈ 314 naquela altura); não invadem Tiro, Mira, Recarregar, Trocar e Agachar (o mais próximo,
-Agachar, fica 44 px abaixo). O botão do cão fica onde já estava (centro `(largura − 235, altura − 350)`, 76 px)
-e só existe enquanto houver cão (`set_dog_present`). Cada botão de item e o do cão mostram o nome curto
-(`short_name` do item, "Cão" para o cão; 16 px) logo abaixo do círculo, e os consumíveis mostram "x2" no canto
-superior direito. Letras de tecla não aparecem no toque. O ponto livre do `mobile_probe.py` (`LOOK_A`) fica a
-≈ 100 px CSS do terceiro botão de item (o probe exige 60).
+**Layout de toque estilo PUBG (HF7, contrato 1.6)** — só `InputSetup.is_touch_mode() == true`; o desktop não muda. Saem os
+botões Troca e a fileira de botões de item de 1.3; o kit vai para o botão Cura e ceva, drone e binóculo para um botão
+Acessórios. Posições em px do canvas virtual, medidas na foto do dono (celular 2400×1080, canvas 1532×720): "br" = a partir
+do canto inferior direito, centros, tudo em constantes nomeadas de `TouchControls`.
+
+| Peça | Posição (centro) | d | id (chave do probe) / ação |
+|---|---|---|---|
+| Tiro direito (principal) | br (245, 181) | 120 | `fire` / `fire` |
+| Tiro esquerdo | 69 da esquerda, 355 de baixo | 100 | `fire_left` / `fire` |
+| Joystick | (242, `A − 220`), raio 90 | | (era 190 / 160) |
+| Mochila (futuro) | (77, `A − 59`) | | só reservada (constante comentada): nenhum botão nem desenho |
+| Cura | bloco de baixo, 277 à esquerda do centro a 1532, y `A − 50` | 64 | `use_medkit` |
+| Acessórios | bloco de baixo, 216 à direita do centro a 1532, y `A − 50` | 70 | ação do acessório atual (`use_corn_bait`, ...) |
+| Recarregar | br (359, 47) | 64 | `reload` |
+| Agachar | br (253, 53) | 72 | `crouch` |
+| Mira | br (108, 342) | 76 | `aim` (alterna) |
+| Cão | br (235, 346) (350 até 0.9.0; 4 px para não encostar no cartão do cão) | 76 | `dog_command`, só com cão |
+| Interagir | br (410, 380) | 100 | `interact`, só com alvo ("Levantar" / "Pegar") |
+| Pausa | (56, 56) | 64 | `pause` |
+
+- **Dois Tiros.** `_centers` / `_radii` são indexados pelo **id do botão** (`fire`, `fire_left`, ...); os dois Tiros apertam a ação
+  `fire`, com **contagem de dedos** por ação: soltar um não solta `fire` enquanto o outro dedo segue. Os dois giram a câmera
+  ao arrastar (`LOOK_BUTTONS = [fire, fire_left, aim]`). `get_button_center(&"fire")` é o botão direito.
+- **Bloco de baixo** (`TouchControls.compute_bottom_block(tela, direita_do_joystick)`), da esquerda para a direita: Cura (64),
+  6, chip do colete (`HealthStrip.VEST_CHIP_W_PX` = 62), 6, cartão, 8, cartão, 10, Acessórios (70). Cartões de `CARD_W_MAX_PX = 167`
+  encolhendo até `CARD_W_MIN_PX = 130` para o bloco caber entre a borda direita do joystick (x 332) e a borda esquerda do
+  Recarregar menos 2 × `HIT_PADDING_PX`; centrado na tela quando cabe, senão empurrado para a esquerda. A 1532 ele cai nos números
+  da foto; a 1280 de largura os cartões ficam com 157,5 px e o centro em x 631,5.
+- **Cartões de arma** (`WeaponPanel` em modo toque, dentro do `WeaponFrame`, que no toque perde o fundo e fica exatamente sobre os
+  cartões): retrato (36% da largura), nome (13 px, reticências) e munição "10 | 50"; o da arma na mão com borda âmbar e barra de
+  recarga, o outro com `INACTIVE_ALPHA`. Ordem dos slots; **com uma arma só, um cartão só** (centrado); com mais de duas (horda) o da
+  arma na mão e o **próximo do ciclo** (tocar nele faz o papel do antigo Troca). O `Hud` posiciona e passa os retângulos
+  (fonte única) por `TouchControls.set_weapon_card_rects(rects, actions)`; `actions[i]` = `weapon_<n>` da arma do cartão, `&""` para
+  a arma na mão (toque consumido, sem efeito). O `TouchControls` trata o toque por índice, depois dos botões. A munição de cada cartão
+  vem dos nós `Weapon_<id>` do `Player` (`Hud._weapon_nodes`). `weapon_swap` continua no teclado.
+- **Barra de vida e colete.** Largura = a dos dois cartões, 8 px da borda (`TOUCH_HEALTH_BOTTOM_PX`), cartões 6 px acima
+  (`TOUCH_CARDS_GAP_PX`). O colete é um chip (ícone + "35%" = `damage_reduction` do item) colado à esquerda da barra, desenhado fora
+  do retângulo da faixa; só visual.
+- **Acessórios.** Itens de `InputSetup.ITEM_ACTIONS` sem o kit e que o caçador possui, nessa ordem. O padrão é o primeiro com contagem
+  diferente de 0 (o binóculo não tem contagem: nunca zera); se o atual chega a 0 e há outro em estoque, troca sozinho (só nesse
+  momento, escolher um zerado à mão o mantém). O botão principal mostra ícone e "x2" (binóculo aceso: anel âmbar) e **usa** o atual
+  (aperta a ação dele). Com 2+ acessórios aparece a seta (aba de 44×24 colada no topo do botão, área de toque 56×44) que abre uma lista
+  vertical **para cima** (linhas de 60 px, uma por acessório possuído, o atual com anel âmbar); tocar numa linha o torna o atual e fecha,
+  **sem usar**; tocar na seta ou em qualquer outro ponto fecha (o toque segue para o que estiver ali). `flash_slot(id)`: o atual pisca o
+  botão; outro pisca a seta (e a linha, com a lista aberta). O véu e o setor de "ocupado" valem para o botão principal e para o Cura.
+- **Nomes do onboarding** (`set_action_labels`): botões a menos de 130 px da borda de baixo (Cura, Acessórios, Recarga, Agachar) e o
+  Tiro direito desenham o nome **acima** do círculo (o de Acessórios, acima da seta); os demais, abaixo.
+- **Slider de zoom** (aparece mirando com zoom ajustável): coluna da esquerda, x 32–116, acima do Tiro esquerdo: de y 130
+  (a 720 de altura, y 130–299; a 960, y 136–539) até 16 px acima do círculo do Tiro esquerdo. O painel de objetivos continua em x ≥ 128.
+- **Posições nas três telas** (centros; `A` = altura; o bloco muda só em x):
+
+| Tela | Cartões (x) | Cura / Acessórios (x) | Chip do colete (x) | Recarregar / Agachar | Tiro dir. / Mira / Cão |
+|---|---|---|---|---|---|
+| 1532×720 | 595–937 (167) | 489 / 982 | 527–589 | (1173, 673) / (1279, 667) | (1287, 539) / (1424, 378) / (1297, 374) |
+| 1280×720 | 470–793 (157,5) | 364 / 838 | 402–464 | (921, 673) / (1027, 667) | (1035, 539) / (1172, 378) / (1045, 374) |
+| 1280×960 | 470–793 (157,5) | 364 / 838 | 402–464 | (921, 913) / (1027, 907) | (1035, 779) / (1172, 618) / (1045, 614) |
+
+  Cartões em y `A − 97` … `A − 42`, barra de vida em y `A − 36` … `A − 8`; Cura e Acessórios em y `A − 50`; seta em y 593–637
+  (a 720), linhas da lista em y 557, 491, 425 (3 acessórios). Nenhum círculo de toque (raio + `HIT_PADDING_PX`) encosta em outro,
+  nos cartões, na barra, no cartão do cão, no minimapa ou na área ativa do joystick (centro `(242, A − 220)`, raio 153), conferido por
+  `tests/unit/test_item_hud.gd` (3 telas) e por screenshots (HF7). Folgas conhecidas: com a lista aberta e o botão Interagir
+  visível ao mesmo tempo, a linha de cima da lista (a 1280 de largura) e o Interagir ficam a 10,8 px (só o preenchimento do toque
+  se sobrepõe, e a lista tem prioridade); o cartão do cão (não interativo) termina 11 px acima do círculo do botão Cão.
 
 Gancho de QA da build Web (`?probe=1`, `Hud._publish_probe`), campos novos em 1.3: `items` (objeto
 `{item_id: get_count}`, -1 para o binóculo), `busy_item` (String, `""` = nenhum), `binoculars` (bool),
 `hint` (id da dica atual, `""` = nenhuma) e `touch_buttons` (objeto `{ação: [x, y, raio]}` em px do viewport,
-para todo botão que existe agora, inclusive `use_*` e `dog_command`). O `mobile_probe.py` passa a ler a posição
-dos botões de item daí, em vez de constantes. Na Web, `?hints=0` na URL (lido pelo `Hud` do mesmo jeito que
+para todo botão que existe agora, inclusive `use_*` e `dog_command`; 1.6: também `fire_left`, o botão Acessórios sob a ação do
+acessório atual, `accessory_menu` (a seta, só com 2+ acessórios), `accessory_item_<id>` (linhas da lista, só aberta) e
+`weapon_card_<n>` com raio = metade da altura do cartão; e os campos `weapon_slot`, `accessory`, `accessory_menu_open`). O
+`mobile_probe.py` lê a posição dos botões daí, em vez de constantes. Na Web, `?hints=0` na URL (lido pelo `Hud` do mesmo jeito que
 `?probe=1`) deixa o `HintDirector` inativo e, desde o jogo 0.8.2, também esconde os objetivos, a legenda e os nomes dos
 botões de toque (a mesma chave): o `mobile_probe.py` abre com `?probe=1&hints=0` para que nada disso apareça no meio dos
 diffs de pixel (a faixa da dica cruza a área do diff da mira). A lógica das dicas é testada
@@ -1414,9 +1466,8 @@ nos botões de toque. Só vistas: o `Hud` as cria em `_ready`, decide quando apa
   cão) e "H Recolher". **H** (`help`) recolhe a legenda para a aba "H: Ajuda" e reabre. Todo rótulo de tecla vem de
   `InputSetup.get_key_label`; só o rótulo "Mouse" é texto fixo (o mouse não tem ação de teclado). A legenda não tem
   relógio: continua aberta até o jogador apertar H.
-- **Botões de toque.** Com `TouchControls.set_action_labels(true)` (o `Hud` liga junto com os objetivos), Tiro, Mira,
-  Recarga, Troca e Agachar mostram o nome (16 px, mesma posição dos nomes dos botões de item: 20 px abaixo da
-  borda do círculo); o Pausa nunca. Os botões de item e o do cão já mostram o nome sempre. Fora das primeiras caçadas
+- **Botões de toque.** Com `TouchControls.set_action_labels(true)` (o `Hud` liga junto com os objetivos), Tiro (os dois), Mira,
+  Recarga e Agachar mostram o nome (16 px, 20 px abaixo da borda do círculo; acima dele perto da borda de baixo, 1.6); o Pausa nunca. Os botões de item e o do cão já mostram o nome sempre. Fora das primeiras caçadas
   ou com `?hints=0` os botões ficam como antes.
 - **Sandbox** (`src/player/debug/player_sandbox.tscn`): `--onboarding` (ou `--hunts=N`) troca o perfil por um novo, com N
   caçadas jogadas (padrão 0), em `user://sandbox_save.json` (o save real não é tocado); sem isso o perfil do
@@ -1671,41 +1722,22 @@ versão anterior desta tabela tratava 960×720 como canvas de 960 px de largura,
 
 | Peça | Teclado/mouse | Toque |
 |---|---|---|
-| `HealthStrip` | âncoras x 0,5/0,5, y 1/1; `offset_left = offset_right = 0`, `grow_horizontal = BOTH`; `offset_bottom = −HEALTH_BOTTOM_PX` (−14), `offset_top = −(HEALTH_BOTTOM_PX + HEIGHT_PX)` (−42), `grow_vertical = BEGIN` → x `L/2 ± 200`, y `A − 42` … `A − 14` (1280×720: x 440–840, y 678–706) | as mesmas âncoras, 300 px → x `L/2 ± 150`, y `A − 42` … `A − 14` (1280×720: x 490–790, y 678–706; 4:3 = 1280×960: x 490–790, y 918–946; 1558×720: x 629–929, y 678–706) |
+| `HealthStrip` | âncoras x 0,5/0,5, y 1/1; `offset_left = offset_right = 0`, `grow_horizontal = BOTH`; `offset_bottom = −HEALTH_BOTTOM_PX` (−14), `offset_top = −(HEALTH_BOTTOM_PX + HEIGHT_PX)` (−42), `grow_vertical = BEGIN` → x `L/2 ± 200`, y `A − 42` … `A − 14` (1280×720: x 440–840, y 678–706) | 1.6 (HF7): âncoras à esquerda, posição absoluta: largura dos dois cartões, centrada no bloco de baixo, `offset_bottom = −TOUCH_HEALTH_BOTTOM_PX` (−8), y `A − 36` … `A − 8` (1280×720: x 470–793; 1532×720: x 595–937), com o chip do colete à esquerda (x 402–464 a 1280) |
 | `Quickbar` | centro-baixo como antes, `offset_bottom = −QUICKBAR_BOTTOM_PX` (−50), `offset_top = −QUICKBAR_BOTTOM_PX − Quickbar.SLOT_SIZE_PX` (−114) → x 500–780, y 606–670 | invisível (como antes) |
-| `WeaponFrame` | âncoras 1/1/1/1; `offset_left = offset_right = −MARGIN_PX`, `offset_top = offset_bottom = −MARGIN_PX`; `grow_horizontal = grow_vertical = BEGIN` → x `L − 272` … `L − 24` (248 px), base em `A − 24`, topo ≥ ≈ `A − 157` (5 armas recarregando; 1280×720: x 1008–1256, y ≈ 563–696) | âncoras x 0/0, y 1/1; `offset_left = offset_right = TOUCH_OBJECTIVES_LEFT_PX` (128); `offset_top = offset_bottom = −TOUCH_WEAPON_BOTTOM_PX` (−320); `grow_horizontal = END`, `grow_vertical = BEGIN` → x 128–376, base em `A − 320`, topo ≥ ≈ `A − 453` (1280×720 e 1558×720: y ≈ 267–400; 4:3 = 1280×960: y ≈ 507–640) |
+| `WeaponFrame` | âncoras 1/1/1/1; `offset_left = offset_right = −MARGIN_PX`, `offset_top = offset_bottom = −MARGIN_PX`; `grow_horizontal = grow_vertical = BEGIN` → x `L − 272` … `L − 24` (248 px), base em `A − 24`, topo ≥ ≈ `A − 157` (5 armas recarregando; 1280×720: x 1008–1256, y ≈ 563–696) | 1.6 (HF7): sem fundo (`StyleBoxEmpty`), exatamente sobre os cartões: x = o da barra de vida, y `A − 97` … `A − 42` (`TOUCH_CARDS_GAP_PX` = 6 acima da barra); a coluna da esquerda e `TOUCH_WEAPON_BOTTOM_PX` saíram |
 | `TopLeft` (só o FPS) | (24, 24) | (100, 24), à direita do botão Pausa (`TOUCH_TOPLEFT_MARGIN_PX`) |
 | `Objectives` | (24, 132), sem mudança | (128, 132), sem mudança; com 4 linhas termina em y ≈ 256, acima do painel da arma em qualquer proporção |
 
-Folgas conferidas (toque; centros e raios de `TouchControls.BUTTONS`, que ficam presos aos cantos, e da fileira de
-itens, §8.4; o caso mais apertado na horizontal é `L = 1280`, que vale para 16:9 e para 4:3):
-- `HealthStrip` (x `L/2 ± 150`, y `A − 42` … `A − 14`): zona ativa do joystick (centro `(190, A − 160)`, raio
-  90 × 1,7 = 153) alcança no máximo x ≈ 287 nessa altura (a faixa começa em x ≥ 490); base visível do joystick termina
-  em `A − 70`; Agachar (centro `(L − 410, A − 130)`, r 38) começa em x ≥ 832 e termina em `A − 92`, o nome dele em
-  ≈ `A − 68`; Mira (centro `(L − 290, A − 105)`, r 50) fica a ≥ 160 px do canto `(L/2 + 150, A − 42)` e o nome dela
-  ocupa x ≈ `L − 308` … `L − 272` (≥ 972); Tiro (centro `(L − 125, A − 130)`, r 65) começa em x ≥ 1090 e termina em
-  `A − 65`. Com `L` maior a folga só cresce (os botões andam com a borda direita, a faixa fica no centro).
-- `WeaponFrame` no toque (x 128–376, y ≈ `A − 453` … `A − 320`): slider de zoom em x 32–116; zona ativa do joystick
-  começa em `A − 313` (x = 190), 7 px abaixo da base, e mais abaixo nas outras colunas; fileira de itens: o mais à
-  esquerda em x `L − 572` (≥ 708; raio de toque a partir de x 662) e em y ≥ `A − 296`, longe nas duas direções.
-  Faixas por fração da altura, a 1280×720 e 1558×720: dica (0,30–0,37 = y 216–266) e mensagem de contexto (y 180–238)
-  acima; mensagem do cão (0,58–0,66 = y 418–475) abaixo; faixa da lavoura e aviso "Javalis na lavoura!" terminam antes
-  de y 170. A 1280×960 (4:3): dica (y 288–355), contexto (y 240–317) e mensagem de fim (0,38–0,52 = y 365–499) acima
-  do topo (≥ 507); mensagem de abate (0,72–0,84 = y 691–806) abaixo; a mensagem do cão (y 557–634) fica na altura do
-  painel (resíduo abaixo). A coluna da esquerda foi escolhida porque, no toque, a faixa de baixo não tem 248 px livres
-  entre o joystick e Agachar/itens.
+Folgas conferidas (toque): as do layout de 1.5 (coluna da esquerda, fileira de itens) deixaram de valer com o HF7; as novas estão em "Layout de
+toque estilo PUBG" (posições nas três telas). Teclado, sem mudança:
 - Teclado a 1280×720: legenda das primeiras caçadas termina em y 497 com cão, acima do `WeaponFrame` (≥ 563); a barra de
   vida (x ≤ 840) e a `Quickbar` (x ≤ 780) não alcançam o painel (x ≥ 1008).
 
 Resíduos aceitos (documentados para não virarem bug):
 - Teclado 1280×720: uma mensagem de abate muito longa (> ≈ 750 px a 30 px, combinações "Tiro limpo! · Um tiro só!")
   pode encostar no canto superior esquerdo do `WeaponFrame` (y 541–581 da mensagem contra o topo ≈ 563 do painel).
-- Toque 16:9 ou mais largo (`A = 720`; ex. 1280×720, 1558×720): a mensagem de fim de caçada (0,38–0,52 = y 274–374,
-  44 px, centrada) pode cobrir a parte direita do painel da arma nos 5 s antes do resultado quando o texto passa de
-  ≈ `2 × (L/2 − 376)` px (528 a 1280, 806 a 1558). Em 4:3 (`A = 960`) ela termina acima do painel.
-- Toque 4:3 (1280×960): a mensagem do cão (0,58–0,66 = y 557–634, 28 px, centrada) fica na altura do painel da arma
-  (y ≈ 507–640); só encosta nele (x ≤ 376) um texto com mais de ≈ 528 px (achado no fechamento da 1.5, sem tarefa).
-- Toque: a munição fica longe dos polegares (coluna da esquerda); troca consciente pelo espaço livre em 4:3.
+- Toque (HF7): a faixa da dica (0,30–0,37) cruza o painel de objetivos (x 128–460, y 132–256) quando os dois aparecem, como já
+  acontecia antes; as mensagens de abate (0,72–0,84, termina em y 604,8 a 720) ficam acima dos cartões (y ≥ 623).
 - FPS ligado em rede com várias ligações (várias linhas) pode encostar no topo dos objetivos (setting de
   desenvolvedor + primeiras caçadas + rede).
 - Horda, 1280×720 (anterior à Fase 6, sem tarefa): a faixa "Defenda o celeiro! A horda chega em N s" (`WaveBanner`,
@@ -3198,6 +3230,32 @@ Critérios de aceite:
   loadout real: painel da arma, faixa de vida e `Quickbar` como no item 1; `load_ab.py --throttle=4` sem etapa acima de
   700 ms (comparar a etapa do jogador com a 0.8.3; se subir demais, aplicar a válvula de §13.1); `mobile_probe.py`
   verde (o layout do toque mudou, embora o probe não leia o painel).
+
+### Frente HUD/gameplay — HF7: layout de toque estilo PUBG Mobile (contrato 1.6)
+Só o modo toque muda (`InputSetup.is_touch_mode()`); o desktop fica idêntico. Contrato em §6.8 (`TouchControls`, `WeaponPanel`,
+`HealthStrip`) e §8.4 ("Layout de toque estilo PUBG"). Nada muda em `project.godot`, `export_presets.cfg`, `data/`, `assets/`,
+`Quickbar`, mecânica de jogo nem no protocolo de rede. Em Sonnet.
+
+| Tarefa | Dono | Arquivos | Depende de |
+|---|---|---|---|
+| HF7-A — layout de toque (concluída) | game-developer (A) | `src/hud/touch/touch_controls.gd`, `src/hud/hud.gd`, `src/hud/weapon_panel.gd`, `src/hud/health_strip.gd` | — |
+| HF7-QA (concluída) | game-developer (A) | `tests/lib/contract_sigs.gd`, `tests/unit/test_item_hud.gd`, `tests/unit/test_weapon_health_hud.gd`, `tests/web/mobile_probe.py` | HF7-A |
+
+Critérios de aceite:
+- **HF7-A:** `check_scripts`, `unit_tests`, `flow_test`, `playthrough` e `net_unit --only=hud_net,hud_hints,spectator` verdes;
+  `hud_horde_test` e `hud_horde2_test` sem FAIL. Screenshots com janela (`player_sandbox`, `--touch=on --dog
+  --items=medkit,corn_bait,scout_drone,binoculars,leather_vest --weapons=carbine_22,shotgun_12 --frames=600`) a 1532×720,
+  1280×720 e 1280×960, cada um com a lista de acessórios aberta e com `--onboarding` (nomes); nada se sobrepõe. `--touch=off`: o
+  desktop igual ao de antes (diferença de pixels só na animação da arma).
+- **HF7-QA:** testes unitários dos dois Tiros (contagem de dedos), do bloco de baixo (números da foto a 1532), dos botões e da
+  lista de acessórios (padrão, troca sozinha, escolher sem usar, seta só com 2+, piscar), dos cartões (toque, prioridade de botão),
+  da ausência de sobreposição nas três telas, do chip do colete e dos cartões do `WeaponPanel`; `mobile_probe.py` com o fluxo
+  novo (g7: Cura, Acessórios, cartões, dois Tiros; a lista e a troca de arma só rodam com loadout maior que o padrão).
+- **Resíduos / divergências (HF7):** (1) com mais de duas armas (horda) os cartões mostram a arma na mão e a próxima do ciclo,
+  porque o botão Troca saiu; (2) o texto das dicas de toque ("Toque no drone", "Toque na ceva") e do objetivo "(botão Drone)" não
+  mudou: com a lista fechada o item pode estar atrás da seta, e a seta pisca nesse caso; (3) o slider de zoom foi para a coluna da
+  esquerda acima do Tiro esquerdo, não à direita dele, para não cruzar o painel de objetivos; (4) o cão passou de br (235, 350)
+  para (235, 346).
 
 ---
 

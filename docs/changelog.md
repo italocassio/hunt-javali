@@ -3,6 +3,17 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.1 — 20/11/2026
+
+**Celular: botões no lugar do PUBG.** No computador nada muda.
+- Dois botões de tiro, um de cada lado da tela. O joystick sobe um pouco para a direita.
+- As duas armas viram cartões embaixo, no centro, logo acima da barra de vida. Toque no cartão da outra arma para
+  trocar (sai o botão Troca).
+- Kit à esquerda das armas; colete com a redução de dano ("35%") ao lado da barra de vida.
+- Ceva, drone e binóculo num botão só, à direita das armas. A setinha abre a lista para escolher qual fica no botão.
+- Recarregar e agachar no canto de baixo à direita; mira acima do tiro direito, abaixo do cartão do cão.
+- O controle de zoom da luneta fica acima do tiro esquerdo.
+
 ## 0.9.0 — 20/11/2026
 
 **Horda: correções e Nível 2.**

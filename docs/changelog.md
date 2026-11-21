@@ -3,6 +3,14 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.4 — 21/11/2026
+
+**Cães em alto detalhe.** Os três cães foram refeitos no mesmo padrão do javali e do cenário.
+- Vira-lata Caramelo esguio de orelhas semi-eretas, Foxhound tricolor de pernas longas e orelhas caídas, Dogo
+  Argentino branco e musculoso de cabeça larga.
+- Pelagem com sombreamento, olhos, trufa e patas de verdade; correm, apontam, latem, mordem e recuam com mais vida.
+- Ficam nítidos de perto e leves de longe, inclusive vistos pela luneta.
+
 ## 0.9.3 — 21/11/2026
 
 **Horda: correções e ondas maiores.**

@@ -858,7 +858,13 @@ foi usado.
 - Referências por raça (o asset aplica as proporções internamente; o gameplay **não** escala o cão):
   `caramelo` cernelha 0,52 m, comprimento 0,85 m, caramelo liso; `foxhound` 0,60 m / 0,95 m, tricolor;
   `dogo` 0,64 m / 1,00 m, branco musculoso.
-- Orçamento: ≤ 500 triângulos, ≤ 6 `MeshInstance3D`, 1 material por raça.
+- Orçamento (HD, mesmo padrão do javali §7.1: LOD por `visibility_range` esticado pelo zoom, malhas
+  compartilhadas entre instâncias da mesma raça):
+  - perto (≤ 20 m): ≤ 2 500 triângulos, ≤ 8 `MeshInstance3D` visíveis (corpo, cabeça, 4 pernas, rabo, orelhas);
+  - médio (20–50 m): ≤ 800 triângulos, ≤ 8 `MeshInstance3D` visíveis;
+  - longe (> 50 m): ≤ 250 triângulos, ≤ 2 `MeshInstance3D` visíveis, sem pernas animadas;
+  - 1 material compartilhado (pelagem por cor de vértice + shader de pelo); `cast_shadow` só no corpo;
+  - montagem a frio ≤ 40 ms por raça (desktop), ≈ 0 em cache.
 - API:
 
 | Método | Contrato |

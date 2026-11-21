@@ -18,6 +18,14 @@ const BOAR_LODS: Array[Dictionary] = [
 	{"name": "far", "max_tris": 300, "max_meshes": 2, "samples": [BOAR_MID_END_M + 0.01, 100.0, 500.0]},
 ]
 const BREEDS: Array[StringName] = [&"caramelo", &"foxhound", &"dogo"]
+## Dog LOD contract (docs/arquitetura.md section 7.2): bands by visibility_range at rest (base FOV, no zoom).
+const DOG_NEAR_END_M: float = 20.0
+const DOG_MID_END_M: float = 50.0
+const DOG_LODS: Array[Dictionary] = [
+	{"name": "near", "max_tris": 2500, "max_meshes": 8, "samples": [0.5, 10.0, DOG_NEAR_END_M - 0.01]},
+	{"name": "mid", "max_tris": 800, "max_meshes": 8, "samples": [DOG_NEAR_END_M + 0.01, 35.0, DOG_MID_END_M - 0.01]},
+	{"name": "far", "max_tris": 250, "max_meshes": 2, "samples": [DOG_MID_END_M + 0.01, 100.0, 500.0]},
+]
 
 ## prop id -> [size X, Y, Z, max triangles] (docs/arquitetura.md section 7.4). Y is the height above the ground.
 const PROPS: Dictionary = {
@@ -288,6 +296,26 @@ func test_boar_visual_fits_hit_zones_and_reference_size() -> void:
 # Dog
 # --------------------------------------------------------------------------------------------
 
+## Checks one dog against the three LOD budgets of docs/arquitetura.md section 7.2 (same sampling as the boar).
+func _check_dog_lods(meshes: Array[MeshInstance3D], label: String) -> void:
+	for lod: Dictionary in DOG_LODS:
+		var worst_tris: int = 0
+		var worst_count: int = 0
+		for d: float in lod["samples"]:
+			var tris: int = 0
+			var count: int = 0
+			for mi: MeshInstance3D in meshes:
+				if _visible_at(mi, d):
+					count += 1
+					tris += _tris(mi.mesh)
+			worst_tris = maxi(worst_tris, tris)
+			worst_count = maxi(worst_count, count)
+			ok(count > 0, "%s: nenhuma malha visivel a %.1f m (buraco entre LODs)" % [label, d])
+		print("INFO dog LOD %-4s %-9s tris=%4d (<= %4d)  malhas=%d (<= %d)" % [lod["name"], label, worst_tris, lod["max_tris"], worst_count, lod["max_meshes"]])
+		ok(worst_tris <= int(lod["max_tris"]), "%s: LOD %s: %d triangulos (<= %d)" % [label, lod["name"], worst_tris, lod["max_tris"]])
+		ok(worst_count <= int(lod["max_meshes"]), "%s: LOD %s: %d MeshInstance3D visiveis (<= %d)" % [label, lod["name"], worst_count, lod["max_meshes"]])
+
+
 func test_dog_visual_contract() -> void:
 	var root: Node3D = _spawn(ScenePaths.DOG_VISUAL)
 	if root == null:
@@ -299,12 +327,26 @@ func test_dog_visual_contract() -> void:
 	ok(dog.get_node_or_null("Mouth") is Marker3D, "filho obrigatorio Mouth (Marker3D)")
 	_forbidden(dog, "dog_visual")
 	var snap: Array = _root_transform_snapshot(dog)
+	var dog_materials: Dictionary = {}
 	for breed: StringName in BREEDS:
 		var inst: DogVisualBase = _spawn(ScenePaths.DOG_VISUAL) as DogVisualBase
+		var t0: int = Time.get_ticks_usec()
 		inst.setup(breed)
-		ok(_meshes(inst).size() <= 6, "%s: %d MeshInstance3D (<= 6)" % [breed, _meshes(inst).size()])
-		ok(_tree_tris(inst) <= 500, "%s: %d triangulos (<= 500)" % [breed, _tree_tris(inst)])
-		ok(inst.get_node_or_null("Mouth") != null, "%s: Mouth presente apos setup" % breed)
+		print("INFO dog %-9s setup (montagem): %.2f ms (informativo, sem limite)" % [breed, float(Time.get_ticks_usec() - t0) / 1000.0])
+		var dog_meshes: Array[MeshInstance3D] = _meshes(inst)
+		_check_dog_lods(dog_meshes, str(breed))
+		for mi: MeshInstance3D in dog_meshes:
+			ok(mi.mesh != null, "%s: %s tem malha" % [breed, mi.get_path()])
+			var is_body: bool = mi.name in [&"BodyNear", &"BodyMid", &"Far"]
+			if not is_body:
+				eq(mi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "%s: %s sem sombra (so o corpo projeta)" % [breed, mi.get_path()])
+		var breed_materials: Dictionary = _unique_materials(dog_meshes)
+		ok(breed_materials.size() == 1, "%s: %d material(is) distinto(s) (== 1)" % [breed, breed_materials.size()])
+		for id: int in breed_materials:
+			dog_materials[id] = true
+		ok(inst.get_node_or_null("Mouth") is Marker3D, "%s: Mouth (Marker3D) presente apos setup" % breed)
+	ok(dog_materials.size() == 1, "material unico compartilhado entre as %d racas: %d (== 1)" % [BREEDS.size(), dog_materials.size()])
+	ok(dog.get_node_or_null("Mouth") is Marker3D, "Mouth (Marker3D) presente na raiz depois dos setups")
 	dog.setup(Ids.D_FOXHOUND)
 	for speed: float in [0.0, 2.0, 6.0, -1.0, 500.0]:
 		dog.set_locomotion(speed)

@@ -247,8 +247,8 @@ func flush() -> void:
 
 # --- internals ---
 
-## Server URL for this platform (section 9.9): the dev URL in native Godot and in pages served from
-## localhost, the production URL everywhere else. Test overrides only where they cannot reach players.
+## Server URL for this platform (section 9.9): the dev URL in the native editor binary and in pages served
+## from localhost, the production URL everywhere else (exported native builds included). Test overrides only where they cannot reach players.
 func _resolve_env() -> void:
 	if _env_resolved:
 		return
@@ -266,7 +266,8 @@ func _resolve_env() -> void:
 		else:
 			url = str(cfg["server_url"])
 	else:
-		url = str(cfg["dev_server_url"])
+		# Exported builds (APK, desktop) play online; the editor binary (tests, development) stays local.
+		url = str(cfg["server_url"] if OS.has_feature("template") else cfg["dev_server_url"])
 		for arg: String in OS.get_cmdline_user_args():
 			if arg.begins_with(SERVER_ARG):
 				url = arg.trim_prefix(SERVER_ARG)

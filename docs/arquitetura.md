@@ -2504,6 +2504,7 @@ O desenvolvedor gera códigos com `RedeemCode.generate` (ex.: uma cena de ferram
   "version": 1,
   "server_url": "wss://javali-salas.acpw01.workers.dev/ws",
   "dev_server_url": "ws://localhost:8787/ws",
+  "native_origin": "https://italocassio.github.io",
   "rtc_enabled": true,
   "ice_servers": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"],
   "ice_timeout_s": 8.0,
@@ -2529,7 +2530,9 @@ O desenvolvedor gera códigos com `RedeemCode.generate` (ex.: uma cena de ferram
 }
 ```
 `server_url` é a produção (`wss://javali-salas.acpw01.workers.dev/ws`, já no lugar do marcador `SUBDOMINIO`);
-`dev_server_url` vale em nativo e em página servida de `localhost`. `relay_hz` é a taxa de envio de um enlace
+`dev_server_url` vale no binário do editor (testes e desenvolvimento) e em página servida de `localhost`;
+build nativo exportado (APK, desktop) usa `server_url`. `native_origin` é o `Origin` que o cliente nativo envia
+no handshake, só para `server_url` (o navegador envia o seu; sem `Origin` a produção responde 403). `relay_hz` é a taxa de envio de um enlace
 enquanto está em relay (uma mensagem por tick por direção). Só em página servida de `localhost`/`127.0.0.1`
 valem as sobreposições por URL para teste: `?server=ws://127.0.0.1:PORT/ws`, `?relay_only=1` (não tenta
 WebRTC), `?drop_ice=1` (não envia candidatos: força o estouro de `ice_timeout_s`). Em nativo: `-- --server=…`.

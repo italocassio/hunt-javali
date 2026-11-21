@@ -2,6 +2,7 @@
   "version": 1,
   "server_url": "wss://javali-salas.acpw01.workers.dev/ws",
   "dev_server_url": "ws://localhost:8787/ws",
+  "native_origin": "https://italocassio.github.io",
   "rtc_enabled": true,
   "ice_servers": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"],
   "ice_timeout_s": 8.0,

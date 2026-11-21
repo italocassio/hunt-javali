@@ -49,6 +49,11 @@ func open(url: String, cfg: Dictionary, now_ms: int) -> bool:
 	_pong_window_ms = _pong_timeout_ms
 	_connect_deadline_ms = now_ms + int(float(cfg["connect_timeout_s"]) * 1000.0)
 	_ws = WebSocketPeer.new()
+	# Browsers send Origin on their own; native builds send none, and production refuses a missing Origin
+	# (403). Only to production: the local dev server refuses a non-local Origin.
+	if not OS.has_feature("web") and str(cfg.get("native_origin", "")) != "" \
+			and url.begins_with(str(cfg.get("server_url", ""))):
+		_ws.handshake_headers = PackedStringArray(["Origin: " + str(cfg["native_origin"])])
 	if _ws.connect_to_url(url) != OK:
 		_ws = null
 		_state = State.CLOSED

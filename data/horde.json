@@ -4,6 +4,8 @@
   "route_crop_margin_m": 4.0,
   "route_corner_out_m": 2.0,
   "route_waypoint_arrive_m": 3.0,
+  "route_room_inset_m": 0.45,
+  "route_dog_arrive_m": 1.0,
   "name": "Horda Javali",
   "description": "Defendam o celeiro de milho contra ondas de javalis. Todas as armas liberadas, munição sem fim. Se a horda comer o milho ou derrubar todos os caçadores, acabou.",
   "map_id": "mato_grosso",
@@ -12,42 +14,55 @@
   "intermission_s": 15.0,
   "barn_drain_mult": 1.0,
   "eat_ring_m": 10.0,
+  "eat_heap_margin_m": 0.35,
+  "eat_heap_standoff_m": 0.6,
   "to_barn_speed_frac": 0.8,
   "max_carcasses": 12,
-  "player_count_mult": [1.0, 1.4, 1.8, 2.2],
+  "player_count_mult": [1.0, 1.3, 1.6, 1.9],
   "extra_group_delay_s": 4.0,
   "kill_reward_mult": 0.35,
   "victory_bonus_money": 3000,
   "waves": [
     {"groups": [
-      {"members": ["sow", "piglet", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 0.0}]},
+      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 0.0},
+      {"members": ["piglet", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 6.0}]},
     {"groups": [
       {"members": ["sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0},
-      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 5.0}]},
+      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 5.0},
+      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 10.0}]},
     {"groups": [
       {"members": ["sow", "sow", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 0.0},
       {"members": ["boar"], "spawn_zone": 3, "delay_s": 6.0},
-      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 10.0}]},
+      {"members": ["sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 10.0},
+      {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 15.0}]},
     {"groups": [
       {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0},
       {"members": ["sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 6.0},
-      {"members": ["boar"], "spawn_zone": 3, "delay_s": 12.0}]},
+      {"members": ["boar"], "spawn_zone": 3, "delay_s": 12.0},
+      {"members": ["boar", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 18.0}]},
     {"groups": [
       {"members": ["boar", "sow", "sow", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 0.0},
       {"members": ["sow", "piglet", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 5.0},
-      {"members": ["boar", "sow", "piglet"], "spawn_zone": 0, "delay_s": 10.0}]},
+      {"members": ["boar", "sow", "piglet"], "spawn_zone": 0, "delay_s": 10.0},
+      {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 15.0}]},
     {"groups": [
       {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0},
       {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 5.0},
-      {"members": ["sow", "sow", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 10.0}]},
+      {"members": ["sow", "sow", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 10.0},
+      {"members": ["boar", "sow", "piglet"], "spawn_zone": 1, "delay_s": 15.0},
+      {"members": ["sow", "piglet", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 18.0}]},
     {"groups": [
       {"members": ["boar", "boar", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 0.0},
       {"members": ["boar", "sow", "sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 5.0},
-      {"members": ["sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 10.0}]},
+      {"members": ["sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 10.0},
+      {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 14.0},
+      {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 18.0}]},
     {"groups": [
       {"members": ["alpha", "boar", "boar"], "spawn_zone": 1, "delay_s": 0.0},
       {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 4.0},
-      {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 8.0}]}
+      {"members": ["boar", "sow", "sow", "piglet", "piglet", "piglet"], "spawn_zone": 2, "delay_s": 8.0},
+      {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 3, "delay_s": 12.0},
+      {"members": ["boar", "sow", "piglet", "piglet"], "spawn_zone": 1, "delay_s": 16.0}]}
   ],
   "levels": [
     {"level": 1, "name": "Nível 1",

@@ -83,6 +83,16 @@ var _hurt_timer: float = 0.0
 var _orbit_angle: float = 0.0
 var _last_pct_sent: int = -1
 var _local: bool = true                # this dog belongs to the hunter of this machine (always true offline)
+# Horde: the way round the open barn (_way_to). Rooms = route obstacles with an exit, their rect shrunk by
+# route_room_inset_m (walls, not the roof overhang); empty outside the horde.
+var _rooms: Array[Dictionary] = []
+var _route: PackedVector2Array = PackedVector2Array()
+var _route_i: int = 0
+var _route_goal: Vector2 = Vector2.INF
+var _route_timer: float = 0.0
+var _route_corner_out: float = 0.0
+var _route_arrive: float = 0.0           # a waypoint counts as reached this close (route_dog_arrive_m)
+var _route_replan: float = 0.0           # the goal moved this far since the plan: plan again (route_waypoint_arrive_m)
 
 
 func setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector3, p_owner_slot: int = 0) -> void:
@@ -107,6 +117,7 @@ func setup(p_breed_id: StringName, world: HuntController, spawn_position: Vector
 	_retreat_frac = float(def.get("retreat_health_frac", 0.3))
 	_return_frac = float(def.get("return_health_frac", 0.7))
 	_build_visual()
+	_read_rooms()
 	var p: Vector2 = _world.obstacles.resolve(Vector2(spawn_position.x, spawn_position.z), BODY_RADIUS_M)
 	position = Vector3(p.x, _world.get_height(p.x, p.y), p.y)
 	var owner_hunter: PlayerBase = _world.get_hunter(owner_slot)
@@ -248,7 +259,10 @@ func _go_to_follow_point(delta: float, always_run: bool) -> float:
 	var dist: float = get_xz().distance_to(point)
 	if dist > FOLLOW_STOP_M:
 		var speed: float = _run_speed if (always_run or dist > FOLLOW_RUN_M) else _follow_speed
-		_steer(Steering.seek(get_xz(), point), speed * Steering.arrive_scale(dist, FOLLOW_SLOW_RADIUS_M), delta)
+		var way: Vector2 = _way_to(point, delta)
+		var direct: bool = way == point
+		var slow: float = Steering.arrive_scale(dist, FOLLOW_SLOW_RADIUS_M) if direct else 1.0
+		_steer(Steering.seek(get_xz(), way), speed * slow, delta, direct)
 	return dist
 
 
@@ -296,7 +310,59 @@ func _tick_seek(delta: float) -> void:
 			if dist <= POINT_DISTANCE_M:
 				_enter_point()
 				return
-	_steer(Steering.seek(get_xz(), _target.get_xz()), _run_speed, delta)
+	var way: Vector2 = _way_to(_target.get_xz(), delta)
+	_steer(Steering.seek(get_xz(), way), _run_speed, delta, way == _target.get_xz())
+
+
+# --- Way round the barn (horde) ------------------------------------------------------------------
+
+## Horde (docs/plano_horda_nivel2.md C1-C2): the barn is an open room the dog walks in and out of by its front.
+## Its walls are a row of steering circles a straight seek cannot get round, so the way to a goal goes through
+## HordeRoute over the rooms among the horde route obstacles (the corn field is not one: the dog crosses it).
+func _read_rooms() -> void:
+	_rooms.clear()
+	var horde: Dictionary = Data.get_horde_level(_world.get_horde_level()) if _world.is_horde() else {}
+	_route_corner_out = maxf(float(horde.get("route_corner_out_m", 0.0)), 0.0)
+	_route_arrive = maxf(float(horde.get("route_dog_arrive_m", 0.0)), 0.0)
+	_route_replan = maxf(float(horde.get("route_waypoint_arrive_m", 0.0)), 0.0)
+	# The route rect runs to the roof's edge: a dog under the eave behind a wall is outside, not in the room.
+	var inset: float = maxf(float(horde.get("route_room_inset_m", 0.0)), 0.0)
+	for o: Dictionary in _world.horde_route_obstacles:
+		var exit: Vector2 = o.get("exit", Vector2.INF) as Vector2
+		if exit.is_finite():
+			_rooms.append({"rect": (o["rect"] as Rect2).grow(-inset), "exit": exit})
+
+
+## The point to seek now on the way to `goal`: `goal` itself outside the horde or on the last leg, else the next
+## waypoint (out of the room by its exit, round its corners, in by the exit). A leg to a waypoint is steered without
+## obstacle avoidance (the route already keeps off the walls, and the sideways pushes of a row of wall circles can
+## turn the dog into them); obstacles.resolve still keeps it out of every circle. Replanned every RETARGET_S and when
+## the goal (the hunter's side, a boar) has moved more than route_waypoint_arrive_m since the plan.
+func _way_to(goal: Vector2, delta: float) -> Vector2:
+	if _rooms.is_empty():
+		return goal
+	_route_timer -= delta
+	if _route_timer <= 0.0 or _route.is_empty() or goal.distance_to(_route_goal) > _route_replan:
+		_route_timer = RETARGET_S
+		_route_goal = goal
+		_route = _plan_route(get_xz(), goal)
+		_route_i = 0
+	while _route_i < _route.size() - 1 and get_xz().distance_to(_route[_route_i]) < _route_arrive:
+		_route_i += 1
+	if _route_i >= _route.size() - 1:
+		return goal
+	return _route[_route_i]
+
+
+## HordeRoute.plan over the rooms. A goal inside a room the dog is not in: to that room's exit first, then in.
+func _plan_route(from: Vector2, to: Vector2) -> PackedVector2Array:
+	for o: Dictionary in _rooms:
+		var r: Rect2 = o["rect"] as Rect2
+		if r.has_point(to) and not r.has_point(from):
+			var way: PackedVector2Array = HordeRoute.plan(from, o["exit"] as Vector2, _rooms, _route_corner_out)
+			way.append(to)
+			return way
+	return HordeRoute.plan(from, to, _rooms, _route_corner_out)
 
 
 # --- Abilities -----------------------------------------------------------------------------------
@@ -470,10 +536,12 @@ func _send_health(force: bool) -> void:
 			GameEvents.dog_health_changed.emit(get_health_pct())
 
 
-func _steer(desired: Vector2, speed: float, delta: float) -> void:
+func _steer(desired: Vector2, speed: float, delta: float, avoid: bool = true) -> void:
 	var pos: Vector2 = get_xz()
 	var fwd: Vector2 = Steering.dir_from_yaw(_yaw)
-	var dir: Vector2 = desired + _world.obstacles.avoidance(pos, fwd, AVOID_LOOKAHEAD_M, BODY_RADIUS_M)
+	var dir: Vector2 = desired
+	if avoid:
+		dir += _world.obstacles.avoidance(pos, fwd, AVOID_LOOKAHEAD_M, BODY_RADIUS_M)
 	var align: float = 1.0
 	if dir.length_squared() > 0.0001:
 		dir = dir.normalized()

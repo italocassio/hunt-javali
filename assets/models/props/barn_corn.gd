@@ -107,6 +107,14 @@ func setup(ring_radius_m: float) -> void:
 		_ensure_gnawed()
 
 
+## The outer heaps / sack stacks on the ring (the sack pair fits inside HEAP_RADIUS too).
+func get_heap_circles() -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	for p: Vector3 in _outer_base:
+		out.append(Vector3(p.x, p.z, HEAP_RADIUS))
+	return out
+
+
 func set_stock_pct(pct: float) -> void:
 	var stage: int = CornStockVisualBase.stage_for(pct)
 	if stage == _stage:

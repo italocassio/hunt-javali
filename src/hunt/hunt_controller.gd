@@ -124,6 +124,10 @@ var _horde: Dictionary = {}             # data/horde.json (empty outside the hor
 var _director: HordeDirector = null     # offline and host
 var _objective: Vector3 = Vector3.INF   # barn origin on the ground
 var _eat_ring_m: float = 0.0
+## Heaps of the corn stock on the eat ring, world (x, z, keep-out radius = heap radius + eat_heap_margin_m): steering
+## circles for the boars, and no eat point closer than keep-out + eat_heap_standoff_m to their centres.
+var _eat_heaps: PackedVector3Array = PackedVector3Array()
+var _eat_heap_standoff_m: float = 0.0
 var _stock_visual: CornStockVisualBase = null
 var _carcasses: Array[Node3D] = []      # dead boars (host) / dead puppets (client), oldest first
 var _max_carcasses: int = 0
@@ -1169,6 +1173,7 @@ func _build_objective() -> bool:
 	_stock_visual.global_position = _objective
 	_stock_visual.rotation.y = spawn.global_rotation.y
 	_stock_visual.set_stock_pct(100.0)
+	_build_eat_heaps()
 	GameEvents.crop_health_changed.connect(_on_stock_changed)
 	GameEvents.crop_under_attack.connect(_on_stock_attack)
 	_build_horde_level(spawn)
@@ -1212,10 +1217,36 @@ func _on_stock_attack(on: bool) -> void:
 		_stock_visual.set_under_attack(on)
 
 
-## Where boar `boar_id` eats: its own spot (golden angle) on the ring around the barn, inside the map margin.
+## The heaps of the stock visual sit on the eat ring: each one becomes a steering circle (radius + eat_heap_margin_m)
+## so no boar body walks into it; the boars eat from its edge (get_horde_eat_point).
+func _build_eat_heaps() -> void:
+	_eat_heaps.clear()
+	var margin: float = maxf(float(_horde.get("eat_heap_margin_m", 0.0)), 0.0)
+	_eat_heap_standoff_m = maxf(float(_horde.get("eat_heap_standoff_m", 0.0)), 0.0)
+	for c: Vector3 in _stock_visual.get_heap_circles():
+		var g: Vector3 = _stock_visual.global_transform * Vector3(c.x, 0.0, c.y)
+		var keep_out: float = c.z + margin
+		_eat_heaps.append(Vector3(g.x, g.z, keep_out))
+		obstacles.add_circle(g.x, g.z, keep_out)
+
+
+## Where boar `boar_id` eats: its own spot (golden angle) on the ring around the barn, inside the map margin. A spot
+## on a heap of the stock is pushed to the heap's edge (keep-out + eat_heap_standoff_m from its centre), beside it
+## along the ring; a spot right on the centre goes to the side given by the parity of boar_id.
 func get_horde_eat_point(boar_id: int) -> Vector2:
 	var a: float = float(boar_id) * 2.3999632
-	var p: Vector2 = Vector2(_objective.x, _objective.z) + Vector2(sin(a), -cos(a)) * _eat_ring_m
+	var centre: Vector2 = Vector2(_objective.x, _objective.z)
+	var p: Vector2 = centre + Vector2(sin(a), -cos(a)) * _eat_ring_m
+	for h: Vector3 in _eat_heaps:
+		var hc: Vector2 = Vector2(h.x, h.y)
+		var want: float = h.z + _eat_heap_standoff_m
+		var off: Vector2 = p - hc
+		if off.length_squared() >= want * want:
+			continue
+		if off.length_squared() < 1e-6:
+			var radial: Vector2 = (hc - centre).normalized() if hc.distance_squared_to(centre) > 1e-6 else Vector2.UP
+			off = Vector2(-radial.y, radial.x) * (1.0 if boar_id % 2 == 0 else -1.0)
+		p = hc + off.normalized() * want
 	return Steering.clamp_to_rect(p, _map_rect, Boar.MAP_MARGIN_M)
 
 

@@ -47,6 +47,15 @@ func set_under_attack(_on: bool) -> void:
 	pass
 
 
+## Ground footprint of every heap on the eating ring at full stock, in this node's frame: (x, z, radius) per heap.
+## Gameplay keeps the boars' bodies out of these circles (they eat from the edge). Valid after setup.
+func get_heap_circles() -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	for heap: MeshInstance3D in _fallback_heaps:
+		out.append(Vector3(heap.position.x, heap.position.z, FALLBACK_HEAP_RADIUS_M))
+	return out
+
+
 static func create_fallback() -> CornStockVisualBase:
 	var v: CornStockVisualBase = CornStockVisualBase.new()
 	v.name = "CornStockFallback"

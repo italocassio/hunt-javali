@@ -187,7 +187,7 @@ func test_horde_data_references_and_rules() -> void:
 			wave_total += members.size()
 		total += wave_total
 		wave_max = maxi(wave_max, wave_total)
-	eq(total, 85, "85 javalis base")
+	eq(total, 128, "128 javalis base")
 	var mults: Array = h.get("player_count_mult", [])
 	eq(mults.size(), int(Data.get_net().get("max_players", 0)), "um multiplicador por jogador da sala")
 	var prev: float = 1.0

@@ -441,6 +441,21 @@ func _clear_wave_debug(wave: int, timeout_s: float) -> bool:
 	return _hunt.get_horde_waves_cleared() >= wave or _hunt.is_hunt_over()
 
 
+## Solo boar count of one horde wave, straight from data/horde.json.
+func _horde_wave_total(wave_index: int) -> int:
+	var n: int = 0
+	for g: Variant in Data.get_horde()["waves"][wave_index]["groups"]:
+		n += (g["members"] as Array).size()
+	return n
+
+
+func _horde_solo_total() -> int:
+	var n: int = 0
+	for i: int in (Data.get_horde()["waves"] as Array).size():
+		n += _horde_wave_total(i)
+	return n
+
+
 func _wander_or_flee_count() -> int:
 	var n: int = 0
 	for s: Array in _states:
@@ -494,7 +509,7 @@ func _scn_horde_victory() -> void:
 	if not await _open(0, &"", Ids.MODE_HORDE):
 		return
 	var total: int = _hunt.get_boars_total()
-	_t.call("eq", total, 85, "boars_total = 85 (solo, a partida inteira)")
+	_t.call("eq", total, _horde_solo_total(), "boars_total = soma das ondas (solo, a partida inteira)")
 	_t.call("eq", _hunt.get_mode(), Ids.MODE_HORDE, "get_mode")
 	_t.call("ok", _hunt.crop.is_store_mode(), "CropManager em modo estoque")
 	_t.call("eq", _hunt.get_horde_wave(), 1, "onda 1 anunciada")
@@ -509,8 +524,8 @@ func _scn_horde_victory() -> void:
 	_hunt.debug_horde_start_next_wave()
 	await _sleep(0.2)
 	_t.call("eq", _hunt.get_horde_phase(), Ids.HP_WAVE, "onda 1 em curso")
-	_t.call("eq", _hunt.get_horde_wave_total(), 4, "onda 1 tem 4 javalis")
-	_t.call("eq", _hunt.get_horde_wave_remaining(), 4, "faltam 4")
+	_t.call("eq", _hunt.get_horde_wave_total(), _horde_wave_total(0), "onda 1 tem os javalis dos dados")
+	_t.call("eq", _hunt.get_horde_wave_remaining(), _horde_wave_total(0), "faltam todos os da onda 1")
 	_t.call("eq", _hunt.get_horde_countdown_s(), 0.0, "contador 0 na fase onda")
 	var bot: RefCounted = HuntBot.new()
 	bot.call("setup", self, _hunt)
@@ -695,7 +710,7 @@ func _scn_horde2_victory() -> void:
 	var p: PlayerBase = _hunt.get_player()
 	var total: int = _hunt.get_boars_total()
 	_t.call("eq", _hunt.get_horde_level(), 2, "H5: get_horde_level() == 2")
-	_t.call("eq", total, 85, "H5: boars_total = 85 (os mesmos dados de ondas)")
+	_t.call("eq", total, _horde_solo_total(), "H5: boars_total = soma das ondas (os mesmos dados de ondas)")
 	_t.call("ok", not p.has_infinite_reserve(), "H5: reserva contada (nao infinita)")
 	var weapon_id: StringName = p.get_current_weapon_id()
 	var mag_size: int = int(Data.get_weapon(weapon_id).get("mag_size", 0))
@@ -893,8 +908,9 @@ func _scn_horde_wave_cleared_same_frame() -> void:
 		return
 	_park()
 	_hunt.debug_horde_start_next_wave()
-	var got: bool = await _wait_until(func() -> bool: return _hunt.get_alive_boar_ids().size() >= 4, 60.0)
-	_t.call("ok", got, "os 4 javalis da onda 1 nao apareceram em 60 s")
+	var wave1: int = _horde_wave_total(0)
+	var got: bool = await _wait_until(func() -> bool: return _hunt.get_alive_boar_ids().size() >= wave1, 60.0)
+	_t.call("ok", got, "os %d javalis da onda 1 nao apareceram em 60 s" % wave1)
 	if not got:
 		return
 	var n_changed: int = _changed_log().size()
@@ -914,15 +930,15 @@ func _scn_horde_wave_cleared_same_frame() -> void:
 	for e: Array in _horde_log:
 		if e[0] == "progress" and int(e[1]) == 0:
 			zero_remaining += 1
-	_t.call("eq", zero_remaining, 1, "horde_wave_progress(0, 4) uma unica vez")
-	_t.call("eq", _hunt.get_boars_killed(), 4, "4 abates")
+	_t.call("eq", zero_remaining, 1, "horde_wave_progress(0, total) uma unica vez")
+	_t.call("eq", _hunt.get_boars_killed(), wave1, "todos os abates da onda 1")
 	_t.call("eq", _ended.size(), 0, "a caçada continua")
 	# killing the dead again, or ids that never existed, changes nothing
 	for id: int in ids:
 		_hunt.debug_kill_boar(id)
 	_hunt.debug_kill_boar(99999)
 	await _sleep(0.5)
-	_t.call("eq", _hunt.get_boars_killed(), 4, "repeticao ignorada")
+	_t.call("eq", _hunt.get_boars_killed(), wave1, "repeticao ignorada")
 	_t.call("eq", _hunt.get_horde_waves_cleared(), 1, "ainda 1 onda vencida")
 
 

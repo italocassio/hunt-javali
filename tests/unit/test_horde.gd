@@ -3,8 +3,8 @@ extends "res://tests/lib/test_case.gd"
 ## data/horde.json, the cut at 255 boar ids with inflated data, and the horde economy. No scene needed.
 
 const WIRE_ID_LIMIT: int = 255   # NetCodec.MAX_BOARS_PER_HUNT: boar ids travel as u8
-const SOLO_WAVE_TOTALS: Array[int] = [4, 6, 8, 10, 12, 14, 16, 15]
-const FOUR_PLAYER_WAVE_TOTALS: Array[int] = [9, 13, 18, 22, 26, 31, 35, 33]
+const SOLO_WAVE_TOTALS: Array[int] = [6, 9, 12, 15, 18, 21, 24, 23]
+const FOUR_PLAYER_WAVE_TOTALS: Array[int] = [11, 17, 23, 29, 34, 40, 46, 44]
 
 
 func _horde() -> Dictionary:
@@ -54,10 +54,10 @@ func test_seed_is_loaded_and_valid() -> void:
 
 func test_plan_waves_totals_by_player_count() -> void:
 	var h: Dictionary = _horde()
-	eq(_plan_total(HordeDirector.plan_waves(h, 1)), 85, "1 jogador: 85 javalis")
-	eq(_plan_total(HordeDirector.plan_waves(h, 2)), 119, "2 jogadores: 119 javalis")
-	eq(_plan_total(HordeDirector.plan_waves(h, 3)), 153, "3 jogadores: 153 javalis")
-	eq(_plan_total(HordeDirector.plan_waves(h, 4)), 187, "4 jogadores: 187 javalis")
+	eq(_plan_total(HordeDirector.plan_waves(h, 1)), 128, "1 jogador: 128 javalis")
+	eq(_plan_total(HordeDirector.plan_waves(h, 2)), 167, "2 jogadores: 167 javalis")
+	eq(_plan_total(HordeDirector.plan_waves(h, 3)), 205, "3 jogadores: 205 javalis")
+	eq(_plan_total(HordeDirector.plan_waves(h, 4)), 244, "4 jogadores: 244 javalis")
 
 
 func test_plan_waves_totals_by_wave() -> void:
@@ -118,10 +118,10 @@ func test_plan_waves_does_not_mutate_the_input() -> void:
 
 func test_plan_waves_odd_player_counts_are_safe() -> void:
 	var h: Dictionary = _horde()
-	eq(_plan_total(HordeDirector.plan_waves(h, 0)), 85, "0 jogadores = solo")
-	eq(_plan_total(HordeDirector.plan_waves(h, -3)), 85, "negativo = solo")
-	eq(_plan_total(HordeDirector.plan_waves(h, 5)), 187, "5 jogadores satura no multiplicador do ultimo")
-	eq(_plan_total(HordeDirector.plan_waves(h, 99)), 187, "99 jogadores satura")
+	eq(_plan_total(HordeDirector.plan_waves(h, 0)), 128, "0 jogadores = solo")
+	eq(_plan_total(HordeDirector.plan_waves(h, -3)), 128, "negativo = solo")
+	eq(_plan_total(HordeDirector.plan_waves(h, 5)), 244, "5 jogadores satura no multiplicador do ultimo")
+	eq(_plan_total(HordeDirector.plan_waves(h, 99)), 244, "99 jogadores satura")
 	eq(HordeDirector.plan_waves({}, 1).size(), 0, "dados vazios: plano vazio")
 	eq(HordeDirector.plan_waves({"waves": []}, 4).size(), 0, "sem ondas: plano vazio")
 
@@ -303,7 +303,7 @@ func test_validation_rejects_each_broken_rule() -> void:
 
 func test_plan_waves_by_level_respects_the_wire_limit() -> void:
 	## plan_waves takes the RESOLVED level (Data.get_horde_level), so every level stays <= 255 ids with 1..4 hunters.
-	var expected_level_1: Array[int] = [85, 119, 153, 187]
+	var expected_level_1: Array[int] = [128, 167, 205, 244]
 	for lv: int in range(1, Data.get_horde_level_count() + 1):
 		var cfg: Dictionary = Data.get_horde_level(lv)
 		ok(not cfg.is_empty(), "nivel %d resolvido" % lv)
@@ -319,7 +319,7 @@ func test_plan_waves_by_level_respects_the_wire_limit() -> void:
 	var p2: Array = HordeDirector.plan_waves(Data.get_horde_level(2), 1)
 	eq(p1.size(), p2.size(), "mesmo numero de ondas nos dois niveis do seed")
 	((p2[0] as Array)[0] as Dictionary)["members"].append("piglet")
-	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(1), 1)), 85, "alterar o plano do nivel 2 nao toca nos dados (nivel 1)")
+	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(1), 1)), 128, "alterar o plano do nivel 2 nao toca nos dados (nivel 1)")
 	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(2), 1)), _plan_total(p1), "nem no nivel 2 (funcao pura)")
 
 
@@ -328,8 +328,7 @@ func test_level_waves_override_keeps_the_budget_per_level() -> void:
 	var errs: PackedStringArray = _errors_with(func(h: Dictionary) -> void:
 		var waves: Array = (h["waves"] as Array).duplicate(true)
 		(waves[0]["groups"] as Array).append_array([
-			{"members": ["sow", "piglet", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0},
-			{"members": ["sow", "piglet", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0}])
+			{"members": ["sow", "piglet", "piglet", "piglet"], "spawn_zone": 0, "delay_s": 0.0}])
 		h["levels"][1]["overrides"]["waves"] = waves)
 	eq(errs.size(), 0, "override de ondas dentro do orcamento e aceito: %s" % str(errs))
 	var over: PackedStringArray = _errors_with(func(h: Dictionary) -> void:

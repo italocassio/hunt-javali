@@ -3,6 +3,14 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.3 — 21/11/2026
+
+**Horda: correções e ondas maiores.**
+- Os javalis não entram mais dentro dos montes de milho do celeiro: comem pela beira (Níveis 1 e 2).
+- O cão não fica mais preso dentro do celeiro: entra e sai pela frente e volta a seguir o caçador.
+- Cada onda da horda traz 50% mais javalis (85 para 128 na partida solo). Em grupo o aumento é um pouco menor.
+- Celular: o botão de agachar mostra uma pessoa agachada; o de recarregar ganhou os cartuchos na seta.
+
 ## 0.9.2 — 21/11/2026
 
 **iPhone: tela cortada e aparelho quente.**

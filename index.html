@@ -92,7 +92,27 @@ body {
 		</style>
 		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
-
+<meta name='apple-mobile-web-app-capable' content='yes'>
+<meta name='mobile-web-app-capable' content='yes'>
+<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>
+<style>
+html, body { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
+#canvas { position: fixed; top: 0; left: 0; }
+</style>
+<script>
+(function () {
+	/* iOS home-screen app: after portrait -> landscape WebKit can leave the page scrolled by the status bar height. */
+	function pin() { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; if (document.body) { document.body.scrollTop = 0; } }
+	function settle() {
+		pin();
+		[60, 250, 600, 1200].forEach(function (t) { setTimeout(function () { pin(); window.dispatchEvent(new Event('resize')); }, t); });
+	}
+	window.addEventListener('orientationchange', settle);
+	window.addEventListener('pageshow', settle);
+	window.addEventListener('resize', pin);
+	if (window.visualViewport) { window.visualViewport.addEventListener('resize', pin); }
+})();
+</script>
 	</head>
 	<body>
 		<canvas id="canvas">
@@ -111,7 +131,7 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":true,"fileSizes":{"index.pck":7480148,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":true,"fileSizes":{"index.pck":7483704,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 

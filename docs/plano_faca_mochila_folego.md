@@ -16,7 +16,7 @@ Identificadores em inglês; texto do jogador em PT-BR **exatamente** como na §2
 |---|---|---|---|
 | F1 | Mochila: níveis na loja, espaços de equipamento, save | 0.9.5 | publicada em 23/11/2026 (main `cbde11c`, gh-pages `5adaf79`). Resíduo: `UpgradeCard` já traz os ramos de texto/retrato da faca (ativam na F4); `SaveService.item_slots_for_level(level)` é helper estático extra |
 | F2 | Fôlego: corrida gasta, cansaço, barra no HUD | 0.9.6 | publicada em 23/11/2026 (main `9ec2d09`, gh-pages `e2928d9`). Resíduo: a marca do limiar é o nó irmão `StaminaMark` (`ColorRect` sob a `HealthStrip`, não filho de `Stamina`); `breath_tired` é sintetizado sob demanda (`SynthWeapons.LAZY_IDS`), sem MP3; `debug_set_stamina` não zera `_regen_wait`; `net_unit` ganhou também `player_horde2` |
-| F3 | Energético: consumível que enche o fôlego | 0.9.7 | pendente |
+| F3 | Energético: consumível que enche o fôlego | 0.9.7 | publicada em 23/11/2026 (main `2776b61`, gh-pages `404ee18`). Resíduo: a lista de 4 acessórios sobrepunha o botão `interact`, então o botão do toque **Levantar/Pegar** passou de `ox 410` para `ox 340` (§2.7, remédio de choque; `oy 380`, `d 100` iguais) — a tabela §14 de `arquitetura.md` ainda diz br (410, 380) e precisa ser corrigida na F4, porque o arquivo tinha trabalho não commitado de outra sessão; `ItemBelt.stamina_restore_frac` é lido com `maxf` entre os consumíveis; `sfx_library.gd` não precisou mudar (o som entrou por `SynthWeapons.LAZY_IDS`); `Hud._update_energy_hint` exige também caçador vivo |
 | F4 | Faca: golpe rápido sem slot, níveis de dano na loja, rede | 0.9.8 | pendente |
 
 Quem fecha uma fase troca "pendente" por "publicada em DD/MM/AAAA (main `<hash>`, gh-pages `<hash>`)" e anota resíduos.

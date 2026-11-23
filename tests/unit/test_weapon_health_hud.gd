@@ -575,6 +575,164 @@ func test_strip_nothing_is_clickable() -> void:
 
 
 # --------------------------------------------------------------------------------------------
+# Stamina bar of the HealthStrip (docs/plano_faca_mochila_folego.md 1.2 and 2.7; F2)
+# --------------------------------------------------------------------------------------------
+
+const STAMINA_BLUE: Color = Color("#8EC3E6")
+const STAMINA_RED: Color = Color("#D9452B")
+const RECOVER_FRAC: float = 0.35
+
+
+func _stamina_bar(strip: HealthStrip) -> ProgressBar:
+	return strip.get_node("Stamina") as ProgressBar
+
+
+func _stamina_mark(strip: HealthStrip) -> ColorRect:
+	return strip.get_node("StaminaMark") as ColorRect
+
+
+func test_stamina_strip_constants_and_height() -> void:
+	near(HealthStrip.HEIGHT_PX, 28.0, 0.0001, "HEIGHT_PX continua 28")
+	near(HealthStrip.STAMINA_BAR_H_PX, 4.0, 0.0001, "STAMINA_BAR_H_PX = 4")
+	near(HealthStrip.STAMINA_GAP_PX, 2.0, 0.0001, "STAMINA_GAP_PX = 2")
+	ok(HealthStrip.COLOR_STAMINA.is_equal_approx(STAMINA_BLUE), "COLOR_STAMINA = #8EC3E6")
+	ok(HealthStrip.COLOR_DANGER.is_equal_approx(STAMINA_RED), "COLOR_DANGER = #D9452B")
+	var strip: HealthStrip = _strip()
+	ok(strip.has_node("Stamina") and strip.get_node("Stamina") is ProgressBar, "filho Stamina (ProgressBar)")
+	ok(strip.has_node("StaminaMark") and strip.get_node("StaminaMark") is ColorRect, "filho StaminaMark (ColorRect), irmao da barra")
+	ok(not strip.get_node("Stamina").has_node("StaminaMark"), "a marca nao e filha da barra (a cor da barra nao a tinge)")
+	ok(not strip.is_stamina_visible(), "recem criada: faixa escondida")
+	ok(not _stamina_mark(strip).visible, "recem criada: marca escondida")
+	_end()
+
+
+func test_stamina_strip_hidden_when_full_and_visible_otherwise() -> void:
+	var strip: HealthStrip = _strip()
+	strip.set_stamina(1.0, false, RECOVER_FRAC)
+	ok(not strip.is_stamina_visible(), "folego cheio: faixa escondida")
+	ok(not _stamina_bar(strip).visible, "no Stamina escondido")
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	ok(strip.is_stamina_visible(), "0,5: faixa visivel")
+	strip.set_stamina(1.0, false, RECOVER_FRAC)
+	ok(not strip.is_stamina_visible(), "encheu de novo: some")
+	strip.set_stamina(0.999, false, RECOVER_FRAC)
+	ok(strip.is_stamina_visible(), "0,999: ainda visivel")
+	strip.set_stamina(1.0, true, RECOVER_FRAC)
+	ok(strip.is_stamina_visible(), "cansado: visivel mesmo com a fracao 1,0 (regra: so some cheio e nao cansado)")
+	strip.set_stamina(0.0, true, RECOVER_FRAC)
+	ok(strip.is_stamina_visible(), "zerado e cansado: visivel")
+	_end()
+
+
+func test_stamina_strip_colours() -> void:
+	var strip: HealthStrip = _strip()
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_BLUE), "normal: #8EC3E6")
+	strip.set_stamina(0.2, true, RECOVER_FRAC)
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_RED), "cansado: #D9452B")
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_BLUE), "saiu do cansaco: volta a #8EC3E6")
+	_end()
+
+
+func test_stamina_strip_fill_pct() -> void:
+	var strip: HealthStrip = _strip()
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	near(strip.get_stamina_fill_pct(), 50.0, 0.01, "0,5 -> 50%")
+	strip.set_stamina(0.0, true, RECOVER_FRAC)
+	near(strip.get_stamina_fill_pct(), 0.0, 0.01, "0 -> 0%")
+	strip.set_stamina(0.123, false, RECOVER_FRAC)
+	near(strip.get_stamina_fill_pct(), 12.3, 0.01, "0,123 -> 12,3%")
+	strip.set_stamina(1.7, false, RECOVER_FRAC)
+	ok(strip.get_stamina_fill_pct() <= 100.0, "fracao acima de 1 nao passa de 100")
+	strip.set_stamina(-0.4, true, RECOVER_FRAC)
+	ok(strip.get_stamina_fill_pct() >= 0.0, "fracao negativa nao passa de 0")
+	_end()
+
+
+func test_stamina_strip_mark_only_while_exhausted_and_at_the_threshold() -> void:
+	var strip: HealthStrip = _strip()
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	await frames(2)
+	var mark: ColorRect = _stamina_mark(strip)
+	ok(not mark.visible, "nao cansado: sem marca")
+	strip.set_stamina(0.1, true, RECOVER_FRAC)
+	await frames(2)
+	ok(mark.visible, "cansado: marca visivel")
+	var bar: Control = _stamina_bar(strip)
+	near(mark.size.x, HealthStrip.STAMINA_MARK_W_PX, 0.01, "marca de 1 px")
+	near(mark.size.y, HealthStrip.STAMINA_BAR_H_PX, 0.01, "marca com a altura da faixa")
+	near(mark.position.x + mark.size.x * 0.5, bar.position.x + RECOVER_FRAC * bar.size.x, 0.6, "marca em recover_frac da largura da barra")
+	near(mark.position.y, bar.position.y, 0.01, "marca alinhada a faixa")
+	ok(mark.color.is_equal_approx(HealthStrip.COLOR_TEXT), "marca em COLOR_TEXT")
+	strip.set_stamina(0.1, true, 0.6)
+	await frames(2)
+	near(mark.position.x + mark.size.x * 0.5, bar.position.x + 0.6 * bar.size.x, 0.6, "outro limiar (0,6): a marca se move")
+	strip.set_stamina(0.4, false, 0.6)
+	ok(not mark.visible, "saiu do cansaco: marca some")
+	_end()
+
+
+func test_stamina_strip_layout_sits_under_the_health_bar_inside_the_strip() -> void:
+	for touch: bool in [false, true]:
+		var strip: HealthStrip = _strip()
+		strip.set_touch(touch)
+		strip.set_vest(true)
+		strip.set_health(100.0, 100.0)
+		strip.set_stamina(0.5, false, RECOVER_FRAC)
+		await frames(2)
+		var tag: String = "toque" if touch else "teclado"
+		var bar: Control = strip.get_node("Bar") as Control
+		var st: Control = _stamina_bar(strip)
+		near(st.size.y, HealthStrip.STAMINA_BAR_H_PX, 0.01, "%s: altura da faixa de folego" % tag)
+		near(st.size.x, bar.size.x, 0.01, "%s: mesma largura da barra de vida" % tag)
+		near(st.position.x, bar.position.x, 0.01, "%s: mesmo x da barra de vida" % tag)
+		near(st.position.y, bar.position.y + bar.size.y + HealthStrip.STAMINA_GAP_PX, 0.01, "%s: 2 px abaixo da barra de vida" % tag)
+		ok(st.position.y + st.size.y <= strip.size.y + 0.01, "%s: dentro da faixa (y %s de %s)" % [tag, st.position.y + st.size.y, strip.size.y])
+		ok(bar.position.y >= 0.0, "%s: a barra de vida continua dentro da faixa" % tag)
+		near(strip.size.y, HealthStrip.HEIGHT_PX, 0.01, "%s: altura da faixa continua 28" % tag)
+		near(strip.get_combined_minimum_size().y, HealthStrip.HEIGHT_PX, 0.01, "%s: altura minima continua 28" % tag)
+	_end()
+
+
+func test_stamina_strip_leaves_the_health_readings_alone() -> void:
+	var strip: HealthStrip = _strip()
+	strip.set_health(37.0, 100.0)
+	var text_before: String = strip.get_value_text()
+	var pct_before: float = strip.get_fill_pct()
+	var colour_before: Color = strip.get_fill_color()
+	strip.set_stamina(0.1, true, RECOVER_FRAC)
+	strip.set_stamina(0.8, false, RECOVER_FRAC)
+	eq(strip.get_value_text(), text_before, "o numero da vida nao muda")
+	near(strip.get_fill_pct(), pct_before, 0.0001, "a barra de vida nao muda")
+	ok(strip.get_fill_color().is_equal_approx(colour_before), "a cor da vida nao muda")
+	eq(strip.get_value_text(), "37", "37 na faixa")
+	near(strip.get_fill_pct(), 37.0, 0.01, "37%")
+	ok(strip.get_fill_color().is_equal_approx(HealthStrip.COLOR_WARN), "37: ambar")
+	strip.set_health(100.0, 100.0)
+	eq(strip.get_value_text(), "100", "100 depois")
+	ok(strip.get_fill_color().is_equal_approx(HealthStrip.COLOR_GOOD), "cheia: verde")
+	_end()
+
+
+func test_stamina_strip_repeated_calls_are_stable() -> void:
+	# The Hud calls set_stamina every frame: identical calls and a change back and forth must leave the right state.
+	var strip: HealthStrip = _strip()
+	for i: int in 5:
+		strip.set_stamina(0.5, false, RECOVER_FRAC)
+	ok(strip.is_stamina_visible(), "5 chamadas iguais: visivel")
+	near(strip.get_stamina_fill_pct(), 50.0, 0.01, "50%")
+	strip.set_stamina(0.5, true, RECOVER_FRAC)
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_RED), "so o cansaco mudou: a cor acompanha")
+	strip.set_stamina(0.5, false, RECOVER_FRAC)
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_BLUE), "e volta")
+	strip.set_stamina(1.0, false, RECOVER_FRAC)
+	strip.set_stamina(1.0, false, RECOVER_FRAC)
+	ok(not strip.is_stamina_visible(), "cheio, repetido: escondido")
+	_end()
+
+
+# --------------------------------------------------------------------------------------------
 # Hud wiring: a real Player, a fake world
 # --------------------------------------------------------------------------------------------
 
@@ -772,6 +930,36 @@ func test_hud_health_follows_the_player() -> void:
 	player.debug_set_health(max_hp)
 	await frames(2)
 	ok(strip.get_fill_color().is_equal_approx(HealthStrip.COLOR_GOOD), "cheia de novo: verde")
+	_end()
+
+
+func test_hud_stamina_follows_the_player() -> void:
+	var hud: Hud = await _spawn()
+	if hud == null:
+		_end()
+		return
+	var player: Player = _player_of(hud)
+	var strip: HealthStrip = _strip_of(hud)
+	ok(not strip.is_stamina_visible(), "inicio: folego cheio, faixa escondida")
+	near(player.get_stamina_frac(), 1.0, 0.0001, "o Player comeca com o folego cheio")
+	player.debug_set_stamina(50.0)
+	await frames(2)
+	ok(strip.is_stamina_visible(), "folego 50: faixa visivel")
+	near(strip.get_stamina_fill_pct(), player.get_stamina_frac() * 100.0, 0.5, "a faixa acompanha o Player")
+	in_range(strip.get_stamina_fill_pct(), 50.0, 52.0, "~50% (regenera 6/s sem correr)")
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_BLUE), "nao cansado: azul")
+	player.debug_set_stamina(0.0)
+	await frames(2)
+	ok(player.is_exhausted(), "debug_set_stamina(0) cansa")
+	ok(strip.get_stamina_color().is_equal_approx(STAMINA_RED), "cansado: vermelha")
+	ok(_stamina_mark(strip).visible, "cansado: marca visivel")
+	in_range(strip.get_stamina_fill_pct(), 0.0, 3.0, "~0% (regenera 6/s sem correr)")
+	player.restore_stamina(1.0)
+	await frames(2)
+	ok(not player.is_exhausted(), "restore_stamina(1) sai do cansaco")
+	ok(not strip.is_stamina_visible(), "cheio: some")
+	ok(not _stamina_mark(strip).visible, "marca some")
+	eq(strip.get_value_text(), str(ceili(player.get_health())), "a vida continua igual")
 	_end()
 
 

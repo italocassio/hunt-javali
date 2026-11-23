@@ -23,9 +23,14 @@ const DANGER_FRAC: float = 0.3
 const OUTLINE_PX: int = 5
 const PANEL_RADIUS_PX: int = 8
 const BAR_RADIUS_PX: int = 4
+const STAMINA_BAR_H_PX: float = 4.0    # F2: thin stamina bar under the health bar
+const STAMINA_GAP_PX: float = 2.0      # health bar to stamina bar; the health bar also sits this much above centre
+const STAMINA_RADIUS_PX: int = 2
+const STAMINA_MARK_W_PX: float = 1.0   # mark at the recover threshold, only while exhausted
 const COLOR_GOOD: Color = Color("#3FAF5A")
 const COLOR_WARN: Color = Color("#F2C12E")
 const COLOR_DANGER: Color = Color("#D9452B")
+const COLOR_STAMINA: Color = Color("#8EC3E6")
 const COLOR_TEXT: Color = Color("#F4EFE6")
 const COLOR_PANEL: Color = Color(0.12, 0.10, 0.086, 0.72)
 const COLOR_OUTLINE: Color = Color(0.0, 0.0, 0.0, 0.9)
@@ -36,6 +41,9 @@ var _touch: bool = false
 var _touch_width_px: float = TOUCH_WIDTH_PX
 var _vest_reduction: float = 0.0
 var _shown_hp: int = -1
+var _stamina_frac: float = 1.0
+var _stamina_exhausted: bool = false
+var _stamina_recover: float = 0.0
 var _panel_style: StyleBox = null
 
 var _vest: HBoxContainer = HBoxContainer.new()
@@ -43,6 +51,8 @@ var _vest_icon: TextureRect = TextureRect.new()
 var _vest_text: Label = Label.new()
 var _bar: ProgressBar = ProgressBar.new()
 var _value: Label = Label.new()
+var _stamina_bar: ProgressBar = ProgressBar.new()
+var _stamina_mark: ColorRect = ColorRect.new()
 
 
 func _init() -> void:
@@ -74,6 +84,16 @@ func _init() -> void:
 	_bar.name = "Bar"
 	_style_bar(_bar)
 	add_child(_bar)
+
+	_stamina_bar.name = "Stamina"
+	_style_stamina_bar(_stamina_bar)
+	_stamina_bar.visible = false
+	add_child(_stamina_bar)
+	_stamina_mark.name = "StaminaMark"   # sibling of the bar, not a child: the bar's tint must not colour it
+	_stamina_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stamina_mark.color = COLOR_TEXT
+	_stamina_mark.visible = false
+	add_child(_stamina_mark)
 
 	_value.name = "Value"
 	_style_label(_value, VALUE_FONT_PX, COLOR_TEXT, &"HudBigLabel")
@@ -119,6 +139,33 @@ func set_health(hp: float, max_hp: float) -> void:
 		_shown_hp = shown
 		_value.text = str(shown)
 		_layout()
+
+
+## F2: stamina bar under the health bar. Hidden at full stamina; blue while recovering, red while exhausted, with a mark
+## where the exhaustion ends. The Hud calls this every frame: nothing is touched unless a value changed.
+func set_stamina(frac: float, exhausted: bool, recover_frac: float) -> void:
+	if is_equal_approx(frac, _stamina_frac) and exhausted == _stamina_exhausted and is_equal_approx(recover_frac, _stamina_recover) 			and _stamina_bar.visible == (frac < 1.0 or exhausted):
+		return
+	_stamina_frac = frac
+	_stamina_exhausted = exhausted
+	_stamina_recover = recover_frac
+	_stamina_bar.value = clampf(frac, 0.0, 1.0) * 100.0
+	_stamina_bar.modulate = COLOR_DANGER if exhausted else COLOR_STAMINA
+	_stamina_bar.visible = frac < 1.0 or exhausted
+	_stamina_mark.visible = exhausted
+	_layout_stamina()
+
+
+func get_stamina_fill_pct() -> float:
+	return _stamina_bar.value
+
+
+func is_stamina_visible() -> bool:
+	return _stamina_bar.visible
+
+
+func get_stamina_color() -> Color:
+	return _stamina_bar.modulate
 
 
 func set_vest(on: bool) -> void:
@@ -205,8 +252,19 @@ func _layout() -> void:
 	_value.size = Vector2(value_w, value_h)
 	_value.position = Vector2(size.x - PAD_X_PX - value_w, (size.y - value_h) * 0.5)
 	var bar_w: float = maxf(_value.position.x - GAP_PX - x, 0.0)
+	var bar_y: float = (size.y - BAR_HEIGHT_PX) * 0.5 - STAMINA_GAP_PX
 	_bar.size = Vector2(bar_w, BAR_HEIGHT_PX)
-	_bar.position = Vector2(x, (size.y - BAR_HEIGHT_PX) * 0.5)
+	_bar.position = Vector2(x, bar_y)
+	_stamina_bar.size = Vector2(bar_w, STAMINA_BAR_H_PX)
+	_stamina_bar.position = Vector2(x, bar_y + BAR_HEIGHT_PX + STAMINA_GAP_PX)
+	_layout_stamina()
+
+
+func _layout_stamina() -> void:
+	var w: float = _stamina_bar.size.x
+	_stamina_mark.size = Vector2(STAMINA_MARK_W_PX, STAMINA_BAR_H_PX)
+	_stamina_mark.position = _stamina_bar.position + Vector2(
+		clampf(_stamina_recover * w - STAMINA_MARK_W_PX * 0.5, 0.0, maxf(w - STAMINA_MARK_W_PX, 0.0)), 0.0)
 
 
 func _style_label(label: Label, font_px: int, color: Color, variation: StringName) -> void:
@@ -236,3 +294,21 @@ func _style_bar(bar: ProgressBar) -> void:
 		fill.set_corner_radius_all(BAR_RADIUS_PX)
 		bar.add_theme_stylebox_override("background", bg)
 		bar.add_theme_stylebox_override("fill", fill)
+
+
+## Own flat boxes (a 4 px bar does not suit the HealthBar theme); the fill is white and tinted through modulate.
+func _style_stamina_bar(bar: ProgressBar) -> void:
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.show_percentage = false
+	bar.min_value = 0.0
+	bar.max_value = 100.0
+	bar.custom_minimum_size = Vector2(0.0, STAMINA_BAR_H_PX)
+	var bg: StyleBoxFlat = StyleBoxFlat.new()
+	bg.bg_color = COLOR_BAR_BG
+	bg.set_corner_radius_all(STAMINA_RADIUS_PX)
+	var fill: StyleBoxFlat = StyleBoxFlat.new()
+	fill.bg_color = Color.WHITE
+	fill.set_corner_radius_all(STAMINA_RADIUS_PX)
+	bar.add_theme_stylebox_override("background", bg)
+	bar.add_theme_stylebox_override("fill", fill)
+	bar.modulate = COLOR_STAMINA

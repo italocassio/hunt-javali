@@ -381,3 +381,69 @@ func test_upgrades_validation_medkit_id_yields_two_errors() -> void:
 	# The id is both outside the allowed list and a reused item id (hint from S1): two distinct rules fire.
 	var n: int = _upgrade_errors_after(func(e: Dictionary) -> void: e["id"] = "medkit")
 	eq(n, 2, "id 'medkit' gera dois erros (fora da lista + repete item)")
+
+
+# --- Stamina (docs/plano_faca_mochila_folego.md 1.2 and 2.2; F2) ---
+
+func test_stamina_seed_values() -> void:
+	eq(Data.get_load_errors().size(), 0, "sem erros de carga: %s" % str(Data.get_load_errors()))
+	var s: Dictionary = Data.get_game().get("stamina", {})
+	ok(not s.is_empty(), "game.json tem o bloco stamina")
+	near(float(s.get("max", 0.0)), 100.0, 0.0001, "max 100")
+	near(float(s.get("sprint_drain_per_s", 0.0)), 10.0, 0.0001, "sprint_drain_per_s 10 (10 s de corrida)")
+	near(float(s.get("regen_per_s", 0.0)), 6.0, 0.0001, "regen_per_s 6")
+	near(float(s.get("regen_delay_s", -1.0)), 1.0, 0.0001, "regen_delay_s 1")
+	near(float(s.get("recover_threshold", 0.0)), 35.0, 0.0001, "recover_threshold 35")
+	near(float(s.get("exhausted_message_s", 0.0)), 2.5, 0.0001, "exhausted_message_s 2,5")
+	near(float(s.get("exhausted_message_interval_s", -1.0)), 30.0, 0.0001, "exhausted_message_interval_s 30")
+
+
+## Runs `mutate` on the live (deep-copied, then restored) game.stamina block and returns the errors _validate_stamina adds.
+## The mutation gets the whole game dictionary so a case can also remove the block.
+func _stamina_errors_after(mutate: Callable) -> PackedStringArray:
+	var game: Dictionary = Data._raw["game"]
+	var saved: Variant = (game["stamina"] as Dictionary).duplicate(true)
+	var base: int = Data._errors.size()
+	mutate.call(game)
+	Data._validate_stamina()
+	var added: PackedStringArray = PackedStringArray()
+	for i: int in range(base, Data._errors.size()):
+		added.append(Data._errors[i])
+	Data._errors.resize(base)
+	game["stamina"] = saved
+	return added
+
+
+func _stamina_set(key: String, value: Variant) -> Callable:
+	return func(game: Dictionary) -> void: game["stamina"][key] = value
+
+
+func test_stamina_validation_rejects_each_broken_rule() -> void:
+	# Pokes the live registry (restored after every case) to prove _validate_stamina reports each rule.
+	eq(_stamina_errors_after(func(_g: Dictionary) -> void: pass).size(), 0, "controle: dados intactos nao geram erro")
+	var cases: Array[Dictionary] = [
+		{"label": "bloco ausente", "mutate": func(g: Dictionary) -> void: g.erase("stamina"), "text": "lacks 'stamina'"},
+		{"label": "max = 0", "mutate": _stamina_set("max", 0.0), "text": "game.stamina.max"},
+		{"label": "sprint_drain_per_s = 0", "mutate": _stamina_set("sprint_drain_per_s", 0.0), "text": "game.stamina.sprint_drain_per_s"},
+		{"label": "regen_per_s = 0", "mutate": _stamina_set("regen_per_s", 0.0), "text": "game.stamina.regen_per_s"},
+		{"label": "exhausted_message_s = 0", "mutate": _stamina_set("exhausted_message_s", 0.0), "text": "game.stamina.exhausted_message_s"},
+		{"label": "regen_delay_s = -1", "mutate": _stamina_set("regen_delay_s", -1.0), "text": "game.stamina.regen_delay_s"},
+		{"label": "recover_threshold = 0", "mutate": _stamina_set("recover_threshold", 0.0), "text": "game.stamina.recover_threshold"},
+		{"label": "recover_threshold = max + 1", "mutate": _stamina_set("recover_threshold", 101.0), "text": "game.stamina.recover_threshold"},
+		{"label": "exhausted_message_interval_s = -1", "mutate": _stamina_set("exhausted_message_interval_s", -1.0), "text": "game.stamina.exhausted_message_interval_s"},
+		{"label": "campo ausente (regen_per_s)", "mutate": func(g: Dictionary) -> void: g["stamina"].erase("regen_per_s"), "text": "regen_per_s"},
+		{"label": "campo nao numerico (max)", "mutate": _stamina_set("max", "cem"), "text": "'max'"},
+	]
+	for c: Dictionary in cases:
+		var errs: PackedStringArray = _stamina_errors_after(c["mutate"])
+		ok(errs.size() > 0, "%s gera erro" % c["label"])
+		if errs.size() > 0:
+			ok(errs[0].begins_with("Data: "), "%s: mensagem comeca com 'Data: ' (%s)" % [c["label"], errs[0]])
+			ok(errs[0].contains(str(c["text"])), "%s: a mensagem cita '%s' (%s)" % [c["label"], c["text"], errs[0]])
+	# the limits that stay valid
+	eq(_stamina_errors_after(_stamina_set("recover_threshold", 100.0)).size(), 0, "recover_threshold = max e valido")
+	eq(_stamina_errors_after(_stamina_set("regen_delay_s", 0.0)).size(), 0, "regen_delay_s = 0 e valido")
+	eq(_stamina_errors_after(_stamina_set("exhausted_message_interval_s", 0.0)).size(), 0, "exhausted_message_interval_s = 0 e valido")
+	ok(_stamina_errors_after(_stamina_set("max", 30.0)).size() > 0, "max (30) abaixo do limiar (35) gera erro")
+	eq(Data.get_load_errors().size(), 0, "registro restaurado sem erros")
+	near(float(Data.get_game()["stamina"]["max"]), 100.0, 0.0001, "dados restaurados")

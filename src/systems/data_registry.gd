@@ -340,6 +340,31 @@ func _validate() -> void:
 	_validate_horde()
 	_validate_minimap()
 	_validate_upgrades()
+	_validate_stamina()
+
+
+# Stamina (docs/plano_faca_mochila_folego.md §2.2, game.json "stamina").
+func _validate_stamina() -> void:
+	var s: Variant = _raw["game"].get("stamina", null)
+	if not (s is Dictionary):
+		_errors.append("Data: game.json lacks 'stamina'")
+		return
+	var st: Dictionary = s
+	var fields: Array = ["max", "sprint_drain_per_s", "regen_per_s", "regen_delay_s", "recover_threshold", "exhausted_message_s", "exhausted_message_interval_s"]
+	for f: String in fields:
+		if not st.has(f) or not (st[f] is float or st[f] is int):
+			_errors.append("Data: 'game.stamina' lacks numeric field '%s'" % f)
+			return
+	for f: String in ["max", "sprint_drain_per_s", "regen_per_s", "exhausted_message_s"]:
+		if float(st[f]) <= 0.0:
+			_errors.append("Data: game.stamina.%s must be > 0" % f)
+	if float(st["regen_delay_s"]) < 0.0:
+		_errors.append("Data: game.stamina.regen_delay_s must be >= 0")
+	if float(st["exhausted_message_interval_s"]) < 0.0:
+		_errors.append("Data: game.stamina.exhausted_message_interval_s must be >= 0")
+	var thr: float = float(st["recover_threshold"])
+	if thr <= 0.0 or thr > float(st["max"]):
+		_errors.append("Data: game.stamina.recover_threshold must be in (0, max]")
 
 
 # Upgrades (docs/plano_faca_mochila_folego.md §2.2). Skipped when the file could not be read (error already recorded).

@@ -742,6 +742,46 @@ func test_horde_level2_sounds_exist_and_play() -> void:
 	await frames(2)
 
 
+func test_stamina_sound_exists_and_plays() -> void:
+	## docs/plano_faca_mochila_folego.md section 5 (ART2): breath_tired (~0.9 s), synthesized on demand (SynthWeapons.LAZY_IDS).
+	ok(Sfx.has_sound(&"breath_tired"), "Sfx.has_sound(breath_tired)")
+	ok(SynthWeapons.LAZY_IDS.has(&"breath_tired"), "breath_tired esta em SynthWeapons.LAZY_IDS")
+	var mark: int = error_mark()
+	Sfx.play(&"breath_tired")
+	Sfx.play_3d(&"breath_tired", Vector3(1.0, 1.0, 1.0))
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar breath_tired nao gera erros: %s" % str(errors_since(mark)))
+	# no recorded file: the synthesis fallback produces it, about 0.9 s long
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	ok(fb.call(&"has_sound", &"breath_tired"), "fallback: has_sound(breath_tired)")
+	var stream: AudioStreamWAV = fb.call(&"_get_stream", &"breath_tired") as AudioStreamWAV
+	ok(stream != null, "fallback: breath_tired sintetizado")
+	if stream != null:
+		var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+		var channels: float = 2.0 if stream.stereo else 1.0
+		var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+		ok(seconds >= 0.6 and seconds <= 1.3, "breath_tired dura %.2f s (esperado ~0,9 s)" % seconds)
+		ok(not stream.loop_mode == AudioStreamWAV.LOOP_FORWARD, "breath_tired nao e loop")
+		var peak: int = 0
+		if stream.format == AudioStreamWAV.FORMAT_16_BITS:
+			var i: int = 0
+			while i + 1 < stream.data.size():
+				var v: int = stream.data.decode_s16(i)
+				peak = maxi(peak, absi(v))
+				i += 2 * 16   # every 16th sample is enough to tell silence from sound
+		ok(stream.format != AudioStreamWAV.FORMAT_16_BITS or peak > 500, "breath_tired nao e silencio (pico %d)" % peak)
+	var live: Variant = (Sfx.get(&"_streams") as Dictionary).get(&"breath_tired")
+	ok(live is AudioStreamWAV or live is AudioStreamMP3, "breath_tired no Sfx: WAV sintetizado ou MP3 gravado")
+	# the prompts file lists it (the MP3 may come later)
+	var prompts_text: String = FileAccess.get_file_as_string("res://assets/audio/sfx_prompts.json")
+	ok(prompts_text.contains("\"id\": \"breath_tired\""), "sfx_prompts.json tem a entrada breath_tired")
+	var parsed: Variant = JSON.parse_string(prompts_text)
+	ok(parsed != null, "sfx_prompts.json continua JSON valido")
+	await frames(2)
+
+
 func test_horde_sounds_exist_and_play() -> void:
 	for id: StringName in [&"horde_wave_start", &"horde_wave_clear"]:
 		ok(Sfx.has_sound(id), "Sfx.has_sound(%s)" % id)

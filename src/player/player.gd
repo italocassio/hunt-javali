@@ -25,6 +25,12 @@ const STRIDE_M: float = 2.1
 const STEP_CROUCH_DB: float = -8.0
 const KNOCKBACK_DECAY: float = 7.0
 const HEARTBEAT_INTERVAL_S: float = 0.9
+const BREATH_INTERVAL_S: float = 1.4          # F2: panting sound repeat while exhausted
+const EXHAUSTED_TEXT: String = "Sem fôlego! Ande para recuperar."
+const STAMINA_FALLBACK: Dictionary = {        # same as the seed in data/game.json "stamina"; only if the block is missing
+	"max": 100.0, "sprint_drain_per_s": 10.0, "regen_per_s": 6.0, "regen_delay_s": 1.0, "recover_threshold": 35.0,
+	"exhausted_message_s": 2.5, "exhausted_message_interval_s": 30.0,
+}
 const DEATH_FALL_S: float = 0.8
 const DEATH_EYE_HEIGHT_M: float = 0.3
 const DEATH_ROLL_DEG: float = 70.0
@@ -78,6 +84,12 @@ var _was_captured: bool = false
 var _knock: Vector3 = Vector3.ZERO
 var _stride: float = 0.0
 var _heartbeat_t: float = 0.0
+var _stamina_cfg: Dictionary = {}
+var _stamina: float = 100.0                   # F2: 0.._stamina_max
+var _exhausted: bool = false
+var _regen_wait: float = 0.0                  # seconds left before the stamina starts to come back
+var _breath_t: float = 0.0
+var _exhausted_msg_wait: float = 0.0          # seconds before the exhausted message may show again (0 = may show)
 var _death_t: float = -1.0
 var _thermal_emitted: bool = false
 var _mouse_sens: float = 1.0
@@ -122,6 +134,8 @@ func _ready() -> void:
 	_cfg = Data.get_game().get("player", {})
 	_max_health = float(_cfg.get("max_health", 100.0))
 	_health = _max_health
+	_stamina_cfg = Data.get_game().get("stamina", {})
+	_stamina = _stamina_value("max")
 	_gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
 	_eye_height = float(_cfg.get("standing_eye_height_m", 1.65))
 	_head.position.y = _eye_height
@@ -152,6 +166,7 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 	_world = world
 	slot = Net.get_local_slot()
 	_set_up = true
+	_reset_stamina()
 	_items = ItemBelt.new()
 	_items.name = "ItemBelt"
 	add_child(_items)
@@ -318,6 +333,78 @@ func get_noise_radius() -> float:
 	return float(_cfg.get("noise_radius_walk_m", 0.0))
 
 
+## Stamina 0..1 (F2).
+func get_stamina_frac() -> float:
+	return _stamina / maxf(_stamina_value("max"), 0.001)
+
+
+## Where the exhaustion ends, as a fraction of the maximum (the mark on the HUD bar).
+func get_stamina_recover_frac() -> float:
+	return clampf(_stamina_value("recover_threshold") / maxf(_stamina_value("max"), 0.001), 0.0, 1.0)
+
+
+func is_exhausted() -> bool:
+	return _exhausted
+
+
+## Adds frac x max stamina (capped at the maximum); reaching the recover threshold ends the exhaustion. Dead or downed: nothing.
+func restore_stamina(frac: float) -> void:
+	if not _alive or frac <= 0.0:
+		return
+	_stamina = minf(_stamina + frac * _stamina_value("max"), _stamina_value("max"))
+	if _exhausted and _stamina >= _stamina_value("recover_threshold"):
+		_exhausted = false
+
+
+## Sandbox and tests only: clamps to 0..max; 0 turns the exhaustion on, at or above the threshold turns it off.
+func debug_set_stamina(value: float) -> void:
+	_stamina = clampf(value, 0.0, _stamina_value("max"))
+	if _stamina <= 0.0:
+		_exhausted = true
+	elif _stamina >= _stamina_value("recover_threshold"):
+		_exhausted = false
+
+
+func _stamina_value(key: String) -> float:
+	return float(_stamina_cfg.get(key, STAMINA_FALLBACK[key]))
+
+
+func _reset_stamina() -> void:
+	_stamina = _stamina_value("max")
+	_exhausted = false
+	_regen_wait = 0.0
+	_breath_t = 0.0
+
+
+## F2, once per physics frame, alive only (docs/plano_faca_mochila_folego.md 2.6). _sprinting was already decided with
+## `not _exhausted`, so an exhausted hunter walks and makes walking noise even with sprint held.
+func _update_stamina(delta: float) -> void:
+	if not _alive:
+		return
+	_exhausted_msg_wait = maxf(_exhausted_msg_wait - delta, 0.0)
+	if _sprinting:
+		_stamina = maxf(_stamina - _stamina_value("sprint_drain_per_s") * delta, 0.0)
+		_regen_wait = _stamina_value("regen_delay_s")
+		if _stamina <= 0.0:
+			_exhausted = true
+			if _exhausted_msg_wait <= 0.0:
+				_exhausted_msg_wait = _stamina_value("exhausted_message_interval_s")
+				GameEvents.hud_message_requested.emit(EXHAUSTED_TEXT, _stamina_value("exhausted_message_s"))
+	else:
+		_regen_wait = maxf(_regen_wait - delta, 0.0)
+		if _regen_wait <= 0.0:
+			_stamina = minf(_stamina + _stamina_value("regen_per_s") * delta, _stamina_value("max"))
+	if _exhausted and _stamina >= _stamina_value("recover_threshold"):
+		_exhausted = false
+	if _exhausted:
+		_breath_t -= delta
+		if _breath_t <= 0.0:
+			_breath_t = BREATH_INTERVAL_S
+			Sfx.play(&"breath_tired")
+	else:
+		_breath_t = 0.0
+
+
 func get_display_name() -> String:
 	var name_setting: Variant = Profile.get_setting("player_name")
 	return String(name_setting) if name_setting != null else ""
@@ -480,6 +567,7 @@ func revive(health: float) -> void:
 	_eye_height = _head.position.y          # rises back from the ground at the crouch rate
 	_roll_extra = _camera.rotation.z
 	_heartbeat_t = 0.0
+	_reset_stamina()
 	_ignore_fire_until_release = true       # a fire button still held must not shoot on the way up
 	_fire_buffer = 0.0
 	_bot_interact_pressed = false           # a press made while down takes no crate on the way up
@@ -889,7 +977,8 @@ func _physics_process(delta: float) -> void:
 	var want_aim: bool = _want_aim() or is_binocular_view()
 	var want_sprint: bool = _bot_sprint if _bot else (_input_open() and Input.is_action_pressed(&"sprint"))
 	_sprinting = want_sprint and move_in.y > SPRINT_FORWARD_MIN and not _crouching and not want_aim \
-		and _alive and not _items_busy()
+		and _alive and not _items_busy() and not _exhausted
+	_update_stamina(delta)
 	var speed: float = float(_cfg.get("walk_speed_mps", 4.0))
 	if _crouching:
 		speed = float(_cfg.get("crouch_speed_mps", 2.0))

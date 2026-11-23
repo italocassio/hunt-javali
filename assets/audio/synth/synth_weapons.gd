@@ -12,6 +12,16 @@ const IDS: Array[StringName] = [&"dry_fire", &"reload_start", &"reload_end", &"b
 	&"kill_confirm", &"crop_alarm", &"drone_buzz"]
 
 
+## Ids synthesized on first use only (no recorded file expected), see build_lazy().
+const LAZY_IDS: Array[StringName] = [&"breath_tired"]
+
+
+static func build_lazy(id: StringName) -> AudioStreamWAV:
+	match id:
+		&"breath_tired": return _breath_tired()
+	return null
+
+
 ## Gunshots are the most expensive sounds: built on first use, not at startup.
 static func build_shot(id: StringName) -> AudioStreamWAV:
 	match id:
@@ -169,6 +179,55 @@ static func _heartbeat() -> AudioStreamWAV:
 	SynthDsp.tone(b, 0.2, 0.25, 65.0, 40.0, 0.7, 0.07, SynthDsp.SHAPE_SINE, 0.004)
 	SynthDsp.noise(b, 0.0, 0.1, 0.15, 0.03, 0.1, 0.0, 0.004)
 	return SynthDsp.to_stream(b, 0.85)
+
+
+## Tired hunter, ~0.9 s: a heavy open-mouth exhale (noise through two vocal-tract resonances plus a faint
+## breathy voiced hum) followed by a quieter, shorter inhale. Starts and ends at silence so it loops cleanly.
+static func _breath_tired() -> AudioStreamWAV:
+	var dur: float = 0.9
+	var b: PackedFloat32Array = SynthDsp.buf(dur)
+	var n: int = b.size()
+	var rate: float = float(SynthDsp.RATE)
+	# Two-pole resonators (formants) fed by white noise.
+	var forms: Array[Vector2] = [Vector2(650.0, 0.9), Vector2(1250.0, 0.55), Vector2(2300.0, 0.2)]
+	var y1: Array[float] = [0.0, 0.0, 0.0]
+	var y2: Array[float] = [0.0, 0.0, 0.0]
+	var hp_z: float = 0.0
+	var ph: float = 0.0
+	for i in n:
+		var t: float = float(i) / rate
+		# Exhale 0.02..0.58 (fast swell, long fade), inhale 0.62..0.88 (soft swell, quick drop).
+		var env: float = 0.0
+		if t < 0.58:
+			var u: float = clampf((t - 0.02) / 0.56, 0.0, 1.0)
+			env = pow(sin(minf(u / 0.22, 1.0) * PI * 0.5), 1.5) * exp(-2.4 * maxf(u - 0.22, 0.0))
+			env *= 1.0 - smoothstep(0.85, 1.0, u)
+		else:
+			var v: float = clampf((t - 0.62) / 0.26, 0.0, 1.0)
+			env = 0.38 * sin(PI * pow(v, 0.7)) * (1.0 - 0.0 * v)
+		# Slight irregular flutter so it is not a clean synthetic swell.
+		env *= 0.9 + 0.1 * sin(TAU * 23.0 * t)
+		var w: float = SynthDsp.rnd()
+		var s: float = 0.0
+		for k in 3:
+			var f: float = forms[k].x * (1.0 if t < 0.6 else 0.85)
+			var r: float = 0.965
+			var c1: float = 2.0 * r * cos(TAU * f / rate)
+			var yn: float = w * (1.0 - r) + c1 * y1[k] - r * r * y2[k]
+			y2[k] = y1[k]
+			y1[k] = yn
+			s += yn * forms[k].y
+		# Remove rumble below ~120 Hz so it never reads as wind.
+		hp_z += 0.035 * (s - hp_z)
+		s -= hp_z
+		# Breathy voiced hum, exhale only.
+		var f0: float = 135.0 - 25.0 * clampf(t / 0.6, 0.0, 1.0)
+		ph += f0 / rate
+		var voice: float = (sin(TAU * ph) + 0.5 * sin(TAU * ph * 2.0)) * 0.05
+		if t >= 0.6:
+			voice = 0.0
+		b[i] = (s * 3.2 + voice) * env
+	return SynthDsp.to_stream(b, 0.5)
 
 
 static func _tick() -> AudioStreamWAV:

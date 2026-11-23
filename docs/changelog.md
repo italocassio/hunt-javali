@@ -3,6 +3,17 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.6 — 23/11/2026
+
+**Fôlego.** Correr agora cansa.
+- Dá para correr cerca de 10 segundos seguidos. Uma faixa azul fina, logo abaixo da barra de vida, mostra o fôlego e
+  some quando ele está cheio.
+- Com o fôlego zerado o caçador fica sem fôlego: só anda, faz barulho de caminhada e respira ofegante. A faixa fica
+  vermelha, com uma marca de onde ele volta a correr.
+- O fôlego começa a voltar 1 segundo depois de parar de correr. Com 35% o caçador volta a correr sozinho, se você
+  continuar segurando Shift ou o analógico.
+- Vale no contrato, na horda e no cooperativo. Ao ser levantado na horda, o fôlego volta cheio.
+
 ## 0.9.5 — 23/11/2026
 
 **Mochila.** Uma melhoria nova na Loja, no topo da aba Equipamentos.

@@ -22,6 +22,8 @@ extends Node
 ##   net_horde2     horde level 2 over the byte path: revive (HF_DOWNED, C_REVIVE, EV_HUNTER_REVIVED), ammo   RESULT:
 ##                  crates (C_AMMO_CRATE, EV_AMMO_CRATE, F8 replay), bleed-out, both down = DEFEAT_DEATH
 ##   net_mode       room mode (L_LOBBY / L_START byte of the mode), host_select_mode                NET_MODE_SELFTEST
+##   player_horde2  A1: horde level 2 player rules: counted ammo, crates, confine, downed / revive, bleed-out   RESULT:
+##   player_stamina F2: stamina: sprint drain, exhaustion, regen, recover threshold, message, HealthStrip bar   RESULT:
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
 ##   minimap_bake   1.4 (HF5): Mato Grosso baked to the minimap image: size, orientation, determinism   RESULT:
 ##                  (src/world/debug/minimap_selftest.tscn; prints MINIMAP_BAKE_MS, budget <= 150 ms)
@@ -56,6 +58,8 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "net_horde", "scene": "res://src/hunt/debug/net_horde_test.tscn", "limit_s": 120.0},
 	{"name": "net_horde2", "scene": "res://src/hunt/debug/net_horde2_test.tscn", "limit_s": 120.0},
 	{"name": "net_mode", "scene": "res://src/net/debug/net_mode_selftest.tscn", "limit_s": 60.0},
+	{"name": "player_horde2", "scene": "res://src/player/debug/player_horde2_test.tscn", "limit_s": 120.0},
+	{"name": "player_stamina", "scene": "res://src/player/debug/player_stamina_test.tscn", "limit_s": 120.0},
 	{"name": "remote_hunter", "scene": "res://src/player/debug/remote_sandbox.tscn", "limit_s": 60.0, "wall_clock": true},
 	{"name": "minimap_bake", "scene": "res://src/world/debug/minimap_selftest.tscn", "limit_s": 60.0},
 ]

@@ -24,6 +24,7 @@
     {"id": "player_heal", "duration_s": 0.8, "prompt": "Opening a first aid kit, zipper and bandage tearing, short"},
     {"id": "player_death", "duration_s": 1.5, "prompt": "Body collapsing onto dry grass and dirt, rifle dropping with metallic clatter, no voice"},
     {"id": "heartbeat", "duration_s": 1.0, "prompt": "Single strong human heartbeat, deep muffled lub-dub, close and tense"},
+    {"id": "breath_tired", "duration_s": 0.9, "prompt": "Tired hunter panting after a sprint, one heavy open-mouth exhale with a faint breathy voiced sigh, then a short soft inhale, close and dry, no wind, no music"},
     {"id": "binocular_in", "duration_s": 0.5, "prompt": "Raising binoculars, soft strap rustle and small plastic click"},
     {"id": "hit_marker", "duration_s": 0.5, "prompt": "Very short crisp tick, game hit confirmation click, clean and dry"},
     {"id": "kill_confirm", "duration_s": 0.7, "prompt": "Short satisfying low thump with a soft metallic ring, game kill confirmation, not musical"},

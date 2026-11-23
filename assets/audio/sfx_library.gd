@@ -45,7 +45,7 @@ var _audio_unlocked: bool = false
 
 func _ready() -> void:
 	_ensure_buses()
-	for list: Array[StringName] in [SynthWeapons.SHOT_IDS, SynthWeapons.IDS, SynthAnimals.IDS, SynthWorld.LAZY_IDS, SynthWorld.IDS]:
+	for list: Array[StringName] in [SynthWeapons.SHOT_IDS, SynthWeapons.IDS, SynthWeapons.LAZY_IDS, SynthAnimals.IDS, SynthWorld.LAZY_IDS, SynthWorld.IDS]:
 		for id: StringName in list:
 			_known[id] = true
 	var t0: int = Time.get_ticks_usec()
@@ -161,6 +161,9 @@ func _get_stream(id: StringName) -> AudioStream:
 		_build_animals()
 		if _streams.has(id):
 			return _streams[id]
+	if SynthWeapons.LAZY_IDS.has(id):
+		_streams[id] = SynthWeapons.build_lazy(id)
+		return _streams[id]
 	if SynthWorld.LAZY_IDS.has(id):
 		var s: AudioStreamWAV = SynthWorld.build_lazy(id)
 		_streams[id] = s

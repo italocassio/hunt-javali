@@ -249,7 +249,10 @@ const CLASSES: Array[Dictionary] = [
 				# docs/horda.md section 7
 				"get_weapon_count() -> int", "has_infinite_reserve() -> bool",
 				# docs/arquitetura.md section 6.8 (1.5, HF6)
-				"get_weapon_ids() -> Array[StringName]", "debug_set_health(hp: float) -> void"]},
+				"get_weapon_ids() -> Array[StringName]", "debug_set_health(hp: float) -> void",
+				# docs/plano_faca_mochila_folego.md section 2.6 (F2): stamina
+				"get_stamina_frac() -> float", "get_stamina_recover_frac() -> float", "is_exhausted() -> bool",
+				"restore_stamina(frac: float) -> void", "debug_set_stamina(value: float) -> void"]},
 	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
 	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
 		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
@@ -307,7 +310,10 @@ const CLASSES: Array[Dictionary] = [
 			"get_fill_color() -> Color", "has_vest() -> bool",
 			# HF7: touch chip of the vest and the width the Hud gives the strip
 			"set_touch_width(width_px: float) -> void", "set_vest_reduction(fraction: float) -> void",
-			"get_vest_text() -> String", "get_chip_rect() -> Rect2"]},
+			"get_vest_text() -> String", "get_chip_rect() -> Rect2",
+			# docs/plano_faca_mochila_folego.md section 2.7 (F2): the thin stamina bar under the health bar
+			"set_stamina(frac: float, exhausted: bool, recover_frac: float) -> void",
+			"get_stamina_fill_pct() -> float", "is_stamina_visible() -> bool", "get_stamina_color() -> Color"]},
 	# docs/arquitetura.md sections 6.8 and 8.4 (1.3, HF4): objectives and key legend of the first hunts (views, the Hud feeds them).
 	{"name": "ObjectivesPanel", "path": "res://src/hud/objectives_panel.gd", "base": "VBoxContainer", "pkg": "A",
 		"methods": ["set_dog_present(present: bool) -> void", "set_drone_present(present: bool) -> void",

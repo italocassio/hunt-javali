@@ -30,6 +30,15 @@
     "damage_indicator_s": 1.2,
     "low_health_frac": 0.3
   },
+  "stamina": {
+    "max": 100.0,
+    "sprint_drain_per_s": 10.0,
+    "regen_per_s": 6.0,
+    "regen_delay_s": 1.0,
+    "recover_threshold": 35.0,
+    "exhausted_message_s": 2.5,
+    "exhausted_message_interval_s": 30.0
+  },
   "hunt": {
     "end_delay_s": 2.5,
     "crop_health_signal_step_pct": 0.5,

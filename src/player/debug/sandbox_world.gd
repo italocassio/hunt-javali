@@ -10,6 +10,7 @@ extends HuntWorld
 ## --crop_alert (forces the "Javalis na lavoura!" alert and a context message at the same time)
 ## Weapon panel and health bar (docs §8.4): --hp=<1-100> (health in percent), --slot=<1-5> (weapon in hand),
 ## --mag=<n> (rounds in the magazine of the weapon in hand, to see the low-ammo colour)
+## Stamina (F2): --stamina=<0..100> (stamina of the hunter; 0 = exhausted, below the recover threshold = recovering)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 ## Horde level (docs/plano_horda_nivel2.md): --horde_level=N (or horde_level = N before add_child; default 1) picks the
@@ -274,6 +275,8 @@ func _spawn_player() -> void:
 		InputSetup.set_touch_override(String(_args["touch"]))
 	if _args.has("hp"):
 		player.debug_set_health(player.get_max_health() * float(_args["hp"]) / 100.0)
+	if _args.has("stamina"):
+		player.debug_set_stamina(float(_args["stamina"]))
 	if _args.has("slot"):
 		player.bot_select_weapon(int(_args["slot"]) - 1)
 	if _args.has("mag"):

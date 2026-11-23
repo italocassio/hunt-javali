@@ -893,6 +893,7 @@ func _publish_probe() -> void:
 
 func _update_health() -> void:
 	_health.set_health(_player.get_health(), _player.get_max_health())
+	_health.set_stamina(_player.get_stamina_frac(), _player.is_exhausted(), _player.get_stamina_recover_frac())
 
 
 func _update_weapon() -> void:

@@ -1321,7 +1321,7 @@ do canto inferior direito, centros, tudo em constantes nomeadas de `TouchControl
 | Agachar | br (253, 53) | 72 | `crouch` |
 | Mira | br (108, 342) | 76 | `aim` (alterna) |
 | Cão | br (235, 346) (350 até 0.9.0; 4 px para não encostar no cartão do cão) | 76 | `dog_command`, só com cão |
-| Interagir | br (410, 380) | 100 | `interact`, só com alvo ("Levantar" / "Pegar") |
+| Interagir | br (340, 380) (410 até 0.9.6; 70 px para a lista de 4 acessórios não o sobrepor a 1280 de largura) | 100 | `interact`, só com alvo ("Levantar" / "Pegar") |
 | Pausa | (56, 56) | 64 | `pause` |
 
 - **Dois Tiros.** `_centers` / `_radii` são indexados pelo **id do botão** (`fire`, `fire_left`, ...); os dois Tiros apertam a ação
@@ -2632,10 +2632,10 @@ Esquema (versão 2):
     "quality": "auto",
     "touch_controls": "auto",
     "show_fps": false,
+    "battery_saver": "auto",
     "player_name": ""
   }
 }
-    "battery_saver": "auto",
 ```
 `best_crop_pct[i] = -1` = nunca vencido; `is_contract_completed` = `>= 0`. `items` guarda quantidade de
 consumíveis e `1` para passivos/ativos possuídos. Settings: `mouse_sensitivity`/`touch_sensitivity` 0,1–3,0
@@ -3610,6 +3610,7 @@ const I_CORN_BAIT: StringName = &"corn_bait"
 const I_EXTRA_AMMO: StringName = &"extra_ammo"
 const I_THERMAL_SCOPE: StringName = &"thermal_scope"
 const I_SCOUT_DRONE: StringName = &"scout_drone"
+const I_ENERGY_DRINK: StringName = &"energy_drink"
 
 # Dogs
 const D_CARAMELO: StringName = &"caramelo"

@@ -15,7 +15,7 @@ Identificadores em inglês; texto do jogador em PT-BR **exatamente** como na §2
 | Fase | O quê | Versão | Estado |
 |---|---|---|---|
 | F1 | Mochila: níveis na loja, espaços de equipamento, save | 0.9.5 | publicada em 23/11/2026 (main `cbde11c`, gh-pages `5adaf79`). Resíduo: `UpgradeCard` já traz os ramos de texto/retrato da faca (ativam na F4); `SaveService.item_slots_for_level(level)` é helper estático extra |
-| F2 | Fôlego: corrida gasta, cansaço, barra no HUD | 0.9.6 | pendente |
+| F2 | Fôlego: corrida gasta, cansaço, barra no HUD | 0.9.6 | publicada em 23/11/2026 (main `9ec2d09`, gh-pages `e2928d9`). Resíduo: a marca do limiar é o nó irmão `StaminaMark` (`ColorRect` sob a `HealthStrip`, não filho de `Stamina`); `breath_tired` é sintetizado sob demanda (`SynthWeapons.LAZY_IDS`), sem MP3; `debug_set_stamina` não zera `_regen_wait`; `net_unit` ganhou também `player_horde2` |
 | F3 | Energético: consumível que enche o fôlego | 0.9.7 | pendente |
 | F4 | Faca: golpe rápido sem slot, níveis de dano na loja, rede | 0.9.8 | pendente |
 

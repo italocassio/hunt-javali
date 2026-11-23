@@ -343,6 +343,75 @@ func test_profile_apply_hunt_result() -> void:
 	eq(Profile.get_money(), m2, "resultado nulo ignorado")
 
 
+## F3: the energy drink is a plain consumable of the shop (docs/plano_faca_mochila_folego.md 1.3).
+func test_energy_drink_shop_rules() -> void:
+	var price: int = int(Data.get_equipment(Ids.I_ENERGY_DRINK)["price"])
+	eq(price, 150, "energetico custa R$ 150")
+	eq(str(Data.get_equipment(Ids.I_ENERGY_DRINK)["currency"]), "money", "pago em dinheiro")
+	var wi: Array = _shop_world(price - 1)
+	eq(Shop.buy(Ids.I_ENERGY_DRINK, wi[0], wi[1]), &"insufficient_funds", "sem saldo")
+	eq(wi[0].money, price - 1, "saldo intacto")
+	eq(wi[1].get_count(Ids.I_ENERGY_DRINK), 0, "nada entregue")
+	wi[0].money = price * 2
+	eq(Shop.buy(Ids.I_ENERGY_DRINK, wi[0], wi[1]), &"ok", "compra 1")
+	eq(Shop.buy(Ids.I_ENERGY_DRINK, wi[0], wi[1]), &"ok", "compra 2")
+	eq(wi[0].money, 0, "cobrou R$ 150 por unidade")
+	eq(wi[1].get_count(Ids.I_ENERGY_DRINK), 2, "2 energeticos em estoque")
+	# the stock cap is the shared consumable one
+	var max_owned: int = int(Data.get_game().get("shop", {}).get("max_consumable_owned", 9))
+	var rich: Array = _shop_world(price * (max_owned + 2))
+	for i: int in max_owned:
+		eq(Shop.buy(Ids.I_ENERGY_DRINK, rich[0], rich[1]), &"ok", "compra %d" % (i + 1))
+	eq(Shop.buy(Ids.I_ENERGY_DRINK, rich[0], rich[1]), &"max_reached", "alem do estoque maximo")
+	eq(rich[1].get_count(Ids.I_ENERGY_DRINK), max_owned, "estoque no maximo")
+
+
+func test_energy_drink_profile_starts_without_it_and_request_caps_at_three() -> void:
+	fresh_profile()
+	eq(Profile.get_item_count(Ids.I_ENERGY_DRINK), 0, "perfil novo nao ganha energetico gratis")
+	var price: int = int(Data.get_equipment(Ids.I_ENERGY_DRINK)["price"])
+	Profile.add_money(price * 5)
+	for i: int in 5:
+		eq(Profile.buy(Ids.I_ENERGY_DRINK), &"ok", "compra %d" % (i + 1))
+	eq(Profile.get_item_count(Ids.I_ENERGY_DRINK), 5, "5 em estoque")
+	ok(Profile.set_loadout_items([Ids.I_MEDKIT, Ids.I_ENERGY_DRINK]), "equipa o energetico (cabe na mochila)")
+	var req: HuntRequest = Profile.build_hunt_request(&"mato_grosso", 0)
+	ok(req.item_ids.has(Ids.I_ENERGY_DRINK), "o request leva o energetico equipado")
+	eq(req.get_item_count(Ids.I_ENERGY_DRINK), 3, "max_per_hunt 3: leva 3 dos 5")
+	eq(Profile.get_item_count(Ids.I_ENERGY_DRINK), 5, "montar o request nao gasta o estoque")
+
+
+func test_apply_hunt_result_charges_the_energy_drinks_used() -> void:
+	fresh_profile()
+	Profile.add_money(int(Data.get_equipment(Ids.I_ENERGY_DRINK)["price"]) * 3)
+	for i: int in 3:
+		Profile.buy(Ids.I_ENERGY_DRINK)
+	ok(Profile.set_loadout_items([Ids.I_MEDKIT, Ids.I_ENERGY_DRINK]), "equipa o energetico")
+	var r: HuntResult = HuntResult.new()
+	r.outcome = HuntResult.Outcome.VICTORY
+	r.map_id = &"mato_grosso"
+	r.contract_index = 0
+	r.consumables_used[Ids.I_ENERGY_DRINK] = 2
+	Profile.apply_hunt_result(r)
+	eq(Profile.get_item_count(Ids.I_ENERGY_DRINK), 1, "3 - 2 usados = 1")
+	eq(Profile.get_item_count(Ids.I_MEDKIT), 1, "os outros consumiveis nao mexem")
+	# more used than owned (a hostile or duplicated result) never goes below zero
+	var greedy: HuntResult = HuntResult.new()
+	greedy.outcome = HuntResult.Outcome.DEFEAT_DEATH
+	greedy.map_id = &"mato_grosso"
+	greedy.contract_index = 0
+	greedy.consumables_used[Ids.I_ENERGY_DRINK] = 99
+	Profile.apply_hunt_result(greedy)
+	eq(Profile.get_item_count(Ids.I_ENERGY_DRINK), 0, "usados demais: zera sem ficar negativo")
+	ok(not Profile.get_loadout_items().has(Ids.I_ENERGY_DRINK), "sem estoque o energetico sai do loadout")
+	# the stock survives a save (the energy drink is plain inventory)
+	fresh_profile()
+	Profile.add_money(int(Data.get_equipment(Ids.I_ENERGY_DRINK)["price"]))
+	Profile.buy(Ids.I_ENERGY_DRINK)
+	var raw: Dictionary = SaveService.read("user://test_save.json")
+	eq(int((raw.get("inventory", {}).get("items", {}) as Dictionary).get("energy_drink", 0)), 1, "compra gravada em disco")
+
+
 func test_profile_kill_reward_unknown_type() -> void:
 	fresh_profile()
 	eq(Profile.kill_reward(&"nao_existe", 100.0, Ids.ZONE_BODY, false, &"mato_grosso", 0), 0, "tipo desconhecido")

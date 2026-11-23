@@ -105,7 +105,7 @@ const BUTTONS: Array[Dictionary] = [
 	{"id": &"reload", "action": &"reload", "d": RELOAD_D, "label": "Recarga", "icon": &"btn_reload", "from": "br", "ox": RELOAD_FROM_RIGHT_PX, "oy": 47.0, "mode": "hold"},
 	{"id": &"crouch", "action": &"crouch", "d": CROUCH_D, "label": "Agachar", "icon": &"btn_crouch", "from": "br", "ox": 253.0, "oy": 53.0, "mode": "hold"},
 	{"id": &"dog_command", "action": &"dog_command", "d": 76.0, "label": "Cão", "icon": &"btn_dog", "from": "br", "ox": 235.0, "oy": 346.0, "mode": "hold", "slot": &"dog_command"},
-	{"id": &"interact", "action": &"interact", "d": 100.0, "label": "Levantar", "icon": &"", "from": "br", "ox": 410.0, "oy": 380.0, "mode": "hold"},
+	{"id": &"interact", "action": &"interact", "d": 100.0, "label": "Levantar", "icon": &"", "from": "br", "ox": 340.0, "oy": 380.0, "mode": "hold"},
 	{"id": &"pause", "action": &"pause", "d": 64.0, "label": "II", "icon": &"btn_pause", "from": "tl", "ox": 56.0, "oy": 56.0, "mode": "hold"},
 ]
 
@@ -500,6 +500,16 @@ func _select_accessory(item_id: StringName) -> void:
 	_acc_current = item_id
 	_acc_last_count = _acc_count(item_id)
 	_rebuild_buttons()
+
+
+## Makes `item_id` the accessory of the main button without using it, and closes the list (the HUD does this when the
+## energy drink is worth drinking). False when the item is not among the accessories carried.
+func select_accessory(item_id: StringName) -> bool:
+	if not _acc_ids.has(item_id):
+		return false
+	_close_menu()
+	_select_accessory(item_id)
+	return true
 
 
 func _close_menu() -> void:

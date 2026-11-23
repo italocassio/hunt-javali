@@ -782,6 +782,47 @@ func test_stamina_sound_exists_and_plays() -> void:
 	await frames(2)
 
 
+func test_energy_drink_icon_and_sound_exist() -> void:
+	## docs/plano_faca_mochila_folego.md section 5 (ART3): icon `energy_drink` (SVG) and the sound `energy_drink` (~0.8 s),
+	## synthesized on demand (SynthWeapons.LAZY_IDS), no MP3 needed.
+	var icon_path: String = ScenePaths.icon(&"energy_drink")
+	ok(FileAccess.file_exists(icon_path), "icone %s existe" % icon_path)
+	ok(load(icon_path) is Texture2D, "o icone carrega como Texture2D")
+	ok(UiKit.icon(&"energy_drink") != null, "UiKit.icon(energy_drink) nao e nulo")
+	ok(UiKit.icon_rect(&"energy_drink", 48.0) != null, "UiKit.icon_rect(energy_drink) nao e nulo")
+	ok(Sfx.has_sound(&"energy_drink"), "Sfx.has_sound(energy_drink)")
+	ok(SynthWeapons.LAZY_IDS.has(&"energy_drink"), "energy_drink esta em SynthWeapons.LAZY_IDS")
+	var mark: int = error_mark()
+	Sfx.play(&"energy_drink")
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar energy_drink nao gera erros: %s" % str(errors_since(mark)))
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	ok(fb.call(&"has_sound", &"energy_drink"), "fallback: has_sound(energy_drink)")
+	var stream: AudioStreamWAV = fb.call(&"_get_stream", &"energy_drink") as AudioStreamWAV
+	ok(stream != null, "fallback: energy_drink sintetizado")
+	if stream != null:
+		var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+		var channels: float = 2.0 if stream.stereo else 1.0
+		var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+		ok(seconds >= 0.5 and seconds <= 1.2, "energy_drink dura %.2f s (esperado ~0,8 s)" % seconds)
+		ok(stream.loop_mode != AudioStreamWAV.LOOP_FORWARD, "energy_drink nao e loop")
+		var peak: int = 0
+		if stream.format == AudioStreamWAV.FORMAT_16_BITS:
+			var i: int = 0
+			while i + 1 < stream.data.size():
+				peak = maxi(peak, absi(stream.data.decode_s16(i)))
+				i += 2 * 16
+		ok(stream.format != AudioStreamWAV.FORMAT_16_BITS or peak > 500, "energy_drink nao e silencio (pico %d)" % peak)
+	var live: Variant = (Sfx.get(&"_streams") as Dictionary).get(&"energy_drink")
+	ok(live is AudioStreamWAV or live is AudioStreamMP3, "energy_drink no Sfx: WAV sintetizado ou MP3 gravado")
+	var prompts_text: String = FileAccess.get_file_as_string("res://assets/audio/sfx_prompts.json")
+	ok(prompts_text.contains("\"id\": \"energy_drink\""), "sfx_prompts.json tem a entrada energy_drink")
+	ok(JSON.parse_string(prompts_text) != null, "sfx_prompts.json continua JSON valido")
+	await frames(2)
+
+
 func test_horde_sounds_exist_and_play() -> void:
 	for id: StringName in [&"horde_wave_start", &"horde_wave_clear"]:
 		ok(Sfx.has_sound(id), "Sfx.has_sound(%s)" % id)

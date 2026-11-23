@@ -255,7 +255,7 @@ func _check_autoload_signatures() -> void:
 			var expected: Array[String] = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
 				"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
-					"spectate_next", "pause", "help", "interact"]
+					"spectate_next", "pause", "help", "interact", "use_energy_drink"]
 			var got: Array[String] = []
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))
@@ -268,7 +268,8 @@ func _check_autoload_signatures() -> void:
 		if iconsts.has("ITEM_ACTIONS"):
 			var item_actions: Dictionary = iconsts["ITEM_ACTIONS"]
 			var expected_items: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
-				&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars"}
+				&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars",
+					&"energy_drink": &"use_energy_drink"}
 			# Key order IS the slot order (quickbar and touch row), so compare the keys as a list too.
 			_t.call("eq", item_actions.keys(), expected_items.keys(), "InputSetup.ITEM_ACTIONS (ids e ordem)")
 			_t.call("eq", item_actions, expected_items, "InputSetup.ITEM_ACTIONS (id -> acao)")

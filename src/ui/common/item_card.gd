@@ -161,6 +161,11 @@ static func stats_text(id: StringName) -> String:
 					return "Dano recebido -%d%%" % int(roundf(float(effect.get("damage_reduction", 0.0)) * 100.0))
 				&"medkit":
 					return "Cura %d de vida em %s s" % [int(effect.get("heal", 0)), UiKit.decimal(float(effect.get("use_time_s", 0.0)), 1)]
+				&"energy_drink":
+					var frac: float = float(effect.get("stamina_restore_frac", 0.0))
+					if frac >= 1.0:
+						return "Fôlego cheio na hora"
+					return "Recupera %d%% do fôlego na hora" % int(roundf(frac * 100.0))
 				&"corn_bait":
 					return "Dura %d s  |  Atrai até %d javalis a %d m" % [int(effect.get("duration_s", 0)), int(effect.get("max_boars", 0)), int(effect.get("attract_radius_m", 0))]
 				&"extra_ammo":

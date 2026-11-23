@@ -16,6 +16,7 @@ var damage_reduction: float = 0.0
 var reserve_mult: float = 1.0
 var thermal_range_m: float = 0.0
 var drone_reveal_s: float = 0.0
+var stamina_restore_frac: float = 0.0
 
 var _usable: Array[StringName] = []
 var _counts: Dictionary = {}          # StringName -> int (consumables only)
@@ -34,6 +35,7 @@ func setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void:
 	damage_reduction = 0.0
 	reserve_mult = 1.0
 	thermal_range_m = 0.0
+	stamina_restore_frac = 0.0
 	for item_id: StringName in request.item_ids:
 		var item_def: Dictionary = Data.get_equipment(item_id)
 		if item_def.is_empty():
@@ -49,6 +51,8 @@ func setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void:
 			"consumable":
 				_usable.append(item_id)
 				_counts[item_id] = request.get_item_count(item_id)
+				if effect.has("stamina_restore_frac"):
+					stamina_restore_frac = maxf(stamina_restore_frac, float(effect.get("stamina_restore_frac", 0.0)))
 	# Slot order follows InputSetup.ITEM_ACTIONS (docs §8.11), not the loadout order.
 	var ordered: Array[StringName] = []
 	for item_id: StringName in InputSetup.ITEM_ACTIONS:
@@ -145,6 +149,17 @@ func use_item(item_id: StringName) -> bool:
 			Sfx.play(&"drone_buzz")
 			_consume(item_id, _player.global_position)
 			_message("Drone batedor no ar.")
+			return true
+		Ids.I_ENERGY_DRINK:
+			var hunter: Player = _player as Player   # stamina lives on Player, not on PlayerBase
+			if hunter == null:
+				return false
+			if hunter.get_stamina_frac() >= 1.0:
+				_message("Seu fôlego já está cheio.")
+				return false
+			_consume(item_id, hunter.global_position)
+			Sfx.play(&"energy_drink")
+			hunter.restore_stamina(stamina_restore_frac)
 			return true
 	return false
 

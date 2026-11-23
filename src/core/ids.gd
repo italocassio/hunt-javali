@@ -59,6 +59,7 @@ const I_CORN_BAIT: StringName = &"corn_bait"
 const I_EXTRA_AMMO: StringName = &"extra_ammo"
 const I_THERMAL_SCOPE: StringName = &"thermal_scope"
 const I_SCOUT_DRONE: StringName = &"scout_drone"
+const I_ENERGY_DRINK: StringName = &"energy_drink"
 
 # Dogs
 const D_CARAMELO: StringName = &"caramelo"

@@ -13,12 +13,13 @@ const IDS: Array[StringName] = [&"dry_fire", &"reload_start", &"reload_end", &"b
 
 
 ## Ids synthesized on first use only (no recorded file expected), see build_lazy().
-const LAZY_IDS: Array[StringName] = [&"breath_tired"]
+const LAZY_IDS: Array[StringName] = [&"breath_tired", &"energy_drink"]
 
 
 static func build_lazy(id: StringName) -> AudioStreamWAV:
 	match id:
 		&"breath_tired": return _breath_tired()
+		&"energy_drink": return _energy_drink()
 	return null
 
 
@@ -228,6 +229,26 @@ static func _breath_tired() -> AudioStreamWAV:
 			voice = 0.0
 		b[i] = (s * 3.2 + voice) * env
 	return SynthDsp.to_stream(b, 0.5)
+
+
+## Energy drink, ~0.8 s: can tab click, a short carbonation fizz, then two gulps (falling sine thumps with a
+## little throat noise) and a soft "ahh" exhale.
+static func _energy_drink() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.8)
+	# Tab pop: metallic click plus a low body thump.
+	SynthDsp.tone(b, 0.0, 0.05, 2600.0, 1500.0, 0.55, 0.012, SynthDsp.SHAPE_SINE, 0.0005)
+	SynthDsp.tone(b, 0.012, 0.07, 3900.0, 3100.0, 0.25, 0.02, SynthDsp.SHAPE_SINE, 0.0005)
+	SynthDsp.tone(b, 0.0, 0.09, 220.0, 120.0, 0.45, 0.03, SynthDsp.SHAPE_SINE, 0.001)
+	SynthDsp.noise(b, 0.0, 0.03, 0.4, 0.008, 0.8, 0.3, 0.0005)
+	# Carbonation fizz, bright and decaying.
+	SynthDsp.noise(b, 0.04, 0.3, 0.3, 0.1, 1.0, 0.75, 0.01, 38.0, 0.5)
+	# Two gulps.
+	for g: float in [0.38, 0.56]:
+		SynthDsp.tone(b, g, 0.13, 210.0, 95.0, 0.6, 0.05, SynthDsp.SHAPE_SINE, 0.012)
+		SynthDsp.noise(b, g, 0.1, 0.12, 0.04, 0.12, 0.0, 0.01)
+	# Satisfied exhale.
+	SynthDsp.noise(b, 0.7, 0.1, 0.1, 0.04, 0.35, 0.2, 0.02)
+	return SynthDsp.to_stream(b, 0.8)
 
 
 static func _tick() -> AudioStreamWAV:

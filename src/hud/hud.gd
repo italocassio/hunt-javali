@@ -211,6 +211,9 @@ var _hint_slot: StringName = &""      # slot blinking for the hint on screen (&"
 var _hints_enabled: bool = true       # false on the Web with ?hints=0 (QA hook, see _ready)
 var _zoom_label: Label = null
 var _touch: TouchControls = null
+var _energy_flashing: bool = false            # F3: the energy drink hint is on (exhausted with drinks left)
+var _energy_flash_touch: bool = false         # F3: it was started in touch mode (the Accessories button was switched)
+var _energy_prev_accessory: StringName = &""  # F3: the accessory to go back to
 var _pause: PauseOverlay = null
 
 
@@ -788,6 +791,7 @@ func _process(delta: float) -> void:
 	if _player == null:
 		return
 	_update_health()
+	_update_energy_hint()
 	_update_weapon()
 	_update_revive()
 	_update_scope_and_crosshair()
@@ -894,6 +898,36 @@ func _publish_probe() -> void:
 func _update_health() -> void:
 	_health.set_health(_player.get_health(), _player.get_max_health())
 	_health.set_stamina(_player.get_stamina_frac(), _player.is_exhausted(), _player.get_stamina_recover_frac())
+
+
+## F3 (docs/plano_faca_mochila_folego.md 2.7): while the hunter is exhausted and still has an energy drink, the drink
+## blinks (Quickbar slot on desktop; on touch the Accessories button switches to it and blinks, and goes back to the
+## previous accessory when the exhaustion ends or the drinks run out).
+func _update_energy_hint() -> void:
+	var items: ItemBelt = _player.get_items()
+	var has_drink: bool = items != null and items.get_count(Ids.I_ENERGY_DRINK) > 0
+	var want: bool = _player.is_alive() and _player.is_exhausted() and has_drink
+	if want == _energy_flashing:
+		return
+	_energy_flashing = want
+	if want:
+		_energy_flash_touch = InputSetup.is_touch_mode()
+		if _energy_flash_touch:
+			_energy_prev_accessory = _touch.get_accessory_current()
+			_touch.select_accessory(Ids.I_ENERGY_DRINK)
+			_touch.flash_slot(Ids.I_ENERGY_DRINK, true)
+		else:
+			_quickbar.flash(Ids.I_ENERGY_DRINK, true)
+		return
+	_quickbar.flash(Ids.I_ENERGY_DRINK, false)
+	_touch.flash_slot(Ids.I_ENERGY_DRINK, false)
+	var prev: StringName = _energy_prev_accessory
+	var prev_ok: bool = prev != &"" and prev != Ids.I_ENERGY_DRINK and _touch.get_accessory_ids().has(prev)
+	prev_ok = prev_ok and items != null and items.get_count(prev) != 0
+	if _energy_flash_touch and _touch.get_accessory_current() == Ids.I_ENERGY_DRINK and prev_ok:
+		_touch.select_accessory(prev)
+	_energy_flash_touch = false
+	_energy_prev_accessory = &""
 
 
 func _update_weapon() -> void:

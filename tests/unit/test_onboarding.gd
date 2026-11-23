@@ -63,7 +63,8 @@ func test_data_loads_clean_with_onboarding_and_short_names() -> void:
 			if v is int or v is float:
 				ok(float(v) > 0.0, "onboarding.%s > 0" % f)
 	var ids: Array[StringName] = Data.get_equipment_ids()
-	eq(ids.size(), 7, "7 itens de equipamento")
+	eq(ids.size(), 8, "8 itens de equipamento (o energetico da F3 e o oitavo)")
+	ok(ids.has(&"energy_drink"), "energy_drink esta nos equipamentos")
 	for id: StringName in ids:
 		var short_name: Variant = Data.get_equipment(id).get("short_name")
 		ok(short_name is String and (short_name as String).strip_edges() != "", "%s tem short_name" % id)
@@ -113,8 +114,10 @@ func test_data_validation_rejects_bad_onboarding_and_short_name() -> void:
 
 func test_hint_id_validity() -> void:
 	expect_errors()   # known bug: SaveService.is_valid_hint_id logs "Data: unknown id" for ids that are not equipment (relatado no QA da HF1)
-	for id: StringName in [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"dog_command"]:
+	for id: StringName in [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink", &"dog_command"]:
 		ok(SaveService.is_valid_hint_id(id), "%s e id de dica valido" % id)
+	# F3: the energy drink is a consumable, so a save that learned its hint keeps it through sanitize
+	eq(_sanitized_learned({"learned": ["energy_drink", "medkit"]}), ["energy_drink", "medkit"], "dica do energetico sobrevive ao sanitize")
 	for id: StringName in [&"leather_vest", &"extra_ammo", &"thermal_scope", &"opening", &"", &"nope", &"Medkit", &"carbine_22"]:
 		ok(not SaveService.is_valid_hint_id(id), "'%s' nao e id de dica" % id)
 

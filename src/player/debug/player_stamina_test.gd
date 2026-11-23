@@ -3,6 +3,9 @@ extends Node
 ## hunter (walks, walking noise), it comes back after a delay, the tired state ends at the recover threshold, crouching
 ## and aiming do not spend it, the tired message shows once per interval, restore / debug setters, the horde level 2 revive
 ## refills it, and the bar of the HealthStrip. Runs on a SandboxWorld with a bot. Quits by itself with an exit code.
+## F3 (energy drink, 1.3 / 2.6 / 2.7): the key and the slot order, ItemBelt.use_item(&"energy_drink") rules, the tired message
+## that names the drink, and the HUD hint on the exhaustion edge (Quickbar flash; the touch Accessories button switches to
+## the drink and goes back) with TouchControls.select_accessory.
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/player/debug/player_stamina_test.tscn
 ## Not part of the game.
 
@@ -22,6 +25,13 @@ const STRIP_SIZE: Vector2 = Vector2(400.0, 28.0)
 const COLOR_STAMINA: Color = Color("#8EC3E6")
 const COLOR_DANGER: Color = Color("#D9452B")
 const FORWARD: Vector2 = Vector2(0.0, 1.0)
+const DRINK: StringName = &"energy_drink"
+const DRINK_TEXT_KEY: String = "Sem fôlego! Tome um energético (T) ou ande para recuperar."
+const DRINK_TEXT_TOUCH: String = "Sem fôlego! Toque no energético ou ande para recuperar."
+const NOT_CARRIED_TEXT: String = "Você não trouxe este item: Energético."
+const FULL_TEXT: String = "Seu fôlego já está cheio."
+const EMPTY_TEXT: String = "Acabou: Energético."
+const DRINK_COUNT: int = 2
 
 var _passed: int = 0
 var _failed: int = 0
@@ -38,6 +48,15 @@ class FakeHunter extends PlayerBase:
 		return false
 
 
+## A sandbox that carries ceva, drone, binoculars and the energy drink (2 of each consumable).
+class ItemWorld extends SandboxWorld:
+	func _request() -> HuntRequest:
+		var r: HuntRequest = super()
+		r.item_ids = [Ids.I_CORN_BAIT, Ids.I_SCOUT_DRONE, Ids.I_BINOCULARS, Ids.I_ENERGY_DRINK]
+		r.item_counts = {Ids.I_CORN_BAIT: 2, Ids.I_SCOUT_DRONE: 2, Ids.I_ENERGY_DRINK: 2}
+		return r
+
+
 func _ready() -> void:
 	get_tree().create_timer(WATCHDOG_S).timeout.connect(_on_watchdog)
 	GameEvents.hud_message_requested.connect(func(text: String, duration: float) -> void:
@@ -50,6 +69,11 @@ func _ready() -> void:
 	await _test_horde_revive()
 	_test_strip()
 	await _test_hud_feed()
+	await _test_energy_rules()
+	await _test_energy_message()
+	await _test_energy_hud_desktop()
+	await _test_energy_hud_touch()
+	InputSetup.set_touch_override("auto")
 	print("RESULT: %d passed, %d failed, 0 skipped" % [_passed, _failed])
 	get_tree().quit(0 if _failed == 0 else 1)
 
@@ -399,4 +423,244 @@ func _test_hud_feed() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_check("hud_hidden_after_restore", not strip.is_stamina_visible())
+	await _free_world(world)
+
+
+# --- F3: energy drink ---------------------------------------------------------------------------------------------
+
+func _make_item_world(touch: bool) -> ItemWorld:
+	_hints.clear()
+	InputSetup.set_touch_override("on" if touch else "off")
+	var world: ItemWorld = ItemWorld.new()
+	add_child(world)
+	await get_tree().process_frame
+	world.player.bot_set_enabled(true)
+	return world
+
+
+func _count_hints(text: String) -> int:
+	var n: int = 0
+	for hint: Dictionary in _hints:
+		if hint["text"] == text:
+			n += 1
+	return n
+
+
+func _test_energy_rules() -> void:
+	# Input contract.
+	_check("energy_action", InputSetup.get_item_action(DRINK) == &"use_energy_drink")
+	_check("energy_key_T", InputSetup.get_key_label(&"use_energy_drink") == "T", InputSetup.get_key_label(&"use_energy_drink"))
+	var keys: Array = InputSetup.ITEM_ACTIONS.keys()
+	_check("energy_last_slot", keys.size() >= 5 and keys[keys.size() - 1] == DRINK and keys[keys.size() - 2] == &"binoculars", str(keys))
+	_check("energy_action_registered", InputMap.has_action(&"use_energy_drink") and "use_energy_drink" in InputSetup.ACTIONS
+		and InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 1] == "use_energy_drink")
+
+	# Not in the loadout.
+	var world0: SandboxWorld = await _make_world()
+	var items0: ItemBelt = world0.player.get_items()
+	world0.player.debug_set_stamina(0.0)
+	_check("not_carried_refused", not items0.use_item(DRINK))
+	_check("not_carried_message", _count_hints(NOT_CARRIED_TEXT) == 1, str(_hints))
+	await _free_world(world0)
+
+	# Carried: full stamina, tired, partial, empty.
+	var world: ItemWorld = await _make_item_world(false)
+	var player: Player = world.player
+	var items: ItemBelt = player.get_items()
+	var used: Array[StringName] = []
+	var started: Array[StringName] = []
+	var on_used: Callable = func(id: StringName, _pos: Vector3) -> void: used.append(id)
+	var on_started: Callable = func(id: StringName, _d: float) -> void: started.append(id)
+	GameEvents.item_used.connect(on_used)
+	items.use_started.connect(on_started)
+	_check("effect_read", is_equal_approx(items.stamina_restore_frac, 1.0), str(items.stamina_restore_frac))
+	_check("carried_count", items.get_count(DRINK) == DRINK_COUNT and items.has_item(DRINK), str(items.get_count(DRINK)))
+	_check("slot_order_last", items.get_usable_ids().back() == DRINK, str(items.get_usable_ids()))
+
+	_check("full_refused", not items.use_item(DRINK))
+	_check("full_message", _count_hints(FULL_TEXT) == 1, str(_hints))
+	_check("full_count_same", items.get_count(DRINK) == DRINK_COUNT and used.is_empty())
+
+	player.debug_set_stamina(0.0)
+	_check("tired_fixture", player.is_exhausted())
+	_check("tired_use_ok", items.use_item(DRINK))
+	_check("tired_count_minus_1", items.get_count(DRINK) == DRINK_COUNT - 1, str(items.get_count(DRINK)))
+	_check("tired_item_used_once", used.size() == 1 and used[0] == DRINK, str(used))
+	_check("tired_stamina_full", player.get_stamina_frac() == 1.0 and not player.is_exhausted())
+	_check("tired_instant_no_busy", started.is_empty() and not items.is_busy())
+
+	player.debug_set_stamina(10.0)   # tired-ish but not exhausted: still refills
+	_check("partial_use_ok", items.use_item(DRINK) and player.get_stamina_frac() == 1.0 and items.get_count(DRINK) == 0)
+	_check("partial_item_used_twice", used.size() == 2, str(used))
+	player.debug_set_stamina(0.0)
+	var before: int = used.size()
+	_check("empty_refused", not items.use_item(DRINK))
+	_check("empty_message", _count_hints(EMPTY_TEXT) == 1, str(_hints))
+	_check("empty_no_event", used.size() == before and player.is_exhausted() and items.get_count(DRINK) == 0)
+	GameEvents.item_used.disconnect(on_used)
+	items.use_started.disconnect(on_started)
+	await _free_world(world)
+
+	# The real key path (no bot): T drinks.
+	var world_k: ItemWorld = await _make_item_world(false)
+	world_k.player.bot_set_enabled(false)
+	world_k.player.debug_set_stamina(0.0)
+	Input.action_press(&"use_energy_drink")
+	await _frames(3)
+	Input.action_release(&"use_energy_drink")
+	await _frames(2)
+	var k_items: ItemBelt = world_k.player.get_items()
+	_check("key_t_drinks", k_items.get_count(DRINK) == DRINK_COUNT - 1 and world_k.player.get_stamina_frac() >= 0.99
+		and not world_k.player.is_exhausted(), "count %d frac %.2f" % [k_items.get_count(DRINK), world_k.player.get_stamina_frac()])
+	await _free_world(world_k)
+
+
+## Sprints a bot to exhaustion and returns once it is tired.
+func _run_to_exhaustion(world: SandboxWorld) -> void:
+	var player: Player = world.player
+	player.bot_set_move(FORWARD, true)
+	var guard: int = _ticks(30.0)
+	while not player.is_exhausted() and guard > 0:
+		await get_tree().physics_frame
+		guard -= 1
+		_keep_on_ground(player)
+	player.bot_set_move(Vector2.ZERO, false)
+
+
+func _test_energy_message() -> void:
+	var world: ItemWorld = await _make_item_world(false)
+	await _run_to_exhaustion(world)
+	_check("msg_key_with_drink", _count_hints(DRINK_TEXT_KEY) == 1 and _count_hints(EXHAUST_TEXT) == 0, str(_hints))
+	_check("msg_key_duration", _hints.size() >= 1 and is_equal_approx(float(_hints[_hints.size() - 1]["duration"]), 2.5))
+	await _free_world(world)
+
+	var world_t: ItemWorld = await _make_item_world(true)
+	await _run_to_exhaustion(world_t)
+	_check("msg_touch_with_drink", _count_hints(DRINK_TEXT_TOUCH) == 1 and _count_hints(EXHAUST_TEXT) == 0, str(_hints))
+	await _free_world(world_t)
+
+	# Out of drinks: the plain F2 text again.
+	var world_e: ItemWorld = await _make_item_world(true)
+	var counts: Dictionary = world_e.player.get_items().get("_counts") as Dictionary
+	counts[DRINK] = 0
+	await _run_to_exhaustion(world_e)
+	_check("msg_plain_without_drinks", _count_hints(EXHAUST_TEXT) == 1 and _count_hints(DRINK_TEXT_TOUCH) == 0, str(_hints))
+	await _free_world(world_e)
+
+	# Not carried at all: plain text, in the touch mode too.
+	InputSetup.set_touch_override("on")
+	var world_n: SandboxWorld = await _make_world()
+	await _run_to_exhaustion(world_n)
+	_check("msg_plain_not_carried", _count_hints(EXHAUST_TEXT) == 1, str(_hints))
+	await _free_world(world_n)
+
+
+func _flashing_of(node: Node) -> Dictionary:
+	return node.get("_flashing") as Dictionary
+
+
+func _test_energy_hud_desktop() -> void:
+	var world: ItemWorld = await _make_item_world(false)
+	var player: Player = world.player
+	var items: ItemBelt = player.get_items()
+	var quickbar: Quickbar = player.find_child("Quickbar", true, false) as Quickbar
+	_check("qb_found", quickbar != null and quickbar.get_slot_ids().has(DRINK), str(quickbar.get_slot_ids() if quickbar != null else []))
+	if quickbar == null:
+		await _free_world(world)
+		return
+	_check("qb_drink_last", quickbar.get_slot_ids().back() == DRINK, str(quickbar.get_slot_ids()))
+	await _frames(2)
+	_check("qb_no_flash_full", not _flashing_of(quickbar).has(DRINK))
+	player.debug_set_stamina(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_when_tired", _flashing_of(quickbar).has(DRINK))
+	_check("qb_only_drink_flashes", _flashing_of(quickbar).size() == 1, str(_flashing_of(quickbar)))
+	items.use_item(DRINK)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_off_after_drink", not _flashing_of(quickbar).has(DRINK))
+
+	# The drinks run out while tired: the blink stops.
+	player.debug_set_stamina(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_again", _flashing_of(quickbar).has(DRINK))
+	var counts: Dictionary = items.get("_counts") as Dictionary
+	counts[DRINK] = 0
+	items.counts_changed.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_off_when_empty", not _flashing_of(quickbar).has(DRINK))
+	counts[DRINK] = 1
+	items.counts_changed.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_back_with_drink", _flashing_of(quickbar).has(DRINK))
+	player.debug_set_stamina(100.0)   # recovering by walking ends it too
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("qb_flash_off_after_recover", not _flashing_of(quickbar).has(DRINK))
+	await _free_world(world)
+
+
+func _test_energy_hud_touch() -> void:
+	var world: ItemWorld = await _make_item_world(true)
+	var player: Player = world.player
+	var items: ItemBelt = player.get_items()
+	var touch: TouchControls = player.find_child("TouchControls", true, false) as TouchControls
+	_check("tc_found", touch != null and touch.get_accessory_ids().has(DRINK), str(touch.get_accessory_ids() if touch != null else []))
+	if touch == null:
+		await _free_world(world)
+		return
+	_check("tc_drink_last", touch.get_accessory_ids().back() == DRINK, str(touch.get_accessory_ids()))
+	await _frames(2)
+	var first: StringName = touch.get_accessory_current()
+	_check("tc_first_is_ceva", first == Ids.I_CORN_BAIT, str(first))
+
+	# select_accessory: false for items outside the list, true inside, closes the list, does not use the item.
+	_check("select_unknown_false", not touch.select_accessory(&"foo") and not touch.select_accessory(Ids.I_MEDKIT))
+	touch.set("_menu_open", true)
+	_check("select_known_true", touch.select_accessory(Ids.I_SCOUT_DRONE) and touch.get_accessory_current() == Ids.I_SCOUT_DRONE)
+	_check("select_closes_list", not touch.is_accessory_menu_open())
+	_check("select_does_not_use", items.get_count(Ids.I_SCOUT_DRONE) == DRINK_COUNT)
+	touch.select_accessory(first)
+
+	# Tired: the Accessories button goes to the drink and blinks; the drink brings it back.
+	player.debug_set_stamina(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_switched_to_drink", touch.get_accessory_current() == DRINK, str(touch.get_accessory_current()))
+	_check("tc_drink_flashes", _flashing_of(touch).has(DRINK))
+	items.use_item(DRINK)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_back_to_previous", touch.get_accessory_current() == first, str(touch.get_accessory_current()))
+	_check("tc_flash_off", not _flashing_of(touch).has(DRINK))
+
+	# Tired again, the hunter picks another accessory himself, then recovers: no forced return.
+	player.debug_set_stamina(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_switched_again", touch.get_accessory_current() == DRINK)
+	_check("tc_pick_other", touch.select_accessory(Ids.I_BINOCULARS) and touch.get_accessory_current() == Ids.I_BINOCULARS)
+	player.debug_set_stamina(100.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_keeps_picked", touch.get_accessory_current() == Ids.I_BINOCULARS, str(touch.get_accessory_current()))
+	_check("tc_flash_off_after_recover", not _flashing_of(touch).has(DRINK))
+
+	# Tired with the last drink gone while exhausted: the blink stops and the button leaves the empty drink.
+	touch.select_accessory(first)
+	player.debug_set_stamina(0.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_switched_third", touch.get_accessory_current() == DRINK)
+	var counts: Dictionary = items.get("_counts") as Dictionary
+	counts[DRINK] = 0
+	items.counts_changed.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("tc_flash_off_when_empty", not _flashing_of(touch).has(DRINK))
+	_check("tc_leaves_empty_drink", touch.get_accessory_current() != DRINK, str(touch.get_accessory_current()))
 	await _free_world(world)

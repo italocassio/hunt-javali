@@ -447,3 +447,61 @@ func test_stamina_validation_rejects_each_broken_rule() -> void:
 	ok(_stamina_errors_after(_stamina_set("max", 30.0)).size() > 0, "max (30) abaixo do limiar (35) gera erro")
 	eq(Data.get_load_errors().size(), 0, "registro restaurado sem erros")
 	near(float(Data.get_game()["stamina"]["max"]), 100.0, 0.0001, "dados restaurados")
+
+
+# --- Energy drink (docs/plano_faca_mochila_folego.md 1.3 and 2.2; F3) ---
+
+func test_energy_drink_seed_values() -> void:
+	eq(Data.get_load_errors().size(), 0, "seed carrega sem erro: %s" % str(Data.get_load_errors()))
+	var def: Dictionary = Data.get_equipment(Ids.I_ENERGY_DRINK)
+	ok(not def.is_empty(), "energy_drink existe em equipment.json")
+	eq(Ids.I_ENERGY_DRINK, &"energy_drink", "Ids.I_ENERGY_DRINK")
+	eq(str(def.get("kind", "")), "consumable", "kind consumable")
+	eq(int(def.get("price", -1)), 150, "preco R$ 150")
+	eq(str(def.get("currency", "")), "money", "moeda money")
+	eq(int(def.get("max_per_hunt", 0)), 3, "max_per_hunt 3")
+	near(float((def.get("effect", {}) as Dictionary).get("stamina_restore_frac", 0.0)), 1.0, 0.0001, "stamina_restore_frac 1,0")
+	eq(str(def.get("name", "")), "Energético", "nome")
+	ok(str(def.get("short_name", "")).length() > 0 and str(def.get("short_name", "")).length() <= 9, "short_name de 1 a 9 caracteres")
+	eq(Data.get_item_category(Ids.I_ENERGY_DRINK), &"equipment", "categoria equipment")
+	# it sits right after the medkit in the catalog (the order of the shop)
+	var ids: Array[StringName] = Data.get_equipment_ids()
+	eq(ids.find(Ids.I_ENERGY_DRINK), ids.find(Ids.I_MEDKIT) + 1, "logo depois do medkit")
+
+
+## Runs `mutate` on the live (deep-copied, then restored) energy_drink entry and returns the errors _validate adds.
+func _energy_errors_after(mutate: Callable) -> PackedStringArray:
+	var items: Array = Data._raw["equipment"]["items"]
+	var entry: Dictionary = {}
+	for e: Variant in items:
+		if e is Dictionary and str((e as Dictionary).get("id", "")) == "energy_drink":
+			entry = e
+	var saved: Dictionary = entry.duplicate(true)
+	var base: int = Data._errors.size()
+	mutate.call(entry)
+	Data._validate()
+	var added: PackedStringArray = PackedStringArray()
+	for i: int in range(base, Data._errors.size()):
+		added.append(Data._errors[i])
+	Data._errors.resize(base)
+	entry.clear()
+	entry.merge(saved)
+	return added
+
+
+func _frac_set(value: Variant) -> Callable:
+	return func(e: Dictionary) -> void: e["effect"]["stamina_restore_frac"] = value
+
+
+func test_energy_drink_validation_rejects_a_fraction_outside_0_to_1() -> void:
+	eq(_energy_errors_after(func(_e: Dictionary) -> void: pass).size(), 0, "controle: dados intactos nao geram erro")
+	for bad: Variant in [0.0, 1.5, -0.2, 1.0001]:
+		var errs: PackedStringArray = _energy_errors_after(_frac_set(bad))
+		ok(errs.size() > 0, "stamina_restore_frac = %s gera erro" % str(bad))
+		if errs.size() > 0:
+			ok(errs[0].begins_with("Data: ") and errs[0].contains("stamina_restore_frac") and errs[0].contains("energy_drink"),
+				"a mensagem cita o item e o campo (%s)" % errs[0])
+	for good: Variant in [1.0, 0.5, 0.01]:
+		eq(_energy_errors_after(_frac_set(good)).size(), 0, "stamina_restore_frac = %s e valido" % str(good))
+	eq(Data.get_load_errors().size(), 0, "registro restaurado sem erros")
+	near(float(Data.get_equipment(Ids.I_ENERGY_DRINK)["effect"]["stamina_restore_frac"]), 1.0, 0.0001, "dados restaurados")

@@ -27,6 +27,8 @@ const KNOCKBACK_DECAY: float = 7.0
 const HEARTBEAT_INTERVAL_S: float = 0.9
 const BREATH_INTERVAL_S: float = 1.4          # F2: panting sound repeat while exhausted
 const EXHAUSTED_TEXT: String = "Sem fôlego! Ande para recuperar."
+const EXHAUSTED_TEXT_DRINK_KEY: String = "Sem fôlego! Tome um energético (%s) ou ande para recuperar."   # F3, keyboard
+const EXHAUSTED_TEXT_DRINK_TOUCH: String = "Sem fôlego! Toque no energético ou ande para recuperar."     # F3, touch
 const STAMINA_FALLBACK: Dictionary = {        # same as the seed in data/game.json "stamina"; only if the block is missing
 	"max": 100.0, "sprint_drain_per_s": 10.0, "regen_per_s": 6.0, "regen_delay_s": 1.0, "recover_threshold": 35.0,
 	"exhausted_message_s": 2.5, "exhausted_message_interval_s": 30.0,
@@ -365,6 +367,15 @@ func debug_set_stamina(value: float) -> void:
 		_exhausted = false
 
 
+## F3: the exhausted message names the energy drink when one is left in the backpack (docs/plano 2.11).
+func _exhausted_text() -> String:
+	if _items == null or _items.get_count(Ids.I_ENERGY_DRINK) <= 0:
+		return EXHAUSTED_TEXT
+	if InputSetup.is_touch_mode():
+		return EXHAUSTED_TEXT_DRINK_TOUCH
+	return EXHAUSTED_TEXT_DRINK_KEY % InputSetup.get_key_label(&"use_energy_drink")
+
+
 func _stamina_value(key: String) -> float:
 	return float(_stamina_cfg.get(key, STAMINA_FALLBACK[key]))
 
@@ -389,7 +400,7 @@ func _update_stamina(delta: float) -> void:
 			_exhausted = true
 			if _exhausted_msg_wait <= 0.0:
 				_exhausted_msg_wait = _stamina_value("exhausted_message_interval_s")
-				GameEvents.hud_message_requested.emit(EXHAUSTED_TEXT, _stamina_value("exhausted_message_s"))
+				GameEvents.hud_message_requested.emit(_exhausted_text(), _stamina_value("exhausted_message_s"))
 	else:
 		_regen_wait = maxf(_regen_wait - delta, 0.0)
 		if _regen_wait <= 0.0:

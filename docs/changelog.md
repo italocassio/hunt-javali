@@ -3,6 +3,17 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.7 — 23/11/2026
+
+**Energético.** Um consumível novo na Loja, para quem ficou sem fôlego.
+- Custa R$ 150 e enche o fôlego na hora: o caçador sai do cansaço e volta a correr na mesma hora.
+- Dá para levar até 3 por caçada. Ocupa um espaço da mochila, como o kit de primeiros socorros.
+- No teclado é a tecla **T**, com espaço próprio na barra de itens. No celular ele entra na lista do botão
+  Acessórios.
+- Quando o fôlego acaba e você tem um energético, ele pisca sozinho: no celular o botão Acessórios já troca para
+  ele, e um toque basta para beber. Ao recuperar o fôlego, o botão volta ao acessório de antes.
+- Com o fôlego cheio ele não é gasto à toa: o jogo avisa e guarda a lata.
+
 ## 0.9.6 — 23/11/2026
 
 **Fôlego.** Correr agora cansa.

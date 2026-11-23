@@ -296,6 +296,10 @@ func _validate() -> void:
 	for entry: Variant in _raw["equipment"].get("items", []):
 		if entry is Dictionary and not ["passive", "active", "consumable"].has(str(entry.get("kind", ""))):
 			_errors.append("Data: equipment '%s' has invalid kind" % entry.get("id", "?"))
+		if entry is Dictionary and entry.get("effect", {}).has("stamina_restore_frac"):
+			var frac: float = float(entry["effect"]["stamina_restore_frac"])
+			if frac <= 0.0 or frac > 1.0:
+				_errors.append("Data: equipment '%s' effect.stamina_restore_frac must be in (0, 1]" % entry.get("id", "?"))
 	for entry: Variant in _raw["boars"].get("types", []):
 		if entry is Dictionary:
 			_require_fields(entry, ["weight_min_kg", "weight_max_kg", "health_per_kg", "value_per_kg", "aggression"], str(entry.get("id", "?")))

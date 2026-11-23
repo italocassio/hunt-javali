@@ -8,6 +8,9 @@ extends Node
 ## The three cases after the friends lobby are the backpack route (docs/plano_faca_mochila_folego.md, F1): menu ->
 ## preparation (level 1, 3 slots) -> shop (buy the backpack, then a 4th item) -> preparation (4 slots) -> hunt with 4 items.
 ##
+## The two cases after the backpack route are the energy drink (docs/plano_faca_mochila_folego.md, F3): menu -> shop (buy
+## 2, once without enough money) -> preparation (swap one item for the drink) -> hunt carrying 2 drinks.
+##
 ## The last six cases are the horde route (docs/horda.md section 14): level 1, then level 2 (docs/plano_horda_nivel2.md).
 ##
 ## Run: tools/godot.sh --headless --fixed-fps 60 --path . res://tests/flow_test.tscn [-- --strict]
@@ -148,6 +151,8 @@ func _run() -> void:
 	await _case("backpack_menu_to_shop_via_preparation", _step_backpack_to_shop)
 	await _case("backpack_shop_purchase", _step_backpack_shop)
 	await _case("backpack_preparation_four_items_and_hunt", _step_backpack_preparation)
+	await _case("energy_drink_shop_purchase", _step_energy_shop)
+	await _case("energy_drink_preparation_and_hunt", _step_energy_preparation)
 	await _case("horde_menu_to_hunt", _step_horde_hunt)
 	await _case("horde_result_and_shop", _step_horde_result)
 	await _case("horde_shop_back_to_menu", _step_horde_back_to_menu)
@@ -572,6 +577,113 @@ func _step_backpack_preparation() -> void:
 	hunt.debug_force_end(HuntResult.Outcome.ABANDONED)
 	if await _wait_scene(ScenePaths.RESULT, 30.0):
 		_t.call("eq", _ended.size(), 1, "hunt_ended 1x")
+		if _press("MenuButton"):
+			await _wait_scene(ScenePaths.MAIN_MENU)
+
+
+# --------------------------------------------------------------------------------------------
+# Energy drink route (docs/plano_faca_mochila_folego.md, F3)
+# --------------------------------------------------------------------------------------------
+
+## Menu -> shop: the card says "Fôlego cheio na hora"; without money the button is off; two purchases charge R$ 150 each.
+func _step_energy_shop() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 0, "pre-condicao: o perfil nao tem energetico")
+	if not (_press("ShopButton") and await _wait_scene(ScenePaths.SHOP)):
+		return
+	var buy: Button = _button("Buy_energy_drink")
+	if buy == null:
+		return
+	_t.call("ok", _find_label("Fôlego cheio na hora") != null, "o cartao do energetico mostra 'Fôlego cheio na hora'")
+	var price: int = int(Data.get_equipment(Ids.I_ENERGY_DRINK).get("price", 0))
+	_t.call("eq", price, 150, "energetico custa R$ 150")
+	# 1) one real short: the button is off and pressing it does nothing
+	Profile._wallet.money = price - 1
+	Profile.add_money(0)
+	await get_tree().process_frame
+	_t.call("eq", buy.disabled, true, "Buy_energy_drink desabilitado sem saldo")
+	buy.pressed.emit()
+	_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 0, "clique sem saldo nao entrega")
+	_t.call("eq", Profile.get_money(), price - 1, "clique sem saldo nao cobra")
+	# 2) money for exactly two: two purchases, R$ 150 each
+	Profile.add_money(price + 1)
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_money(), price * 2, "saldo de 2 energeticos")
+	_t.call("eq", buy.disabled, false, "Buy_energy_drink habilitado com saldo")
+	buy.pressed.emit()
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 1, "1o energetico comprado")
+	_t.call("eq", Profile.get_money(), price, "cobrou R$ 150")
+	buy.pressed.emit()
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 2, "2o energetico comprado")
+	_t.call("eq", Profile.get_money(), 0, "cobrou R$ 150 de novo")
+	_t.call("eq", buy.disabled, true, "sem saldo para o 3o")
+	if _press("NextHuntButton"):
+		await _wait_scene(ScenePaths.PREPARATION)
+
+
+## Preparation (backpack level 2, 4/4 full): drop one item, tick the drink, start -> the request carries 2 drinks -> hunt.
+func _step_energy_preparation() -> void:
+	if _scene_path() != ScenePaths.PREPARATION:
+		_t.call("fail", "pre-condicao: nao esta na preparacao (%s)" % _scene_path())
+		return
+	var drink: CheckButton = _node("Item_energy_drink") as CheckButton
+	if drink == null:
+		_t.call("fail", "Preparacao nao tem Item_energy_drink")
+		return
+	_t.call("eq", drink.button_pressed, false, "o energetico comecou desmarcado (mochila cheia, sem espaco)")
+	_t.call("eq", drink.disabled, true, "e bloqueado com a mochila cheia")
+	var bait: CheckButton = _node("Item_corn_bait") as CheckButton
+	if bait == null:
+		_t.call("fail", "Preparacao nao tem Item_corn_bait")
+		return
+	bait.button_pressed = false   # frees one space
+	await get_tree().process_frame
+	_t.call("eq", drink.disabled, false, "com um espaco livre o energetico pode ser marcado")
+	drink.button_pressed = true
+	var picked: Array[StringName] = Profile.get_loadout_items()
+	_t.call("ok", picked.has(Ids.I_ENERGY_DRINK), "energetico no loadout do perfil")
+	_t.call("ok", not picked.has(Ids.I_CORN_BAIT), "a ceva saiu para dar lugar")
+	var c0: Button = _button("Contract_0")
+	if c0 != null:
+		c0.pressed.emit()
+	_started_signals = 0
+	_ended.clear()
+	if not _press("StartHuntButton"):
+		return
+	var request: HuntRequest = Router.get_pending_request()
+	_t.call("ok", request != null, "Router tem o pedido pendente")
+	if request != null:
+		_t.call("ok", request.item_ids.has(Ids.I_ENERGY_DRINK), "request.item_ids leva o energetico")
+		_t.call("eq", int(request.item_counts.get(Ids.I_ENERGY_DRINK, 0)), 2, "request.item_counts[energy_drink] == 2")
+		_t.call("eq", request.get_item_count(Ids.I_ENERGY_DRINK), 2, "request.get_item_count(energy_drink) == 2")
+	if not await _wait_scene(ScenePaths.HUNT, 30.0):
+		return
+	var hunt: HuntController = _scene() as HuntController
+	if hunt == null:
+		_t.call("fail", "cena HUNT nao e HuntController")
+		return
+	var t0: int = Time.get_ticks_msec()
+	while not hunt.is_world_ready() and Time.get_ticks_msec() - t0 < 60000:
+		await get_tree().process_frame
+	_t.call("ok", hunt.is_world_ready(), "mundo pronto")
+	for i: int in 5:
+		await get_tree().process_frame
+	var player: Player = hunt.get_player() as Player
+	_t.call("ok", player != null, "jogador existe")
+	if player != null and player.get_items() != null:
+		var items: ItemBelt = player.get_items()
+		_t.call("eq", items.get_count(Ids.I_ENERGY_DRINK), 2, "o cinto chega com 2 energeticos")
+		var usable: Array[StringName] = items.get_usable_ids()
+		_t.call("ok", not usable.is_empty() and usable.back() == Ids.I_ENERGY_DRINK, "o energetico e o ultimo espaco usavel (%s)" % str(usable))
+	_ended.clear()
+	hunt.debug_force_end(HuntResult.Outcome.ABANDONED)
+	if await _wait_scene(ScenePaths.RESULT, 30.0):
+		_t.call("eq", _ended.size(), 1, "hunt_ended 1x")
+		_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 2, "nenhum energetico usado: o estoque segue em 2")
 		if _press("MenuButton"):
 			await _wait_scene(ScenePaths.MAIN_MENU)
 

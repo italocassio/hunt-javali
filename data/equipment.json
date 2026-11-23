@@ -7,6 +7,8 @@
      "kind": "passive", "price": 2500, "currency": "money", "max_per_hunt": 1, "effect": {"damage_reduction": 0.35}},
     {"id": "medkit", "name": "Kit de primeiros socorros", "short_name": "Kit", "description": "Recupera 50 de vida. Consumível.",
      "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5}},
+    {"id": "energy_drink", "name": "Energético", "short_name": "Energia", "description": "Recupera todo o fôlego na hora. Consumível.",
+     "kind": "consumable", "price": 150, "currency": "money", "max_per_hunt": 3, "effect": {"stamina_restore_frac": 1.0}},
     {"id": "corn_bait", "name": "Ceva de milho", "short_name": "Ceva", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
      "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 2,
      "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4}},

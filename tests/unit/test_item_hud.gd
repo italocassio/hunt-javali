@@ -3,7 +3,9 @@ extends "res://tests/lib/test_case.gd"
 ## InputSetup.get_item_action / get_key_label, ItemBelt.use_item by id, Quickbar slots, TouchControls item buttons.
 ## No selection exists any more: every usable item has its own action.
 
-const ITEM_ORDER: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars"]
+const ITEM_ORDER: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"]
+## The four usable items of before F3 (the energy drink closes the list; docs/plano_faca_mochila_folego.md 1.3).
+const ITEMS_BEFORE_F3: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars"]
 
 
 ## A hunter whose health the test controls (PlayerBase answers a constant 100 / 100).
@@ -95,6 +97,7 @@ func test_get_item_action() -> void:
 	eq(InputSetup.get_item_action(&"corn_bait"), &"use_corn_bait", "ceva")
 	eq(InputSetup.get_item_action(&"scout_drone"), &"use_scout_drone", "drone")
 	eq(InputSetup.get_item_action(&"binoculars"), &"use_binoculars", "binoculo")
+	eq(InputSetup.get_item_action(&"energy_drink"), &"use_energy_drink", "energetico (F3)")
 	for passive: StringName in [&"leather_vest", &"extra_ammo", &"thermal_scope"]:
 		eq(InputSetup.get_item_action(passive), &"", "passivo %s nao tem acao" % passive)
 	eq(InputSetup.get_item_action(&""), &"", "id vazio")
@@ -106,6 +109,7 @@ func test_get_key_label_of_each_item_action() -> void:
 	eq(InputSetup.get_key_label(&"use_corn_bait"), "G", "ceva")
 	eq(InputSetup.get_key_label(&"use_scout_drone"), "V", "drone")
 	eq(InputSetup.get_key_label(&"use_binoculars"), "B", "binoculo")
+	eq(InputSetup.get_key_label(&"use_energy_drink"), "T", "energetico (F3)")
 	eq(InputSetup.get_key_label(&"dog_command"), "E", "cao")
 	eq(InputSetup.get_key_label(&"spectate_next"), "F", "espectador")
 	for id: StringName in InputSetup.ITEM_ACTIONS:
@@ -123,7 +127,7 @@ func test_get_key_label_edge_cases() -> void:
 
 func test_item_keys_are_unique_physical_keys() -> void:
 	var want: Dictionary = {"use_medkit": KEY_Q, "use_corn_bait": KEY_G, "use_scout_drone": KEY_V,
-		"use_binoculars": KEY_B, "dog_command": KEY_E, "spectate_next": KEY_F}
+		"use_binoculars": KEY_B, "use_energy_drink": KEY_T, "dog_command": KEY_E, "spectate_next": KEY_F}
 	for action: String in want:
 		var keys: Array[int] = []
 		for ev: InputEvent in InputMap.action_get_events(action):
@@ -153,7 +157,7 @@ func test_item_keys_are_unique_physical_keys() -> void:
 func test_pressing_an_item_key_presses_only_its_action() -> void:
 	InputSetup.release_all_actions()
 	InputSetup.set_touch_override("off")
-	for action: String in ["use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars", "spectate_next"]:
+	for action: String in ["use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars", "use_energy_drink", "spectate_next"]:
 		var code: int = int((InputMap.action_get_events(action)[0] as InputEventKey).physical_keycode)
 		var ev: InputEventKey = InputEventKey.new()
 		ev.physical_keycode = code as Key
@@ -200,7 +204,10 @@ func test_belt_usable_ids_follow_item_actions_order_not_loadout_order() -> void:
 	eq(belt.get_count(&"binoculars"), -1, "binoculo: -1")
 	eq(belt.get_count(&"corn_bait"), -1, "item nao trazido: -1")
 	var all4: ItemBelt = _belt([&"scout_drone", &"corn_bait", &"binoculars", &"medkit"])
-	eq(all4.get_usable_ids(), ITEM_ORDER, "os 4 usaveis na ordem das acoes")
+	eq(all4.get_usable_ids(), ITEMS_BEFORE_F3, "sem o energetico: os 4 usaveis na ordem das acoes")
+	var all5: ItemBelt = _belt([&"energy_drink", &"scout_drone", &"corn_bait", &"binoculars", &"medkit"], {&"energy_drink": 2})
+	eq(all5.get_usable_ids(), ITEM_ORDER, "com o energetico: os 5 usaveis, ele por ultimo")
+	eq(all5.get_count(&"energy_drink"), 2, "contagem do energetico")
 	_free_belts()
 
 
@@ -422,6 +429,38 @@ func test_quickbar_dog_stays_last_across_rebind() -> void:
 	eq(qb.get_slot_ids(), [&"dog_command"] as Array[StringName], "bind(null): so o cao")
 	InputSetup.set_touch_override("auto")
 	_free_belts()
+
+
+func test_quickbar_with_the_energy_drink_has_six_slots_with_the_drink_before_the_dog() -> void:
+	## docs/plano_faca_mochila_folego.md 1.3: the energy drink is the last usable slot (by ITEM_ACTIONS order), the dog stays last.
+	InputSetup.set_touch_override("off")
+	var belt: ItemBelt = _belt([&"energy_drink", &"binoculars", &"scout_drone", &"corn_bait", &"medkit"], {&"energy_drink": 3})
+	var qb: Quickbar = _bar(belt)
+	eq(qb.get_slot_ids(), ITEM_ORDER, "5 usaveis na ordem das acoes, o energetico por ultimo")
+	qb.set_dog_present(true)
+	eq(qb.get_slot_ids(), [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink", &"dog_command"] as Array[StringName],
+		"5 usaveis + cao = 6 espacos, o cao por ultimo")
+	var drink: Quickbar.Slot = _slot(qb, &"energy_drink")
+	ok(drink != null, "espaco do energetico existe")
+	if drink != null:
+		eq(drink.key_label.text, "T", "tecla do energetico")
+		eq(drink.count_label.text, "x3", "quantidade do energetico")
+		ok(drink.count_label.visible, "o energetico (consumivel) mostra quantidade")
+		near(drink.self_modulate.a, 1.0, 0.001, "com estoque: normal")
+		belt._counts[&"energy_drink"] = 0
+		belt.counts_changed.emit()
+		eq(drink.count_label.text, "x0", "contagem atualizada pelo sinal")
+		near(drink.self_modulate.a, Quickbar.DIM_ALPHA, 0.001, "acabou: espaco apagado")
+	# the flash goes to the drink slot only (the HUD blinks it when the hunter gets tired)
+	qb.flash(&"energy_drink", true)
+	qb.flash(&"energy_drink", false)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_item_card_stats_text_of_the_energy_drink() -> void:
+	eq(ItemCard.stats_text(&"energy_drink"), "Fôlego cheio na hora", "cartao da loja (frac 1,0)")
+	eq(Data.get_item_category(&"energy_drink"), &"equipment", "categoria do energetico")
 
 
 func test_quickbar_slot_contents() -> void:
@@ -785,6 +824,116 @@ func test_touch_accessory_button_default_switch_and_list() -> void:
 	_free_belts()
 
 
+## The energy drink is the 4th accessory (the last): the open list has 4 rows, in ITEM_ACTIONS order, climbing from the tab.
+func test_touch_accessory_list_has_four_rows_with_the_energy_drink_last() -> void:
+	var belt: ItemBelt = _belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"], {&"energy_drink": 2})
+	var tc: TouchControls = _touch(belt)
+	var want: Array[StringName] = [&"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"]
+	eq(tc.get_accessory_ids(), want, "4 acessorios (sem o kit), o energetico por ultimo")
+	eq(tc.get_accessory_current(), &"corn_bait", "padrao: o primeiro com contagem > 0")
+	var arrow: Vector3 = tc.get_probe_buttons()["accessory_menu"]
+	_tap(tc, 1, Vector2(arrow.x, arrow.y))
+	ok(tc.is_accessory_menu_open(), "tocar na seta abre a lista")
+	var rows: Dictionary = tc.get_probe_buttons()
+	var ys: Array[float] = []
+	for id: StringName in want:
+		ok(rows.has("accessory_item_%s" % id), "linha de %s na lista" % id)
+		if rows.has("accessory_item_%s" % id):
+			ys.append((rows["accessory_item_%s" % id] as Vector3).y)
+	var row_count: int = 0
+	for key: Variant in rows:
+		if String(key).begins_with("accessory_item_"):
+			row_count += 1
+	eq(row_count, 4, "a lista tem exatamente 4 linhas")
+	eq(ys.size(), 4, "pre-condicao: 4 posicoes")
+	if ys.size() == 4:
+		ok(ys[0] > ys[1] and ys[1] > ys[2] and ys[2] > ys[3], "a lista sobe: o energetico fica na linha de cima")
+	# choosing the drink makes it the current accessory without drinking it
+	var row: Vector3 = rows["accessory_item_energy_drink"]
+	_tap(tc, 1, Vector2(row.x, row.y))
+	eq(tc.get_accessory_current(), &"energy_drink", "o energetico virou o atual")
+	eq(belt.get_count(&"energy_drink"), 2, "escolher nao bebe")
+	ne(tc.get_button_center(&"use_energy_drink"), Vector2.INF, "o botao agora aperta use_energy_drink")
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+## select_accessory (F3): the HUD puts the drink on the main button without using it; false for an item not carried.
+func test_touch_select_accessory_picks_the_drink_and_refuses_what_is_not_carried() -> void:
+	var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"energy_drink"], {&"energy_drink": 1}))
+	eq(tc.get_accessory_current(), &"corn_bait", "padrao: a ceva")
+	var arrow: Vector3 = tc.get_probe_buttons()["accessory_menu"]
+	_tap(tc, 1, Vector2(arrow.x, arrow.y))
+	ok(tc.is_accessory_menu_open(), "pre-condicao: lista aberta")
+	ok(tc.select_accessory(&"energy_drink"), "select_accessory devolve true")
+	eq(tc.get_accessory_current(), &"energy_drink", "o energetico e o atual")
+	ok(not tc.is_accessory_menu_open(), "a lista fecha")
+	ok(not Input.is_action_pressed(&"use_energy_drink"), "selecionar nao aperta a acao")
+	ok(not tc.select_accessory(&"scout_drone"), "item nao trazido: false")
+	ok(not tc.select_accessory(&"medkit"), "o kit nao e acessorio: false")
+	ok(not tc.select_accessory(&""), "id vazio: false")
+	eq(tc.get_accessory_current(), &"energy_drink", "as recusas nao mudam o atual")
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func _row_rect(row: Vector3) -> Rect2:
+	return Rect2(Vector2(row.x, row.y) - Vector2.ONE * row.z, Vector2.ONE * row.z * 2.0)
+
+
+## The open list of 4 rows (5 usable items, the kit has its own button) against the other buttons, the weapon cards and
+## the screen edges on the three reference screens.
+func test_touch_accessory_list_of_four_rows_does_not_overlap_anything_on_the_three_screens() -> void:
+	var sizes: Array[Vector2i] = [Vector2i(1532, 720), Vector2i(1280, 720), Vector2i(1280, 960)]
+	var acc_actions: Array[String] = ["use_corn_bait", "use_scout_drone", "use_binoculars", "use_energy_drink"]
+	await frames(2)   # nodes freed by the previous test still listen to the window size until the end of the frame
+	for win_size: Vector2i in sizes:
+		_set_window(win_size)
+		await frames(2)
+		var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"], {&"energy_drink": 3}))
+		tc.set_dog_present(true)
+		tc._revive_on = true
+		tc._rebuild_buttons()
+		await frames(2)
+		var size_px: Vector2 = _screen(tc)
+		var label: String = "%dx%d" % [win_size.x, win_size.y]
+		near(size_px.x, float(win_size.x), 0.5, "%s: pre-condicao, largura da viewport" % label)
+		var arrow: Vector3 = tc.get_probe_buttons()["accessory_menu"]
+		_tap(tc, 1, Vector2(arrow.x, arrow.y))
+		ok(tc.is_accessory_menu_open(), "%s: lista aberta" % label)
+		var probe: Dictionary = tc.get_probe_buttons()
+		var rows: Array[Rect2] = []
+		for key: Variant in probe:
+			if String(key).begins_with("accessory_item_"):
+				rows.append(_row_rect(probe[key] as Vector3))
+		eq(rows.size(), 4, "%s: 4 linhas" % label)
+		ok(probe.has("interact") and probe.has("dog_command"), "%s: interact e cao estao no probe (a regra geral os confere)" % label)
+		var screen_rect: Rect2 = Rect2(Vector2.ZERO, size_px)
+		var cards: Array[Rect2] = []
+		var block: Dictionary = tc.get_bottom_block()
+		var card_w: float = float(block["card_w"])
+		for i: int in 2:
+			cards.append(Rect2(Vector2(float(block["center_x"]) - card_w - 4.0 + float(i) * (card_w + 8.0),
+				size_px.y - 8.0 - 28.0 - 6.0 - 55.0), Vector2(card_w, 55.0)))
+		for i: int in rows.size():
+			ok(screen_rect.encloses(rows[i]), "%s: linha %d dentro da tela (%s)" % [label, i, rows[i]])
+			for j: int in range(i + 1, rows.size()):
+				ok(not rows[i].intersects(rows[j]), "%s: linhas %d e %d se sobrepoem" % [label, i, j])
+			for card: Rect2 in cards:
+				ok(not rows[i].intersects(card), "%s: linha %d toca um cartao de arma" % [label, i])
+			for bid: Variant in probe:
+				var bname: String = String(bid)
+				# rows, cards and the tab are checked elsewhere; the main Accessories button is the list's own origin
+				if bname.begins_with("accessory_item_") or bname.begins_with("weapon_card_") or bname == String(TouchControls.MENU_ID) \
+						or acc_actions.has(bname):
+					continue
+				var b: Vector3 = probe[bid] as Vector3
+				var gap: float = rows[i].get_center().distance_to(Vector2(b.x, b.y)) - rows[i].size.x * 0.5 - b.z
+				ok(gap >= -0.01, "%s: a linha %d toca o botao %s (folga %.1f px)" % [label, i, bname, gap])
+		_end_hud_test()
+		_free_belts()
+
+
 func test_touch_accessory_switches_by_itself_when_the_current_runs_out() -> void:
 	var belt: ItemBelt = _belt([&"corn_bait", &"scout_drone"], {&"corn_bait": 1, &"scout_drone": 2})
 	var tc: TouchControls = _touch(belt)
@@ -896,7 +1045,7 @@ func _spawn_hud_with_dog(item_ids: Array[StringName]) -> Hud:
 	var req: HuntRequest = HuntRequest.make_debug()
 	req.weapon_ids = Data.get_weapon_ids()   # the biggest weapon frame (5 weapons)
 	req.item_ids = item_ids
-	req.item_counts = {&"medkit": 1, &"corn_bait": 2, &"scout_drone": 3}
+	req.item_counts = {&"medkit": 1, &"corn_bait": 2, &"scout_drone": 3, &"energy_drink": 2}
 	player.setup(req, _hud_world)
 	for child: Node in player.get_children():
 		if child is Hud:
@@ -912,21 +1061,26 @@ func _rect(c: Control) -> Rect2:
 
 ## The five-slot bar (4 usable items + the dog) against the weapon frame, the kill message and the health strip.
 func _check_five_slot_bar(hud: Hud, label: String) -> void:
+	_check_item_bar(hud, label, 5)
+
+
+## The item bar of `slots` spaces (usable items + the dog) against the weapon frame, the kill message and the health strip.
+func _check_item_bar(hud: Hud, label: String, slots: int) -> void:
 	var qb: Quickbar = hud.get("_quickbar") as Quickbar
 	var frame: Control = hud.get("_weapon_frame") as Control
 	var kill: Control = hud.get("_kill_msg") as Control
 	var strip: Control = hud.get("_health") as Control
 	var root: Control = hud.get("_root") as Control
-	eq(qb.get_slot_ids().size(), 5, "%s: 4 itens usaveis + cao = 5 espacos" % label)
-	eq(qb.get_slot_ids()[4], Quickbar.DOG_SLOT, "%s: o cao e o ultimo" % label)
+	eq(qb.get_slot_ids().size(), slots, "%s: itens usaveis + cao = %d espacos" % [label, slots])
+	eq(qb.get_slot_ids()[slots - 1], Quickbar.DOG_SLOT, "%s: o cao e o ultimo" % label)
 	ok(qb.visible, "%s: barra visivel" % label)
 	var qb_rect: Rect2 = _rect(qb)
 	var frame_rect: Rect2 = _rect(frame)
 	var kill_rect: Rect2 = _rect(kill)
 	var strip_rect: Rect2 = _rect(strip)
 	var root_rect: Rect2 = Rect2(Vector2.ZERO, root.size)
-	var width: float = 5.0 * Quickbar.SLOT_SIZE_PX + 4.0 * float(Quickbar.SEPARATION_PX)
-	near(qb_rect.size.x, width, 1.0, "%s: largura da barra com 5 espacos (%s)" % [label, qb_rect])
+	var width: float = float(slots) * Quickbar.SLOT_SIZE_PX + float(slots - 1) * float(Quickbar.SEPARATION_PX)
+	near(qb_rect.size.x, width, 1.0, "%s: largura da barra com %d espacos (%s)" % [label, slots, qb_rect])
 	near(qb_rect.size.y, Quickbar.SLOT_SIZE_PX, 1.0, "%s: altura de um espaco" % label)
 	near(qb_rect.get_center().x, root.size.x * 0.5, 1.0, "%s: barra centrada (%s)" % [label, qb_rect])
 	ok(root_rect.encloses(qb_rect), "%s: barra dentro da tela (%s em %s)" % [label, qb_rect, root_rect])
@@ -937,7 +1091,7 @@ func _check_five_slot_bar(hud: Hud, label: String) -> void:
 
 
 func test_quickbar_with_four_usable_items_and_dog_clears_weapon_frame_and_kill_message() -> void:
-	# Five slots (4 usable items + the dog) is the widest bar there is: ITEM_ACTIONS has exactly 4 usable items.
+	# Five slots (4 usable items + the dog): the bar a hunter without the energy drink gets (F3 adds the sixth slot).
 	_set_window(Vector2i(1280, 720))
 	await frames(2)
 	var hud: Hud = await _spawn_hud_with_dog([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"] as Array[StringName])
@@ -968,7 +1122,7 @@ func test_quickbar_five_slots_on_a_wide_phone_screen() -> void:
 
 
 func test_quickbar_never_grows_past_four_items_plus_dog_with_a_six_item_backpack() -> void:
-	# Backpack level 4 carries 6 items, but only 4 are usable by key (the other two are passive): the bar keeps 5 slots.
+	# Backpack level 4 carries 6 items, but only 4 are usable by key here (the other two are passive): the bar keeps 5 slots.
 	_set_window(Vector2i(1280, 720))
 	await frames(2)
 	var six: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"leather_vest", &"extra_ammo"]
@@ -978,3 +1132,30 @@ func test_quickbar_never_grows_past_four_items_plus_dog_with_a_six_item_backpack
 		return
 	_check_five_slot_bar(hud, "mochila 6 itens")
 	_end_hud_test()
+
+
+## F3: the widest bar there is, 5 usable items (the energy drink closes the list) + the dog = 6 spaces, on the three
+## reference screens (1532x720 and 1280x720 landscape phones, 1280x960 tablet), also with a reload on the weapon panel.
+func test_quickbar_with_the_energy_drink_and_dog_has_six_slots_and_overlaps_nothing_on_the_three_screens() -> void:
+	var five: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"]
+	var sizes: Array[Vector2i] = [Vector2i(1532, 720), Vector2i(1280, 720), Vector2i(1280, 960)]
+	await frames(2)   # nodes freed by the previous test still listen to the window size until the end of the frame
+	for win_size: Vector2i in sizes:
+		var label: String = "%dx%d" % [win_size.x, win_size.y]
+		_set_window(win_size)
+		await frames(2)
+		var hud: Hud = await _spawn_hud_with_dog(five)
+		if hud == null:
+			_end_hud_test()
+			return
+		var root: Control = hud.get("_root") as Control
+		near(root.size.x, float(win_size.x), 0.5, "%s: pre-condicao, largura (%s)" % [label, root.size])
+		near(root.size.y, float(win_size.y), 0.5, "%s: pre-condicao, altura" % label)
+		var qb: Quickbar = hud.get("_quickbar") as Quickbar
+		eq(qb.get_slot_ids(), [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink", &"dog_command"] as Array[StringName],
+			"%s: 5 usaveis + cao, o energetico antes do cao" % label)
+		_check_item_bar(hud, label, 6)
+		(hud.get("_weapon_panel") as WeaponPanel).set_reload(true, 0.5)
+		await frames(2)
+		_check_item_bar(hud, label + " recarregando", 6)
+		_end_hud_test()

@@ -87,7 +87,9 @@ func test_interact_action_is_f_after_help_and_shared_only_with_spectate_next() -
 	ok(acts.has("interact"), "interact em InputSetup.ACTIONS")
 	ok(InputMap.has_action("interact"), "interact registrada no InputMap")
 	eq(acts.find("interact"), acts.find("help") + 1, "interact logo depois de help")
-	eq(acts[acts.size() - 1], "interact", "interact e a ultima acao")
+	# the energy drink (F3) closes the list: interact stays right before it
+	eq(acts[acts.size() - 2], "interact", "interact e a penultima acao (use_energy_drink fecha a lista)")
+	eq(acts[acts.size() - 1], "use_energy_drink", "use_energy_drink e a ultima acao")
 	var keys: Array[int] = []
 	for ev: InputEvent in InputMap.action_get_events("interact"):
 		ok(ev is InputEventKey, "interact so tem teclas (o toque vem do InteractButton)")
@@ -124,6 +126,55 @@ func test_interact_action_is_f_after_help_and_shared_only_with_spectate_next() -
 	_begin_input_test("off")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
 	ok(not Input.is_action_pressed("interact"), "o mouse nao aperta interact")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	_end_input_test()
+
+
+func test_energy_drink_action_is_t_and_the_last_item_slot() -> void:
+	## docs/plano_faca_mochila_folego.md 1.3 and 2.5 (F3): the drink is `use_energy_drink`, key T, last of ITEM_ACTIONS.
+	eq(InputSetup.get_item_action(&"energy_drink"), &"use_energy_drink", "get_item_action do energetico")
+	eq(InputSetup.get_key_label(&"use_energy_drink"), "T", "legenda da tecla do energetico")
+	ok(InputSetup.ACTIONS.has("use_energy_drink"), "use_energy_drink em InputSetup.ACTIONS")
+	ok(InputMap.has_action("use_energy_drink"), "use_energy_drink registrada no InputMap")
+	var ids: Array = InputSetup.ITEM_ACTIONS.keys()
+	eq(ids.back(), &"energy_drink", "ITEM_ACTIONS termina em energy_drink")
+	eq(ids[ids.size() - 2], &"binoculars", "o energetico vem logo depois do binoculo")
+	var keys: Array[int] = []
+	for ev: InputEvent in InputMap.action_get_events("use_energy_drink"):
+		ok(ev is InputEventKey, "use_energy_drink so tem teclas (o toque vem do botao Acessorios)")
+		if ev is InputEventKey:
+			keys.append(int((ev as InputEventKey).physical_keycode))
+	eq(keys, [int(KEY_T)] as Array[int], "use_energy_drink: so a tecla T")
+	# T collides with no other action
+	var owners: Array[String] = []
+	for action_name: String in InputSetup.ACTIONS:
+		for ev: InputEvent in InputMap.action_get_events(action_name):
+			if ev is InputEventKey and int((ev as InputEventKey).physical_keycode) == int(KEY_T):
+				owners.append(action_name)
+	eq(owners, ["use_energy_drink"] as Array[String], "T so pertence a use_energy_drink")
+	# a held T drives the action and release_all_actions lets go of it
+	_begin_input_test("off")
+	var press: InputEventKey = InputEventKey.new()
+	press.physical_keycode = KEY_T
+	press.pressed = true
+	Input.parse_input_event(press)
+	await frames(2)
+	ok(Input.is_action_pressed("use_energy_drink"), "T aperta use_energy_drink")
+	for other: String in InputSetup.ACTIONS:
+		if other != "use_energy_drink":
+			ok(not Input.is_action_pressed(other), "T nao aperta %s" % other)
+	InputSetup.release_all_actions()
+	ok(not Input.is_action_pressed("use_energy_drink"), "release_all_actions solta use_energy_drink")
+	var up: InputEventKey = press.duplicate() as InputEventKey
+	up.pressed = false
+	Input.parse_input_event(up)
+	await frames(2)
+	_end_input_test()
+	ok(not Input.is_action_pressed("use_energy_drink"), "use_energy_drink solta ao fim")
+	# a real mouse button never drinks
+	_begin_input_test("off")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
+	ok(not Input.is_action_pressed("use_energy_drink"), "o mouse nao aperta use_energy_drink")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
 	_end_input_test()
 

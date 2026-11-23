@@ -263,7 +263,7 @@ const CLASSES: Array[Dictionary] = [
 	{"name": "Hitscan", "path": "res://src/weapons/hitscan.gd", "base": "RefCounted", "pkg": "A",
 		"methods": ["cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array) -> Dictionary"]},
 	# docs/arquitetura.md section 8.11 (1.3): direct use by id, no selection (selection_changed/next/get_selected_id/use_selected are gone)
-	{"name": "ItemBelt", "path": "res://src/player/item_belt.gd", "base": "Node", "pkg": "A",
+	{"name": "ItemBelt", "path": "res://src/player/item_belt.gd", "base": "Node", "pkg": "A", "props": ["stamina_restore_frac"],
 		"signals": ["counts_changed()", "binoculars_changed(active: bool)", "use_started(item_id: StringName, duration_s: float)",
 			"use_finished(item_id: StringName)"],
 		"methods": ["setup(request: HuntRequest, player: PlayerBase, world: HuntWorld) -> void",
@@ -354,7 +354,8 @@ const CLASSES: Array[Dictionary] = [
 			"set_weapon_card_rects(rects: Array[Rect2], actions: Array[StringName] = []) -> void",
 			"get_weapon_card_rects() -> Array[Rect2]", "get_bottom_block() -> Dictionary",
 			"get_probe_buttons() -> Dictionary", "get_accessory_current() -> StringName",
-			"get_accessory_ids() -> Array[StringName]", "is_accessory_menu_open() -> bool"],
+			"get_accessory_ids() -> Array[StringName]", "is_accessory_menu_open() -> bool",
+				"select_accessory(item_id: StringName) -> bool"],
 		"signals": ["layout_changed()"]},
 	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
 	# docs/multiplayer.md section 3.3 / 3.6: an ally in the world. The PlayerBase virtuals it overrides.
@@ -677,7 +678,9 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"set_under_attack(on: bool) -> void", "create_fallback() -> CornStockVisualBase"],
 		"consts": {"STAGE_COUNT": 5, "FALLBACK_HEAPS": 6}},
 	{"name": "Ids", "path": "res://src/core/ids.gd", "base": "RefCounted",
-		"consts": {"MODE_CONTRACT": &"contract", "MODE_HORDE": &"horde", "HP_INTERMISSION": &"intermission", "HP_WAVE": &"wave"}},
+		"consts": {"MODE_CONTRACT": &"contract", "MODE_HORDE": &"horde", "HP_INTERMISSION": &"intermission", "HP_WAVE": &"wave",
+				# docs/plano_faca_mochila_folego.md section 2.1 (F3)
+				"I_ENERGY_DRINK": &"energy_drink"}},
 ]
 
 

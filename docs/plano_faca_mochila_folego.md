@@ -17,9 +17,37 @@ Identificadores em inglês; texto do jogador em PT-BR **exatamente** como na §2
 | F1 | Mochila: níveis na loja, espaços de equipamento, save | 0.9.5 | publicada em 23/11/2026 (main `cbde11c`, gh-pages `5adaf79`). Resíduo: `UpgradeCard` já traz os ramos de texto/retrato da faca (ativam na F4); `SaveService.item_slots_for_level(level)` é helper estático extra |
 | F2 | Fôlego: corrida gasta, cansaço, barra no HUD | 0.9.6 | publicada em 23/11/2026 (main `9ec2d09`, gh-pages `e2928d9`). Resíduo: a marca do limiar é o nó irmão `StaminaMark` (`ColorRect` sob a `HealthStrip`, não filho de `Stamina`); `breath_tired` é sintetizado sob demanda (`SynthWeapons.LAZY_IDS`), sem MP3; `debug_set_stamina` não zera `_regen_wait`; `net_unit` ganhou também `player_horde2` |
 | F3 | Energético: consumível que enche o fôlego | 0.9.7 | publicada em 23/11/2026 (main `2776b61`, gh-pages `404ee18`). Resíduo: a lista de 4 acessórios sobrepunha o botão `interact`, então o botão do toque **Levantar/Pegar** passou de `ox 410` para `ox 340` (§2.7, remédio de choque; `oy 380`, `d 100` iguais; §14 de `arquitetura.md` já corrigida, main `0d52deb`); `ItemBelt.stamina_restore_frac` é lido com `maxf` entre os consumíveis; `sfx_library.gd` não precisou mudar (o som entrou por `SynthWeapons.LAZY_IDS`); `Hud._update_energy_hint` exige também caçador vivo |
-| F4 | Faca: golpe rápido sem slot, níveis de dano na loja, rede | 0.9.8 | pendente |
+| F4 | Faca: golpe rápido sem slot, níveis de dano na loja, rede | 0.9.8 | publicada em 23/11/2026 (main `81ef7e4`, gh-pages `8c7c11e`). Resíduos abaixo |
 
 Quem fecha uma fase troca "pendente" por "publicada em DD/MM/AAAA (main `<hash>`, gh-pages `<hash>`)" e anota resíduos.
+
+**Resíduos da F4** (nada bloqueia; o dono decide se vale mexer):
+1. `Player._update_input` **não existe**: a função que lê as teclas discretas é `_pump_discrete_input(delta)`, e é lá que a
+   ação `knife` é lida (depois de `weapon_swap`, antes do laço de itens). A §2.6 citava um nome errado.
+2. **Terreno × ajuda de mira:** a §2.6 não dizia quem ganha quando o raio pega o chão e a esfera pegaria uma zona.
+   Implementado: raio com `HitZone` → dano; senão **tenta a ajuda de mira**; se ela também falhar e o raio tiver pegado
+   algo, só o som. O acerto por ajuda de mira usa `normal = -frente` e `direction = frente` (não estavam no contrato).
+3. `--knife=<1..4>` sozinho não golpeia, então o sandbox ganhou a flag extra **`--knife_swing`** (golpeia a cada cooldown),
+   sem a qual o screenshot "no meio do golpe" do aceite seria impossível.
+4. O `Knife` tem o seu próprio `_spawn_blood` (mesmo asset e mesma regra do `Weapon._impact`, orçamento próprio de 2
+   efeitos), porque `Weapon._impact` é método de instância e só `take_shot_id` podia entrar no `weapon.gd`.
+5. `player_stamina_test.gd` (F2) teve **1 asserção relaxada**: `use_energy_drink` deixou de ser a última de `ACTIONS` e
+   passou a ser a penúltima, porque a §2.5 põe `knife` depois dela.
+6. `tests/unit/test_onboarding_hud.gd` não estava na lista do QA4 no plano, mas 3 falhas da F4 estavam nele (ordem de
+   `ACTIONS` e as duas listas de linhas da legenda). Entrou no pacote.
+7. O cenário ponta a ponta do `net_test` ficou em `tests/net_knife_e2e.gd` (estende `src/hunt/debug/net_hunt_e2e.gd` e
+   sobrescreve 3 funções), e não em `src/hunt/debug/`, para o QA não editar `src/`. Copiável para o B se preferirem.
+8. **`net_horde2` falhava desde antes do plano** sob `--fixed-fps` (5 de 6 no HEAD 0.9.7, 6 de 6 no 0.9.4): o teste espera
+   o fim da caçada em segundos de jogo, mas o byte path é bombeado em tempo real. Remediado **no registro**
+   (`tests/net_unit.gd` com `"wall_clock": true`, `limit_s` 180), sem afrouxar asserção. O conserto de verdade é trocar a
+   espera por tempo real em `net_horde2_test.gd` (dono: B); aí o `wall_clock` sai.
+9. **Arte:** a lâmina usa um material só para o retrato e para a 1ª pessoa. Deixar o retrato com cara de aço escureceu a
+   lâmina em 1ª pessoa (de aço claro para aço quase preto). As duas leituras estão boas; se o dono quiser a lâmina clara
+   de volta em 1ª pessoa, é preciso separar os materiais. O `knife_view` também chama helpers **privados** de
+   `ArmsHD` (`_arm_tube`, `_finger`, `_wrap`, `_filler`, `_paint`): renomear um deles quebra a faca.
+10. As listagens **verbatim** do Apêndice A de `arquitetura.md` (`hunt_request.gd`, `player_base.gd`, `net_codec.gd`,
+    `weapon_view_base.gd`) estão defasadas desde a frente da horda (o `HuntRequest` listado não tem `mode` nem
+    `horde_level`). A F4 atualizou só o bloco "Acréscimos 1.7", que é o que a §2.1 pede.
 
 ---
 

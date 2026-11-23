@@ -58,11 +58,10 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0,
 		"must_pass": ["minimap_same_on_both"]},
 	{"name": "net_horde", "scene": "res://src/hunt/debug/net_horde_test.tscn", "limit_s": 120.0},
-	# net_horde2 waits for the end of the hunt in GAME seconds (END_WAIT_S 3.0) while the byte path of the two hunts is
-	# pumped in REAL time: under --fixed-fps 60 the headless run outpaces the wall clock and "both_down_defeat_death" /
-	# "bleed_client_downed" fail most of the time (found in QA4 2026-11-23: 5 of 6 runs fail at 0.9.7 and 6 of 6 at 0.9.4, before
-	# the F1-F4 plan; 0 of 4 fail in real time). So it runs in wall-clock mode, about 85 s.
-	{"name": "net_horde2", "scene": "res://src/hunt/debug/net_horde2_test.tscn", "limit_s": 180.0, "wall_clock": true},
+	# net_horde2 used to need wall_clock: it waited for the end of the hunt in GAME seconds while the byte path of the two
+	# hunts is pumped in REAL time, so under --fixed-fps 60 the headless run outpaced the wall clock (QA4 2026-11-23).
+	# Fixed at the source in 0.9.9: net_horde2_test._wait_until never gives up before WAIT_REAL_FLOOR_S of wall time.
+	{"name": "net_horde2", "scene": "res://src/hunt/debug/net_horde2_test.tscn", "limit_s": 120.0},
 	{"name": "net_mode", "scene": "res://src/net/debug/net_mode_selftest.tscn", "limit_s": 60.0},
 	{"name": "player_horde2", "scene": "res://src/player/debug/player_horde2_test.tscn", "limit_s": 120.0},
 	{"name": "player_stamina", "scene": "res://src/player/debug/player_stamina_test.tscn", "limit_s": 120.0},

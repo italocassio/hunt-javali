@@ -37,6 +37,7 @@ const END_WAIT_S: float = 3.0
 const HEALTH_TOL: float = 0.01
 const HOLD_TOL_S: float = 0.05
 const PUPPET_WAIT_S: float = 30.0
+const WAIT_REAL_FLOOR_S: float = 10.0   # a condition fed by the real-time pump never gives up before this much wall time
 
 var _passed: int = 0
 var _failed: int = 0
@@ -430,11 +431,17 @@ func _records(data: PackedByteArray) -> Array:
 	return out
 
 
+## Waits for a condition. The game-time budget (timeout_s) is kept for the mechanics that run on the game clock (revive hold,
+## bleed-out), but the byte path between the two hunts is pumped in real time and headless --fixed-fps runs the game clock
+## much faster than that: so it never gives up before WAIT_REAL_FLOOR_S of wall time either.
 func _wait_until(cond: Callable, timeout_s: float) -> bool:
 	var t: float = 0.0
 	var t0: int = Time.get_ticks_msec()
+	var floor_ms: float = WAIT_REAL_FLOOR_S * 1000.0
+	var cap_ms: float = maxf(timeout_s * 1000.0 * 4.0, floor_ms)
 	while not bool(cond.call()):
-		if t > timeout_s or float(Time.get_ticks_msec() - t0) > timeout_s * 1000.0 * 4.0:
+		var real_ms: float = float(Time.get_ticks_msec() - t0)
+		if (t > timeout_s and real_ms >= floor_ms) or real_ms > cap_ms:
 			return false
 		await get_tree().process_frame
 		t += get_process_delta_time()

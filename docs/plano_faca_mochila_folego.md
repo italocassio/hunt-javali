@@ -37,10 +37,13 @@ Quem fecha uma fase troca "pendente" por "publicada em DD/MM/AAAA (main `<hash>`
    `ACTIONS` e as duas listas de linhas da legenda). Entrou no pacote.
 7. O cenário ponta a ponta do `net_test` ficou em `tests/net_knife_e2e.gd` (estende `src/hunt/debug/net_hunt_e2e.gd` e
    sobrescreve 3 funções), e não em `src/hunt/debug/`, para o QA não editar `src/`. Copiável para o B se preferirem.
-8. **`net_horde2` falhava desde antes do plano** sob `--fixed-fps` (5 de 6 no HEAD 0.9.7, 6 de 6 no 0.9.4): o teste espera
-   o fim da caçada em segundos de jogo, mas o byte path é bombeado em tempo real. Remediado **no registro**
-   (`tests/net_unit.gd` com `"wall_clock": true`, `limit_s` 180), sem afrouxar asserção. O conserto de verdade é trocar a
-   espera por tempo real em `net_horde2_test.gd` (dono: B); aí o `wall_clock` sai.
+8. ~~**`net_horde2` falhava desde antes do plano** sob `--fixed-fps`~~ — **resolvido em 0.9.9.** O teste esperava o fim da
+   caçada em segundos de jogo, mas o byte path é bombeado em tempo real, e sob `--fixed-fps` o headless passava na frente
+   do relógio. `net_horde2_test._wait_until` passou a **nunca desistir antes de `WAIT_REAL_FLOOR_S` (10 s) de tempo real**,
+   mantendo o orçamento em tempo de jogo para o que corre no relógio do jogo (manutenção do reviver, `bleed_out_s`), e o
+   teto duro virou `max(4 × timeout, 10 s)`. Nenhuma asserção mudou. O paliativo `"wall_clock": true` saiu do
+   `tests/net_unit.gd` e o `limit_s` voltou a 120. Verificado em 17 rodadas seguidas (12 avulsas + 5 pelo `net_unit`);
+   a rodada caiu de ~85 s para ~27 s.
 9. **Arte:** a lâmina usa um material só para o retrato e para a 1ª pessoa. Deixar o retrato com cara de aço escureceu a
    lâmina em 1ª pessoa (de aço claro para aço quase preto). As duas leituras estão boas; se o dono quiser a lâmina clara
    de volta em 1ª pessoa, é preciso separar os materiais. O `knife_view` também chama helpers **privados** de

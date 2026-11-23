@@ -5,6 +5,9 @@ extends Node
 ## Scene changes free the current scene, so the real runner is a second node of the same script that is
 ## parented to the root window (it survives Router.goto).
 ##
+## The three cases after the friends lobby are the backpack route (docs/plano_faca_mochila_folego.md, F1): menu ->
+## preparation (level 1, 3 slots) -> shop (buy the backpack, then a 4th item) -> preparation (4 slots) -> hunt with 4 items.
+##
 ## The last six cases are the horde route (docs/horda.md section 14): level 1, then level 2 (docs/plano_horda_nivel2.md).
 ##
 ## Run: tools/godot.sh --headless --fixed-fps 60 --path . res://tests/flow_test.tscn [-- --strict]
@@ -142,6 +145,9 @@ func _run() -> void:
 	await _case("preparation_second_contract", _step_second_request)
 	await _case("back_buttons_navigate", _step_back_buttons)
 	await _case("friends_lobby_offline_and_back", _step_friends_lobby)
+	await _case("backpack_menu_to_shop_via_preparation", _step_backpack_to_shop)
+	await _case("backpack_shop_purchase", _step_backpack_shop)
+	await _case("backpack_preparation_four_items_and_hunt", _step_backpack_preparation)
 	await _case("horde_menu_to_hunt", _step_horde_hunt)
 	await _case("horde_result_and_shop", _step_horde_result)
 	await _case("horde_shop_back_to_menu", _step_horde_back_to_menu)
@@ -387,6 +393,187 @@ func _step_friends_lobby() -> void:
 	if _press("BackButton"):
 		await _wait_scene(ScenePaths.MAIN_MENU)
 	_t.call("eq", Net.get_room_state(), Net.RoomState.NONE, "Net sem sala depois de Voltar")
+
+
+# --------------------------------------------------------------------------------------------
+# Backpack route (docs/plano_faca_mochila_folego.md, F1)
+# --------------------------------------------------------------------------------------------
+
+const BACKPACK_ITEMS: Array[StringName] = [&"medkit", &"scout_drone", &"corn_bait", &"binoculars"]
+
+var _backpack_money_before: int = 0
+
+
+## Header and limit hint of the preparation, level 1: "Equipamentos (mochila nível 1: até 3)".
+func _step_backpack_to_shop() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	_t.call("eq", Profile.get_upgrade_level(Ids.BACKPACK), 1, "pre-condicao: mochila nivel 1")
+	if not (_press("PlayButton") and await _wait_scene(ScenePaths.MAP_SELECT)):
+		return
+	var map_btn: Button = _button("Map_mato_grosso")
+	if map_btn == null:
+		return
+	map_btn.pressed.emit()
+	if not await _wait_scene(ScenePaths.PREPARATION):
+		return
+	_t.call("ok", _find_label("Equipamentos (mochila nível 1: até 3)") != null, "cabecalho da Preparacao no nivel 1")
+	_t.call("eq", Profile.get_item_slots(), 3, "3 espacos no nivel 1")
+	var chosen: int = Profile.get_loadout_items().size()
+	if chosen >= 3:
+		_t.call("ok", _find_label("Mochila cheia (3). Desmarque um ou compre uma mochila maior na Loja.") != null, "dica de limite abaixo do maximo (nivel 1)")
+	else:
+		_t.call("ok", _find_label("Mochila cheia (3). Desmarque um ou compre uma mochila maior na Loja.") == null, "sem dica de limite com espaco livre")
+	if _press("ShopButton"):
+		await _wait_scene(ScenePaths.SHOP)
+
+
+## Buy_backpack: the first card of the equipment tab, texts of section 2.11, then the 4th item and back.
+func _step_backpack_shop() -> void:
+	if _scene_path() != ScenePaths.SHOP:
+		_t.call("fail", "pre-condicao: nao esta na loja (%s)" % _scene_path())
+		return
+	var buy: Button = _button("Buy_backpack")
+	if buy == null:
+		return
+	var card: UpgradeCard = buy.get_parent().get_parent() as UpgradeCard
+	if card == null:
+		# the button sits in a VBox inside the card's HBox; walk up to the card
+		var n: Node = buy
+		while n != null and not (n is UpgradeCard):
+			n = n.get_parent()
+		card = n as UpgradeCard
+	_t.call("ok", card != null, "Buy_backpack pertence a um UpgradeCard")
+	if card == null:
+		return
+	_t.call("eq", card.get_index(), 0, "o cartao da mochila e o 1o da aba Equipamentos")
+	var page: Node = card.get_parent()
+	var medkit_btn: Button = _button("Buy_medkit")
+	if medkit_btn != null:
+		var sibling: Node = medkit_btn
+		while sibling != null and sibling.get_parent() != page:
+			sibling = sibling.get_parent()
+		_t.call("ok", sibling != null and sibling.get_index() > 0, "os cartoes de equipamento vem depois da mochila")
+	var weapon_btn: Button = _button("Buy_shotgun_12")
+	if weapon_btn != null:
+		_t.call("ok", not page.is_ancestor_of(weapon_btn), "a mochila nao esta na aba de armas")
+	_t.call("eq", card.get_level_text(), "Nível 1 de 4 · 3 espaços de equipamento", "texto do nivel 1")
+	_t.call("eq", card.get_next_text(), "Próximo nível: 4 espaços", "texto do proximo nivel")
+	# 1) not enough money: exactly one real below the price
+	var price: int = int(Data.get_upgrade_level_def(Ids.BACKPACK, 2)["price"])
+	Profile._wallet.money = price - 1
+	Profile.add_money(0)
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_money(), price - 1, "saldo R$ 1.999")
+	_t.call("eq", buy.disabled, true, "Buy_backpack desabilitado sem saldo")
+	_t.call("eq", buy.text, "SALDO INSUFICIENTE", "texto do botao sem saldo")
+	buy.pressed.emit()
+	_t.call("eq", Profile.get_upgrade_level(Ids.BACKPACK), 1, "clique sem saldo nao sobe o nivel")
+	_t.call("eq", Profile.get_money(), price - 1, "clique sem saldo nao cobra")
+	# 2) enough money (Profile.add_money): the button enables and buys
+	Profile.add_money(1)
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_money(), price, "saldo R$ 2.000")
+	_t.call("eq", buy.disabled, false, "Buy_backpack habilitado com saldo")
+	_t.call("eq", buy.text, "COMPRAR NÍVEL 2", "texto do botao com saldo")
+	buy.pressed.emit()
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_upgrade_level(Ids.BACKPACK), 2, "mochila nivel 2")
+	_t.call("eq", Profile.get_money(), 0, "cobrou R$ 2.000")
+	_t.call("eq", Profile.get_item_slots(), 4, "4 espacos")
+	var message: Label = _node("MessageLabel") as Label
+	if message != null:
+		_t.call("eq", message.text, "Comprado: Mochila nível 2.", "mensagem da loja")
+	_t.call("eq", card.get_level_text(), "Nível 2 de 4 · 4 espaços de equipamento", "texto do nivel 2")
+	_t.call("eq", card.get_next_text(), "Próximo nível: 5 espaços", "texto do proximo nivel (2)")
+	_t.call("eq", buy.disabled, true, "sem saldo para o nivel 3")
+	_t.call("eq", buy.text, "SALDO INSUFICIENTE", "botao do nivel 3 sem saldo")
+	# 3) the card at the top level: "Nível máximo", disabled (level poked directly, no payment)
+	Profile._inventory.upgrades[Ids.BACKPACK] = 4
+	card.refresh()
+	_t.call("eq", buy.disabled, true, "nivel maximo: botao desabilitado")
+	_t.call("eq", buy.text, "NÍVEL MÁXIMO", "nivel maximo: texto do botao")
+	_t.call("eq", card.get_next_text(), "Nível máximo", "nivel maximo: linha do proximo")
+	_t.call("eq", card.get_level_text(), "Nível 4 de 4 · 6 espaços de equipamento", "nivel maximo: linha do nivel")
+	Profile._inventory.upgrades[Ids.BACKPACK] = 2
+	card.refresh()
+	_t.call("eq", Profile.get_upgrade_level(Ids.BACKPACK), 2, "nivel de volta a 2")
+	# 4) the 4th item, bought from the shop with the new room: binoculars (auto-equipped), and a 5th owned item
+	var bino: Button = _button("Buy_binoculars")
+	if bino != null:
+		Profile.add_money(int(Data.get_equipment(&"binoculars")["price"]))
+		await get_tree().process_frame
+		bino.pressed.emit()
+		await get_tree().process_frame
+		_t.call("ok", Profile.owns(&"binoculars"), "binoculo comprado")
+	Profile._inventory.add_item(&"leather_vest", 1)   # a 5th owned item that must not fit in 4 slots
+	_t.call("eq", Profile.get_loadout_items().size(), 4, "4 itens equipados (3 + o binoculo no espaco novo)")
+	_backpack_money_before = Profile.get_money()
+	if _press("NextHuntButton"):
+		await _wait_scene(ScenePaths.PREPARATION)
+
+
+## Preparation at level 2: header, 4 checked items, the 5th blocked, StartHuntButton -> request with 4 item_ids -> hunt.
+func _step_backpack_preparation() -> void:
+	if _scene_path() != ScenePaths.PREPARATION:
+		_t.call("fail", "pre-condicao: nao esta na preparacao (%s)" % _scene_path())
+		return
+	_t.call("ok", _find_label("Equipamentos (mochila nível 2: até 4)") != null, "cabecalho da Preparacao no nivel 2")
+	for id: StringName in BACKPACK_ITEMS:
+		var check: CheckButton = _node("Item_%s" % id) as CheckButton
+		if check == null:
+			_t.call("fail", "Preparacao nao tem Item_%s" % id)
+			continue
+		if not check.button_pressed:
+			_t.call("eq", check.disabled, false, "Item_%s pode ser marcado" % id)
+			check.button_pressed = true
+	var picked: Array[StringName] = Profile.get_loadout_items()
+	_t.call("eq", picked.size(), 4, "4 itens no loadout do perfil")
+	for id: StringName in BACKPACK_ITEMS:
+		_t.call("ok", picked.has(id), "%s no loadout" % id)
+	var vest: CheckButton = _node("Item_leather_vest") as CheckButton
+	if vest != null:
+		_t.call("eq", vest.button_pressed, false, "o 5o item segue desmarcado")
+		_t.call("eq", vest.disabled, true, "o 5o item fica bloqueado com a mochila cheia")
+	_t.call("ok", _find_label("Mochila cheia (4). Desmarque um ou compre uma mochila maior na Loja.") != null, "dica de limite (nivel 2 de 4)")
+	# StartHuntButton builds the request synchronously (the scene change is deferred)
+	var c0: Button = _button("Contract_0")
+	if c0 != null:
+		c0.pressed.emit()
+	_started_signals = 0
+	_ended.clear()
+	if not _press("StartHuntButton"):
+		return
+	var request: HuntRequest = Router.get_pending_request()
+	_t.call("ok", request != null, "Router tem o pedido pendente")
+	if request != null:
+		_t.call("eq", request.item_ids.size(), 4, "request.item_ids.size() == 4")
+		for id: StringName in BACKPACK_ITEMS:
+			_t.call("ok", request.item_ids.has(id), "request leva %s" % id)
+	if not await _wait_scene(ScenePaths.HUNT, 30.0):
+		return
+	var hunt: HuntController = _scene() as HuntController
+	if hunt == null:
+		_t.call("fail", "cena HUNT nao e HuntController")
+		return
+	var t0: int = Time.get_ticks_msec()
+	while not hunt.is_world_ready() and Time.get_ticks_msec() - t0 < 60000:
+		await get_tree().process_frame
+	_t.call("ok", hunt.is_world_ready(), "mundo pronto")
+	for i: int in 5:
+		await get_tree().process_frame
+	var player: Player = hunt.get_player() as Player
+	_t.call("ok", player != null, "jogador existe")
+	if player != null and player.get_items() != null:
+		var usable: Array[StringName] = player.get_items().get_usable_ids()
+		_t.call("eq", usable.size(), 4, "a caçada chega com os 4 itens usaveis no cinto (%s)" % str(usable))
+	_ended.clear()
+	hunt.debug_force_end(HuntResult.Outcome.ABANDONED)
+	if await _wait_scene(ScenePaths.RESULT, 30.0):
+		_t.call("eq", _ended.size(), 1, "hunt_ended 1x")
+		if _press("MenuButton"):
+			await _wait_scene(ScenePaths.MAIN_MENU)
 
 
 # --------------------------------------------------------------------------------------------

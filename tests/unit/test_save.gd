@@ -374,3 +374,166 @@ func test_save_never_touches_real_save_path() -> void:
 	ok(FileAccess.file_exists("user://test_save.json"), "gravou no caminho de teste")
 	# Informational: the real save is not created by tests (only an earlier real run may have made it).
 	cleanup_test_files()
+
+
+# --- Upgrades block (docs/plano_faca_mochila_folego.md 2.4): migration by sanitize, version stays 2 ---
+
+const UP_ITEMS: Array[String] = ["medkit", "binoculars", "leather_vest", "extra_ammo", "corn_bait", "scout_drone"]
+
+
+## A save dictionary that owns every id of UP_ITEMS and equips the first `equipped` of them.
+func _save_with_items(equipped: int, upgrades: Variant = null) -> Dictionary:
+	var owned: Dictionary = {}
+	for id: String in UP_ITEMS:
+		owned[id] = 1
+	var d: Dictionary = {
+		"inventory": {"items": owned},
+		"loadout": {"items": UP_ITEMS.slice(0, equipped)},
+	}
+	if upgrades != null:
+		d["upgrades"] = upgrades
+	return d
+
+
+func test_new_save_has_backpack_level_1_and_version_2() -> void:
+	var s: Dictionary = SaveService.new_save()
+	contains(s, "upgrades", "bloco upgrades no save novo")
+	eq(s["upgrades"], {"backpack": 1}, "mochila nivel 1 (a faca entra so na F4)")
+	eq(SaveService.CURRENT_VERSION, 2, "versao do save continua 2")
+	eq(s["version"], 2, "versao gravada no save novo")
+	eq(SaveService.item_slots_for_level(1), 3, "item_slots_for_level(1)")
+	eq(SaveService.item_slots_for_level(2), 4, "item_slots_for_level(2)")
+	eq(SaveService.item_slots_for_level(3), 5, "item_slots_for_level(3)")
+	eq(SaveService.item_slots_for_level(4), 6, "item_slots_for_level(4)")
+	eq(SaveService.item_slots_for_level(99), 3, "nivel fora da faixa = base")
+	eq(SaveService.item_slots_for_level(0), 3, "nivel 0 = base")
+
+
+func test_sanitize_without_upgrades_block_is_backpack_level_1() -> void:
+	var s: Dictionary = SaveService.sanitize(_save_with_items(3))
+	eq(s["upgrades"]["backpack"], 1, "bloco ausente = nivel 1")
+	eq(s["loadout"]["items"], ["medkit", "binoculars", "leather_vest"], "loadout de 3 itens igual")
+	eq(s["version"], 2, "versao 2")
+	var four: Dictionary = SaveService.sanitize(_save_with_items(4))
+	eq((four["loadout"]["items"] as Array).size(), 3, "save antigo com 4 itens cai em 3 (mochila nivel 1)")
+	eq(four["loadout"]["items"], ["medkit", "binoculars", "leather_vest"], "os 3 primeiros")
+
+
+func test_sanitize_upgrades_level_is_clamped_and_typed() -> void:
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": 9}))["upgrades"]["backpack"], 4, "9 -> 4")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": 4}))["upgrades"]["backpack"], 4, "4 fica 4")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": 2}))["upgrades"]["backpack"], 2, "2 fica 2")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": 0}))["upgrades"]["backpack"], 1, "0 -> 1")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": -7}))["upgrades"]["backpack"], 1, "negativo -> 1")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": "x"}))["upgrades"]["backpack"], 1, "texto -> 1")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": null}))["upgrades"]["backpack"], 1, "null -> 1")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": [3]}))["upgrades"]["backpack"], 1, "array -> 1")
+	eq(SaveService.sanitize(_save_with_items(0, {"backpack": 3.0}))["upgrades"]["backpack"], 3, "3.0 -> 3")
+	var nan_level: Variant = SaveService.sanitize(_save_with_items(0, {"backpack": NAN}))["upgrades"]["backpack"]
+	ok(nan_level is int and int(nan_level) >= 1 and int(nan_level) <= 4, "NaN vira int valido (%s)" % str(nan_level))
+	ok(SaveService.sanitize(_save_with_items(0, {"backpack": 9}))["upgrades"]["backpack"] is int, "nivel e int")
+	for bad: Variant in ["texto", 5, [1, 2], null, true]:
+		eq(SaveService.sanitize(_save_with_items(0, bad))["upgrades"]["backpack"], 1, "bloco de tipo errado (%s) = 1" % str(bad))
+
+
+func test_sanitize_upgrades_unknown_ids_are_dropped() -> void:
+	var s: Dictionary = SaveService.sanitize(_save_with_items(0, {"foo": 2, "backpack": 3, "knife": 4, "": 2}))
+	eq(s["upgrades"].keys(), Data.get_upgrade_ids().map(func(id: StringName) -> String: return String(id)), "so os ids de Data.get_upgrade_ids()")
+	ok(not (s["upgrades"] as Dictionary).has("foo"), "foo descartado")
+	eq(s["upgrades"]["backpack"], 3, "mochila mantida")
+	# knife is not in the data in F1: it must not survive the sanitize (it comes back when F4 adds it to upgrades.json)
+	if not Data.get_upgrade_ids().has(&"knife"):
+		ok(not (s["upgrades"] as Dictionary).has("knife"), "knife descartado enquanto nao esta nos dados")
+	eq(SaveService.sanitize(_save_with_items(0, {"foo": 2}))["upgrades"], {"backpack": 1}, "so foo = mochila 1")
+
+
+func test_sanitize_loadout_limit_follows_backpack_level() -> void:
+	for level: int in range(1, 5):
+		var s: Dictionary = SaveService.sanitize(_save_with_items(UP_ITEMS.size(), {"backpack": level}))
+		var want: int = 3 + level - 1
+		eq((s["loadout"]["items"] as Array).size(), want, "mochila nivel %d: %d itens" % [level, want])
+		eq(s["loadout"]["items"], UP_ITEMS.slice(0, want), "mochila nivel %d: os %d primeiros" % [level, want])
+	var l2: Dictionary = SaveService.sanitize(_save_with_items(5, {"backpack": 2}))
+	eq(l2["loadout"]["items"], ["medkit", "binoculars", "leather_vest", "extra_ammo"], "nivel 2 com 5 itens -> os 4 primeiros")
+	# the limit uses the SANITIZED level: a level 9 in the file is a level 4 (6 slots), not 9
+	var l9: Dictionary = SaveService.sanitize(_save_with_items(UP_ITEMS.size(), {"backpack": 9}))
+	eq((l9["loadout"]["items"] as Array).size(), 6, "nivel 9 vira 4: 6 itens, nunca mais")
+	# a bad level falls back to 3 slots
+	var bad: Dictionary = SaveService.sanitize(_save_with_items(5, {"backpack": "x"}))
+	eq((bad["loadout"]["items"] as Array).size(), 3, "nivel ilegivel = 3 itens")
+
+
+func test_sanitize_upgrades_is_idempotent() -> void:
+	var once: Dictionary = SaveService.sanitize(_save_with_items(5, {"backpack": 3, "foo": 1}))
+	var twice: Dictionary = SaveService.sanitize(once)
+	eq(JSON.stringify(once), JSON.stringify(twice), "sanitize(sanitize(x)) == sanitize(x) com upgrades")
+	eq(twice["upgrades"]["backpack"], 3, "nivel mantido")
+	eq((twice["loadout"]["items"] as Array).size(), 5, "loadout mantido")
+
+
+func test_migrate_v1_save_gets_backpack_level_1() -> void:
+	var s: Dictionary = SaveService.sanitize(SaveService.migrate({
+		"version": 1, "inventory": {"items": {"medkit": 1, "binoculars": 1, "leather_vest": 1, "extra_ammo": 1}},
+		"loadout": {"items": ["medkit", "binoculars", "leather_vest", "extra_ammo"]}}))
+	eq(s["version"], 2, "migra para 2")
+	eq(s["upgrades"]["backpack"], 1, "save v1 nao tem mochila: nivel 1")
+	eq((s["loadout"]["items"] as Array).size(), 3, "v1 continua com a base de 3 espacos")
+
+
+func test_profile_loads_old_save_without_upgrades_block() -> void:
+	_clean()
+	Profile.set_save_path("user://test_save.json")
+	var old: Dictionary = SaveService.new_save()
+	old.erase("upgrades")
+	old["inventory"]["items"] = {"medkit": 1, "binoculars": 1, "leather_vest": 1}
+	old["loadout"]["items"] = ["medkit", "binoculars", "leather_vest"]
+	write_text("user://test_save.json", JSON.stringify(old))
+	Profile.load_or_create()
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "save sem bloco abre com mochila nivel 1")
+	eq(Profile.get_item_slots(), 3, "3 espacos")
+	eq(Profile.get_loadout_items(), [&"medkit", &"binoculars", &"leather_vest"] as Array[StringName], "loadout igual ao do save")
+	Profile.save()
+	var raw: Dictionary = SaveService.read("user://test_save.json")
+	eq(raw["upgrades"]["backpack"], 1, "o bloco passa a ser gravado")
+	eq(raw["version"], 2, "versao gravada continua 2")
+	_clean()
+
+
+func test_profile_loads_save_with_bigger_backpack() -> void:
+	_clean()
+	Profile.set_save_path("user://test_save.json")
+	var s: Dictionary = SaveService.new_save()
+	s["upgrades"] = {"backpack": 3}
+	s["inventory"]["items"] = {"medkit": 1, "binoculars": 1, "leather_vest": 1, "extra_ammo": 1, "corn_bait": 1}
+	s["loadout"]["items"] = ["medkit", "binoculars", "leather_vest", "extra_ammo", "corn_bait"]
+	write_text("user://test_save.json", JSON.stringify(s))
+	Profile.load_or_create()
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 3, "nivel 3 lido")
+	eq(Profile.get_item_slots(), 5, "5 espacos")
+	eq(Profile.get_loadout_items().size(), 5, "os 5 itens equipados sobrevivem")
+	_clean()
+
+
+func test_profile_hostile_upgrades_blocks_do_not_break() -> void:
+	_clean()
+	Profile.set_save_path("user://test_save.json")
+	for bad: Variant in [{"backpack": "x"}, {"backpack": 99}, {"foo": 2}, "lixo", [1, 2], 7, null]:
+		var s: Dictionary = SaveService.new_save()
+		s["upgrades"] = bad
+		write_text("user://test_save.json", JSON.stringify(s))
+		Profile.load_or_create()
+		var level: int = Profile.get_upgrade_level(Ids.BACKPACK)
+		ok(level >= 1 and level <= 4, "bloco %s: nivel %d na faixa 1..4" % [str(bad), level])
+		ok(Profile.get_loadout_items().size() <= Profile.get_item_slots(), "bloco %s: loadout cabe na mochila" % str(bad))
+	_clean()
+
+
+func test_upgrades_roundtrip_through_disk() -> void:
+	_clean()
+	var data: Dictionary = SaveService.new_save()
+	data["upgrades"]["backpack"] = 3
+	ok(SaveService.write(PATH, data), "escrita")
+	var back: Dictionary = SaveService.read(PATH)
+	eq(back["upgrades"]["backpack"], 3, "nivel 3 ida e volta")
+	eq(back["version"], 2, "versao 2")
+	_clean()

@@ -17,6 +17,7 @@ var _dog_option: OptionButton = null
 var _dog_hint: Label = null
 var _item_checks: Dictionary = {}   # StringName -> CheckButton
 var _item_hint: Label = null
+var _items_header: Label = null
 var _dog_locked_text: String = ""
 var _weapons_locked_label: Label = null
 
@@ -122,7 +123,8 @@ func _build_items() -> void:
 	var ibox: VBoxContainer = VBoxContainer.new()
 	ibox.add_theme_constant_override("separation", 6)
 	items_card.add_child(ibox)
-	ibox.add_child(UiKit.label("Equipamentos (até %d)" % _item_slots(), "HeaderLabel"))
+	_items_header = UiKit.label("", "HeaderLabel")
+	ibox.add_child(_items_header)
 	var any_owned: bool = false
 	for id: StringName in Data.get_equipment_ids():
 		if not Profile.owns(id):
@@ -147,7 +149,7 @@ func _build_items() -> void:
 
 
 func _item_slots() -> int:
-	return int(Data.get_game().get("loadout", {}).get("item_slots", 3))
+	return Profile.get_item_slots()
 
 
 func refresh() -> void:
@@ -185,8 +187,13 @@ func refresh() -> void:
 		check.text = label
 		check.set_pressed_no_signal(chosen.has(id))
 		check.disabled = not chosen.has(id) and chosen.size() >= slots
+	var backpack_level: int = Profile.get_upgrade_level(Ids.BACKPACK)
+	_items_header.text = "Equipamentos (mochila nível %d: até %d)" % [backpack_level, slots]
 	if chosen.size() >= slots:
-		_item_hint.text = "Limite de %d equipamentos. Desmarque um para trocar." % slots
+		if backpack_level < Profile.get_upgrade_max_level(Ids.BACKPACK):
+			_item_hint.text = "Mochila cheia (%d). Desmarque um ou compre uma mochila maior na Loja." % slots
+		else:
+			_item_hint.text = "Mochila cheia (%d). Desmarque um para trocar." % slots
 
 
 func _cycle_slot(slot: int) -> void:

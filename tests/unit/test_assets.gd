@@ -1021,6 +1021,11 @@ func test_ui_icons_exist() -> void:
 	var ids: Array[String] = []
 	for id: StringName in Data.get_weapon_ids() + Data.get_equipment_ids() + Data.get_dog_ids():
 		ids.append(String(id))
+	# Upgrades (backpack, later knife) are not items, but their shop cards use the icon of the same id
+	# (docs/plano_faca_mochila_folego.md 2.9 and 2.10).
+	for id: StringName in Data.get_upgrade_ids():
+		ids.append(String(id))
+	ok(ids.has("backpack"), "backpack esta entre os icones exigidos")
 	ids.append_array(EXTRA_ICONS)
 	var missing: Array[String] = []
 	for id: String in ids:

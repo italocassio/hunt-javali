@@ -572,3 +572,252 @@ func test_net_result_hostile_values() -> void:
 	Profile.apply_hunt_result(r)
 	eq(Profile.get_money(), money0, "total_money negativo nao debita")
 	eq(int(Profile.get_stats()["hunts_played"]), 1, "ainda conta a partida")
+
+
+# --- Backpack upgrade (docs/plano_faca_mochila_folego.md 1.1, 2.3 and 2.4) ---
+
+func _backpack_price(level: int) -> int:
+	return int(Data.get_upgrade_level_def(Ids.BACKPACK, level)["price"])
+
+
+func _base_slots() -> int:
+	return int(Data.get_game()["loadout"]["item_slots"])
+
+
+## Gives the profile every equipment item (no payment) so a loadout of any size can be built from owned ids.
+func _own_all_equipment() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for id: StringName in Data.get_equipment_ids():
+		Profile._inventory.add_item(id, 1)
+		ids.append(id)
+	return ids
+
+
+## Money exactly equal to `amount`: tops up (negative top-ups are ignored by the wallet, so the profile must be below).
+func _set_money(amount: int) -> void:
+	var missing: int = amount - Profile.get_money()
+	ok(missing >= 0, "pre-condicao: saldo atual (%d) nao passa de %d" % [Profile.get_money(), amount])
+	Profile.add_money(missing)
+	eq(Profile.get_money(), amount, "saldo ajustado")
+
+
+func test_backpack_new_profile_is_level_1_with_base_slots() -> void:
+	fresh_profile()
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "mochila nivel 1")
+	eq(Profile.get_upgrade_max_level(Ids.BACKPACK), 4, "nivel maximo 4")
+	eq(Profile.get_item_slots(), 3, "3 espacos no nivel 1")
+	eq(Profile.get_item_slots(), _base_slots(), "= game.loadout.item_slots")
+	eq(Profile.get_upgrade_level(&"foo"), 0, "id que nao e melhoria = 0")
+	eq(Profile.get_upgrade_level(&""), 0, "id vazio = 0")
+	eq(Profile.get_upgrade_max_level(&"foo"), 0, "max de id inexistente = 0")
+
+
+func test_buy_backpack_level_2() -> void:
+	fresh_profile()
+	var items: Array[StringName] = _own_all_equipment()
+	_set_money(_backpack_price(2))
+	eq(_backpack_price(2), 2000, "preco do nivel 2 = R$ 2.000")
+	eq(Profile.can_buy_upgrade(Ids.BACKPACK), &"ok", "can_buy_upgrade com saldo exato")
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var inv: Dictionary = record_signal(GameEvents.inventory_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"ok", "compra ok")
+	eq(Profile.get_money(), 0, "dinheiro -2000")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 2, "nivel 2")
+	eq(Profile.get_item_slots(), 4, "4 espacos")
+	eq(wallet["count"], 1, "wallet_changed emitido uma vez")
+	eq(inv["count"], 1, "inventory_changed emitido uma vez")
+	eq(load_rec["count"], 1, "loadout_changed emitido uma vez")
+	eq(wallet["calls"][0][0], 0, "wallet_changed leva o saldo novo")
+	var four: Array[StringName] = [items[0], items[1], items[2], items[3]]
+	var five: Array[StringName] = [items[0], items[1], items[2], items[3], items[4]]
+	ok(not Profile.set_loadout_items(five), "5 itens recusados no nivel 2")
+	ok(Profile.set_loadout_items(four), "4 itens aceitos no nivel 2")
+	eq(Profile.get_loadout_items(), four, "loadout com 4 itens")
+	var raw: Dictionary = SaveService.read("user://test_save.json")
+	eq(int(raw.get("upgrades", {}).get("backpack", -1)), 2, "nivel gravado em disco")
+	eq(int(raw.get("version", -1)), 2, "versao do save continua 2")
+
+
+func test_backpack_three_items_only_at_level_1() -> void:
+	fresh_profile()
+	var items: Array[StringName] = _own_all_equipment()
+	var four: Array[StringName] = [items[0], items[1], items[2], items[3]]
+	ok(not Profile.set_loadout_items(four), "4 itens recusados no nivel 1")
+	var three: Array[StringName] = [items[0], items[1], items[2]]
+	ok(Profile.set_loadout_items(three), "3 itens aceitos no nivel 1")
+
+
+func test_backpack_all_levels_and_max_reached() -> void:
+	fresh_profile()
+	var items: Array[StringName] = _own_all_equipment()
+	var total: int = _backpack_price(2) + _backpack_price(3) + _backpack_price(4)
+	Profile.add_money(total)
+	var money0: int = Profile.get_money()
+	var spent: int = 0
+	for level: int in range(2, 5):
+		eq(Profile.buy_upgrade(Ids.BACKPACK), &"ok", "compra do nivel %d" % level)
+		spent += _backpack_price(level)
+		eq(Profile.get_upgrade_level(Ids.BACKPACK), level, "nivel %d" % level)
+		eq(Profile.get_item_slots(), _base_slots() + level - 1, "espacos no nivel %d" % level)
+		eq(Profile.get_money(), money0 - spent, "dinheiro apos o nivel %d" % level)
+	eq(Profile.get_item_slots(), 6, "6 espacos no nivel 4")
+	# six slots: six distinct owned items fit; a seventh does not (there are 7 equipment items today)
+	var six: Array[StringName] = [items[0], items[1], items[2], items[3], items[4], items[5]]
+	ok(Profile.set_loadout_items(six), "6 itens aceitos no nivel 4")
+	if items.size() >= 7:
+		var seven: Array[StringName] = six.duplicate()
+		seven.append(items[6])
+		ok(not Profile.set_loadout_items(seven), "7 itens recusados no nivel 4")
+	# max level: refused, no charge, no event
+	Profile.add_money(50000)
+	var money: int = Profile.get_money()
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.can_buy_upgrade(Ids.BACKPACK), &"max_reached", "can_buy_upgrade no maximo")
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"max_reached", "buy_upgrade no maximo")
+	eq(Profile.get_money(), money, "nao cobra alem do maximo")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 4, "continua no nivel 4")
+	eq(wallet["count"], 0, "sem wallet_changed na recusa")
+	eq(load_rec["count"], 0, "sem loadout_changed na recusa")
+
+
+func test_buy_backpack_without_funds_has_no_effect() -> void:
+	fresh_profile()
+	_set_money(_backpack_price(2) - 1)
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var inv: Dictionary = record_signal(GameEvents.inventory_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.can_buy_upgrade(Ids.BACKPACK), &"insufficient_funds", "can_buy_upgrade sem saldo")
+	eq(Profile.get_money(), _backpack_price(2) - 1, "can_buy_upgrade nao cobra")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "can_buy_upgrade nao sobe o nivel")
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"insufficient_funds", "buy_upgrade sem saldo (R$ 1.999)")
+	eq(Profile.get_money(), _backpack_price(2) - 1, "saldo intacto")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "nivel intacto")
+	eq(Profile.get_item_slots(), 3, "espacos intactos")
+	eq(int(wallet["count"]) + int(inv["count"]) + int(load_rec["count"]), 0, "nenhum sinal na recusa")
+	# gold does not pay for the backpack
+	Profile.add_gold(99999)
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"insufficient_funds", "ouro nao compra a mochila")
+	eq(Profile.get_gold(), 99999, "ouro intacto")
+
+
+func test_buy_backpack_one_level_per_purchase() -> void:
+	## Plenty of money buys exactly one level per call (never skips to the max).
+	fresh_profile()
+	Profile.add_money(_backpack_price(2) + _backpack_price(3) + _backpack_price(4) + 777)
+	var money0: int = Profile.get_money()
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"ok", "compra")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 2, "so um nivel")
+	eq(Profile.get_money(), money0 - _backpack_price(2), "cobra so o preco do proximo nivel")
+
+
+func test_buy_upgrade_unknown_item() -> void:
+	fresh_profile()
+	Profile.add_money(99999)
+	var money: int = Profile.get_money()
+	for bad: StringName in [&"foo", &"", &"medkit", &"carbine_22"]:
+		eq(Profile.can_buy_upgrade(bad), &"unknown_item", "can_buy_upgrade(%s)" % bad)
+		eq(Profile.buy_upgrade(bad), &"unknown_item", "buy_upgrade(%s)" % bad)
+	eq(Profile.get_money(), money, "saldo intacto")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "mochila intacta")
+	# an upgrade is not an item: Profile.buy does not sell it
+	eq(Profile.can_buy(Ids.BACKPACK), &"unknown_item", "can_buy(backpack) = unknown_item")
+	eq(Profile.buy(Ids.BACKPACK), &"unknown_item", "buy(backpack) = unknown_item")
+	eq(Profile.get_money(), money, "saldo intacto apos buy(backpack)")
+
+
+func test_reset_progress_resets_backpack() -> void:
+	fresh_profile()
+	Profile.add_money(_backpack_price(2))
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"ok", "compra")
+	eq(Profile.get_item_slots(), 4, "4 espacos")
+	Profile.reset_progress()
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "reset volta ao nivel 1")
+	eq(Profile.get_item_slots(), 3, "reset volta a 3 espacos")
+	ok(Profile.get_loadout_items().size() <= 3, "loadout cabe nos 3 espacos")
+
+
+func test_backpack_level_survives_reload() -> void:
+	fresh_profile()
+	Profile.add_money(_backpack_price(2) + _backpack_price(3))
+	Profile.buy_upgrade(Ids.BACKPACK)
+	Profile.buy_upgrade(Ids.BACKPACK)
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 3, "nivel 3")
+	Profile.load_or_create()
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 3, "nivel 3 apos recarregar")
+	eq(Profile.get_item_slots(), 5, "5 espacos apos recarregar")
+
+
+func test_backpack_auto_equip_follows_slots() -> void:
+	## A purchased equipment item goes to the loadout only while there is a free slot; a bigger backpack gives room.
+	fresh_profile()
+	var spare: Array[StringName] = []
+	for id: StringName in Data.get_equipment_ids():
+		var def: Dictionary = Data.get_equipment(id)
+		if not Profile.owns(id) and str(def["currency"]) == "money" and str(def["kind"]) != "consumable":
+			spare.append(id)
+	ok(spare.size() >= 3, "pre-condicao: 3 passivos/ativos a comprar com dinheiro (%d)" % spare.size())
+	Profile.add_money(100000)
+	var before: int = Profile.get_loadout_items().size()
+	ok(before < 3, "pre-condicao: o perfil novo nao enche a mochila (%d itens)" % before)
+	for id: StringName in spare:
+		eq(Profile.buy(id), &"ok", "compra de %s" % id)
+	eq(Profile.get_loadout_items().size(), 3, "loadout para em 3 espacos no nivel 1")
+	eq(Profile.buy_upgrade(Ids.BACKPACK), &"ok", "compra da mochila nivel 2")
+	var left_out: StringName = &""
+	for id: StringName in spare:
+		if not Profile.get_loadout_items().has(id):
+			left_out = id
+			break
+	ne(left_out, &"", "algum item comprado ficou de fora do loadout cheio")
+	if left_out != &"":
+		var picked: Array[StringName] = Profile.get_loadout_items()
+		picked.append(left_out)
+		ok(Profile.set_loadout_items(picked), "o item que ficou de fora cabe no 4o espaco")
+		eq(Profile.get_loadout_items().size(), 4, "4 itens")
+
+
+# --- Shop.check_upgrade / buy_upgrade and Inventory (no Profile, no save) ---
+
+func test_shop_upgrade_rules_on_loose_objects() -> void:
+	var wi: Array = _shop_world(_backpack_price(2) - 1)
+	var w: Wallet = wi[0]
+	var inv: Inventory = wi[1]
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 1, "Inventory novo: nivel 1")
+	eq(Shop.check_upgrade(Ids.BACKPACK, w, inv), &"insufficient_funds", "check sem saldo")
+	eq(Shop.buy_upgrade(Ids.BACKPACK, w, inv), &"insufficient_funds", "buy sem saldo")
+	eq(w.money, _backpack_price(2) - 1, "saldo intacto")
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 1, "nivel intacto")
+	w.money = _backpack_price(2)
+	eq(Shop.check_upgrade(Ids.BACKPACK, w, inv), &"ok", "check com saldo exato")
+	eq(w.money, _backpack_price(2), "check nao cobra")
+	eq(Shop.buy_upgrade(Ids.BACKPACK, w, inv), &"ok", "buy com saldo exato")
+	eq(w.money, 0, "saldo zerado")
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 2, "nivel 2")
+	w.money = 99999
+	eq(Shop.buy_upgrade(Ids.BACKPACK, w, inv), &"ok", "nivel 3")
+	eq(Shop.buy_upgrade(Ids.BACKPACK, w, inv), &"ok", "nivel 4")
+	var money: int = w.money
+	eq(Shop.check_upgrade(Ids.BACKPACK, w, inv), &"max_reached", "check no maximo")
+	eq(Shop.buy_upgrade(Ids.BACKPACK, w, inv), &"max_reached", "buy no maximo")
+	eq(w.money, money, "nao cobra no maximo")
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 4, "continua no 4")
+	eq(Shop.check_upgrade(&"foo", w, inv), &"unknown_item", "id desconhecido")
+	eq(Shop.buy_upgrade(&"", w, inv), &"unknown_item", "id vazio")
+	eq(Shop.buy_upgrade(&"medkit", w, inv), &"unknown_item", "um equipamento nao e melhoria")
+	eq(w.money, money, "saldo intacto apos recusas")
+
+
+func test_inventory_upgrades_roundtrip_and_defaults() -> void:
+	var inv: Inventory = Inventory.new()
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 1, "sem bloco = nivel 1")
+	inv.upgrades[Ids.BACKPACK] = 3
+	var d: Dictionary = JSON.parse_string(JSON.stringify(inv.to_dict()))
+	eq(int(d["upgrades"]["backpack"]), 3, "to_dict grava o bloco upgrades")
+	var back: Inventory = Inventory.from_dict(d)
+	eq(back.get_upgrade_level(Ids.BACKPACK), 3, "ida e volta mantem o nivel")
+	var junk: Inventory = Inventory.from_dict({"upgrades": {"backpack": "x"}})
+	eq(junk.get_upgrade_level(Ids.BACKPACK), 1, "valor de tipo errado nao entra")
+	var not_dict: Inventory = Inventory.from_dict({"upgrades": [1, 2]})
+	eq(not_dict.get_upgrade_level(Ids.BACKPACK), 1, "bloco de tipo errado = nivel 1")

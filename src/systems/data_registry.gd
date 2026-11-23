@@ -12,12 +12,15 @@ const FILES: Dictionary = {
 	"pix": "res://data/pix_config.json",
 	"net": "res://data/net.json",
 	"horde": "res://data/horde.json",
+	"upgrades": "res://data/upgrades.json",
 }
 # file key -> list key inside the file
 const LISTS: Dictionary = {
 	"weapons": "weapons", "equipment": "items", "dogs": "dogs",
-	"boars": "types", "maps": "maps", "gold": "packages",
+	"boars": "types", "maps": "maps", "gold": "packages", "upgrades": "upgrades",
 }
+const UPGRADE_IDS: Array[String] = ["backpack", "knife"]
+const KNIFE_STAT_FIELDS: Array[String] = ["reach_m", "assist_radius_m", "swing_s", "swing_interval_s", "noise_radius_m"]
 const SHORT_NAME_MAX_CHARS: int = 9
 const MINIMAP_COLOR_KEYS: Array[String] = [
 	"grass", "crop_soil", "road", "wet", "water", "water_edge", "soy", "corn", "crop_row", "prop_default",
@@ -218,6 +221,29 @@ func get_item_category(id: StringName) -> StringName:
 	return &""
 
 
+## Upgrades bought with money (backpack, knife). Not items: get_item_def/get_item_category do not see them.
+func get_upgrade_ids() -> Array[StringName]:
+	return _ids("upgrades")
+
+
+func get_upgrade(id: StringName) -> Dictionary:
+	return _lookup("upgrades", id)
+
+
+## levels.size(); 0 when the upgrade does not exist (no push_error).
+func get_upgrade_level_count(id: StringName) -> int:
+	var levels: Variant = _index.get("upgrades", {}).get(String(id), {}).get("levels")
+	return (levels as Array).size() if levels is Array else 0
+
+
+## levels[level - 1]; {} outside 1..count (no push_error).
+func get_upgrade_level_def(id: StringName, level: int) -> Dictionary:
+	if level < 1 or level > get_upgrade_level_count(id):
+		return {}
+	var def: Variant = (_index["upgrades"][String(id)]["levels"] as Array)[level - 1]
+	return def if def is Dictionary else {}
+
+
 func _lookup(key: String, id: StringName) -> Dictionary:
 	var by_id: Dictionary = _index.get(key, {})
 	if not by_id.has(String(id)):
@@ -313,6 +339,97 @@ func _validate() -> void:
 	_validate_onboarding()
 	_validate_horde()
 	_validate_minimap()
+	_validate_upgrades()
+
+
+# Upgrades (docs/plano_faca_mochila_folego.md §2.2). Skipped when the file could not be read (error already recorded).
+func _validate_upgrades() -> void:
+	if _raw.get("upgrades", {}).is_empty():
+		return
+	var item_ids: Dictionary = {}
+	for key: String in ["weapons", "equipment", "dogs"]:
+		for id: String in _index.get(key, {}):
+			item_ids[id] = true
+	for entry: Variant in _raw["upgrades"].get("upgrades", []):
+		if not (entry is Dictionary) or not (entry as Dictionary).has("id"):
+			continue
+		var e: Dictionary = entry
+		var id: String = str(e["id"])
+		var label: String = "upgrade '%s'" % id
+		if not UPGRADE_IDS.has(id):
+			_errors.append("Data: %s has an id that is not allowed (%s)" % [label, ", ".join(UPGRADE_IDS)])
+		if item_ids.has(id):
+			_errors.append("Data: %s reuses an item id" % label)
+		for f: String in ["name", "short_name", "description"]:
+			if not (e.get(f) is String) or (e[f] as String).strip_edges() == "":
+				_errors.append("Data: %s lacks '%s'" % [label, f])
+		if e.get("short_name") is String and (e["short_name"] as String).length() > SHORT_NAME_MAX_CHARS:
+			_errors.append("Data: %s short_name is longer than %d characters" % [label, SHORT_NAME_MAX_CHARS])
+		if str(e.get("currency", "")) != "money":
+			_errors.append("Data: %s currency must be 'money'" % label)
+		var stats: Variant = e.get("stats")
+		if not (stats is Dictionary):
+			_errors.append("Data: %s lacks 'stats'" % label)
+			stats = {}
+		if id == "knife":
+			_validate_knife_stats(stats, label)
+		var levels: Variant = e.get("levels")
+		if not (levels is Array) or (levels as Array).is_empty():
+			_errors.append("Data: %s needs at least one level" % label)
+			continue
+		var prev_bonus: int = 0
+		var prev_damage: float = 0.0
+		var lv_list: Array = levels
+		for i: int in lv_list.size():
+			var lv: Variant = lv_list[i]
+			var lv_label: String = "%s level %d" % [label, i + 1]
+			if not (lv is Dictionary):
+				_errors.append("Data: %s is not an object" % lv_label)
+				continue
+			var d: Dictionary = lv
+			if not _is_whole(d.get("level")) or int(d["level"]) != i + 1:
+				_errors.append("Data: %s: 'level' must be %d" % [lv_label, i + 1])
+			if not _is_whole(d.get("price")) or int(d["price"]) < 0:
+				_errors.append("Data: %s: 'price' must be an integer" % lv_label)
+			elif i == 0 and int(d["price"]) != 0:
+				_errors.append("Data: %s: level 1 price must be 0" % lv_label)
+			elif i > 0 and int(d["price"]) <= 0:
+				_errors.append("Data: %s: price must be an integer > 0" % lv_label)
+			if id == "backpack":
+				var b: Variant = d.get("bonus_item_slots")
+				if not _is_whole(b) or int(b) < 0:
+					_errors.append("Data: %s: bonus_item_slots must be an integer >= 0" % lv_label)
+				else:
+					if i == 0 and int(b) != 0:
+						_errors.append("Data: %s: level 1 bonus_item_slots must be 0" % lv_label)
+					if int(b) < prev_bonus:
+						_errors.append("Data: %s: bonus_item_slots must not decrease" % lv_label)
+					prev_bonus = int(b)
+			elif id == "knife":
+				var dmg: Variant = d.get("damage")
+				if not _is_num(dmg) or float(dmg) <= 0.0:
+					_errors.append("Data: %s: damage must be > 0" % lv_label)
+				else:
+					if float(dmg) <= prev_damage:
+						_errors.append("Data: %s: damage must increase" % lv_label)
+					prev_damage = float(dmg)
+
+
+func _validate_knife_stats(stats: Dictionary, label: String) -> void:
+	for f: String in KNIFE_STAT_FIELDS:
+		if not _is_num(stats.get(f)):
+			_errors.append("Data: %s stats.%s must be a number" % [label, f])
+			return
+	if float(stats["reach_m"]) <= 0.0:
+		_errors.append("Data: %s stats.reach_m must be > 0" % label)
+	if float(stats["assist_radius_m"]) < 0.0 or float(stats["assist_radius_m"]) >= float(stats["reach_m"]):
+		_errors.append("Data: %s stats.assist_radius_m must be in [0, reach_m)" % label)
+	if float(stats["swing_s"]) <= 0.0:
+		_errors.append("Data: %s stats.swing_s must be > 0" % label)
+	if float(stats["swing_interval_s"]) < float(stats["swing_s"]):
+		_errors.append("Data: %s stats.swing_interval_s must be >= swing_s" % label)
+	if float(stats["noise_radius_m"]) < 0.0:
+		_errors.append("Data: %s stats.noise_radius_m must be >= 0" % label)
 
 
 # Minimap image parameters (docs/arquitetura.md §9.1 "minimap.*").

@@ -137,6 +137,11 @@ const DATA_METHODS: Array[String] = [
 	"get_horde_level_count() -> int",
 	"get_horde_level(level: int) -> Dictionary",
 	"get_horde_boar_type(type_id: StringName, level: int) -> Dictionary",
+	# docs/plano_faca_mochila_folego.md section 2.3 (F1): upgrades bought with money (backpack, later knife)
+	"get_upgrade_ids() -> Array[StringName]",
+	"get_upgrade(id: StringName) -> Dictionary",
+	"get_upgrade_level_count(id: StringName) -> int",
+	"get_upgrade_level_def(id: StringName, level: int) -> Dictionary",
 ]
 
 const PROFILE_METHODS: Array[String] = [
@@ -177,6 +182,12 @@ const PROFILE_METHODS: Array[String] = [
 	"is_onboarding_active() -> bool",
 	"is_hint_learned(hint_id: StringName) -> bool",
 	"mark_hint_learned(hint_id: StringName) -> void",
+	# docs/plano_faca_mochila_folego.md section 2.4 (F1): backpack and upgrades
+	"get_item_slots() -> int",
+	"get_upgrade_level(upgrade_id: StringName) -> int",
+	"get_upgrade_max_level(upgrade_id: StringName) -> int",
+	"can_buy_upgrade(upgrade_id: StringName) -> StringName",
+	"buy_upgrade(upgrade_id: StringName) -> StringName",
 ]
 
 const INPUT_SETUP_METHODS: Array[String] = [
@@ -472,8 +483,10 @@ const CLASSES: Array[Dictionary] = [
 			"spend(price: int, currency: StringName) -> bool", "add(amount: int, currency: StringName) -> void",
 			"to_dict() -> Dictionary", "from_dict(d: Dictionary) -> Wallet"]},
 	{"name": "Inventory", "path": "res://src/systems/inventory.gd", "base": "RefCounted", "pkg": "S",
-		"props": ["owned_weapons", "owned_dogs", "items", "loadout_weapons", "loadout_dog", "loadout_items"],
+		"props": ["owned_weapons", "owned_dogs", "items", "loadout_weapons", "loadout_dog", "loadout_items", "upgrades"],
 		"methods": ["owns(id: StringName) -> bool", "get_count(id: StringName) -> int",
+			# docs/plano_faca_mochila_folego.md section 2.4 (F1)
+			"get_upgrade_level(id: StringName) -> int",
 			"add_item(id: StringName, count: int) -> void", "remove_item(id: StringName, count: int) -> bool",
 			"to_dict() -> Dictionary", "from_dict(d: Dictionary) -> Inventory"]},
 	{"name": "Progression", "path": "res://src/systems/progression.gd", "base": "RefCounted", "pkg": "S",
@@ -483,7 +496,10 @@ const CLASSES: Array[Dictionary] = [
 			"to_dict() -> Dictionary", "from_dict(d: Dictionary) -> Progression"]},
 	{"name": "Shop", "path": "res://src/systems/shop.gd", "base": "RefCounted", "pkg": "S",
 		"methods": ["check(item_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName",
-			"buy(item_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName"]},
+			"buy(item_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName",
+			# docs/plano_faca_mochila_folego.md section 2.4 (F1)
+			"check_upgrade(upgrade_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName",
+			"buy_upgrade(upgrade_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName"]},
 	{"name": "RewardCalculator", "path": "res://src/systems/reward_calculator.gd", "base": "RefCounted", "pkg": "S",
 		"methods": ["kill_reward(type_def: Dictionary, rules: Dictionary, weight_kg: float, killing_zone: StringName, one_shot: bool, contract_def: Dictionary) -> int",
 			"contract_bonus(contract_def: Dictionary, crop_health_pct: float) -> int"]},
@@ -514,6 +530,11 @@ const CLASSES: Array[Dictionary] = [
 		"signals": ["changed()"],
 		"methods": ["setup(root: Control, dog_locked_text: String = \"\") -> void", "refresh() -> void",
 			"set_weapons_locked(text: String) -> void"]},
+	# docs/plano_faca_mochila_folego.md section 2.9 (F1): the shop card of an upgrade (backpack, later knife)
+	{"name": "UpgradeCard", "path": "res://src/ui/common/upgrade_card.gd", "base": "PanelContainer", "pkg": "S",
+		"props": ["buy_button"],
+		"methods": ["setup(upgrade_id: StringName, on_buy: Callable) -> void", "refresh() -> void",
+			"get_level_text() -> String", "get_next_text() -> String"]},
 	{"name": "Lobby", "path": "res://src/ui/lobby/lobby.gd", "base": "Control", "pkg": "S",
 		"methods": ["player_label(info: NetPeerInfo, slot: int, is_local: bool) -> String",
 			"status_text(info: NetPeerInfo) -> String", "path_text(path: int) -> String",

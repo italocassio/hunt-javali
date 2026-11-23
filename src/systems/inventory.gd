@@ -8,6 +8,12 @@ var items: Dictionary = {}                      # equipment id (StringName) -> i
 var loadout_weapons: Array[StringName] = [&"", &""]
 var loadout_dog: StringName = &""
 var loadout_items: Array[StringName] = []
+var upgrades: Dictionary = {}                   # upgrade id (StringName) -> level (int, 1-based)
+
+
+## Level of an upgrade; 1 when never bought.
+func get_upgrade_level(id: StringName) -> int:
+	return int(upgrades.get(id, 1))
 
 
 func owns(id: StringName) -> bool:
@@ -65,12 +71,16 @@ func prune_loadout() -> void:
 		loadout_dog = &""
 
 
-## Returns {"inventory": {...}, "loadout": {...}} matching the save schema blocks.
+## Returns {"inventory": {...}, "loadout": {...}, "upgrades": {...}} matching the save schema blocks.
 func to_dict() -> Dictionary:
 	var item_dict: Dictionary = {}
 	for id: StringName in items:
 		item_dict[String(id)] = int(items[id])
+	var upgrade_dict: Dictionary = {}
+	for id: StringName in upgrades:
+		upgrade_dict[String(id)] = int(upgrades[id])
 	return {
+		"upgrades": upgrade_dict,
 		"inventory": {
 			"weapons": _strings(owned_weapons),
 			"dogs": _strings(owned_dogs),
@@ -84,7 +94,7 @@ func to_dict() -> Dictionary:
 	}
 
 
-## Accepts the "inventory"/"loadout" blocks side by side ({"inventory": {...}, "loadout": {...}}).
+## Accepts the "inventory"/"loadout"/"upgrades" blocks side by side.
 ## Expects already sanitized data (see SaveService.sanitize) but tolerates missing keys.
 static func from_dict(d: Dictionary) -> Inventory:
 	var inv: Inventory = Inventory.new()
@@ -102,6 +112,11 @@ static func from_dict(d: Dictionary) -> Inventory:
 	if raw_items is Dictionary:
 		for key: Variant in raw_items:
 			inv.items[StringName(str(key))] = int(raw_items[key])
+	var raw_up: Variant = d.get("upgrades", {})
+	if raw_up is Dictionary:
+		for key: Variant in raw_up:
+			if raw_up[key] is int or raw_up[key] is float:
+				inv.upgrades[StringName(str(key))] = int(raw_up[key])
 	var lw: Array[StringName] = [&"", &""]
 	var raw_lw: Variant = load_block.get("weapons", [])
 	if raw_lw is Array:

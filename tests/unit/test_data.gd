@@ -290,3 +290,94 @@ func test_pix_config_has_placeholders_flagged() -> void:
 		print("INFO pix_config: redeem_secret ainda e o placeholder (trocar antes de publicar)")
 	if str(cfg.get("pix_key", "")).begins_with("SUA-CHAVE"):
 		print("INFO pix_config: pix_key ainda e o placeholder (DonationService.is_pix_configured() == false)")
+
+
+# --- Upgrades (docs/plano_faca_mochila_folego.md 2.2 and 2.3; F1 ships only the backpack) ---
+
+func test_upgrades_load_and_lookups() -> void:
+	eq(Data.get_load_errors().size(), 0, "sem erros de carga: %s" % str(Data.get_load_errors()))
+	eq(Data.get_upgrade_ids(), [&"backpack"] as Array[StringName], "so a mochila na F1")
+	eq(Data.get_upgrade_level_count(&"backpack"), 4, "mochila tem 4 niveis")
+	eq(Data.get_upgrade_level_def(&"backpack", 1).get("price"), 0, "nivel 1 custa 0")
+	eq(Data.get_upgrade_level_def(&"backpack", 1).get("bonus_item_slots"), 0, "nivel 1 sem bonus")
+	eq(Data.get_upgrade_level_def(&"backpack", 2).get("bonus_item_slots"), 1, "nivel 2 = +1 espaco")
+	eq(Data.get_upgrade_level_def(&"backpack", 3).get("bonus_item_slots"), 2, "nivel 3 = +2")
+	eq(Data.get_upgrade_level_def(&"backpack", 4).get("bonus_item_slots"), 3, "nivel 4 = +3")
+	var prev: int = 0
+	for lv: int in range(2, 5):
+		var price: int = int(Data.get_upgrade_level_def(&"backpack", lv)["price"])
+		ok(price > prev, "preco do nivel %d (%d) maior que o anterior (%d)" % [lv, price, prev])
+		prev = price
+	eq(Data.get_upgrade_level_def(&"backpack", 5), {}, "nivel 5 nao existe")
+	eq(Data.get_upgrade_level_def(&"backpack", 0), {}, "nivel 0 nao existe")
+	eq(Data.get_upgrade_level_def(&"backpack", -1), {}, "nivel negativo nao existe")
+	var def: Dictionary = Data.get_upgrade(&"backpack")
+	eq(str(def.get("currency")), "money", "moeda")
+	ok(str(def.get("name", "")) != "", "tem nome")
+	ok(str(def.get("short_name", "")).length() <= Data.SHORT_NAME_MAX_CHARS, "short_name curto")
+
+
+func test_upgrades_unknown_ids_are_safe() -> void:
+	# get_upgrade_level_count / get_upgrade_level_def do not push_error for an unknown id (contract 2.3).
+	var mark: int = error_mark()
+	eq(Data.get_upgrade_level_count(&"nao_existe"), 0, "contagem de id inexistente")
+	eq(Data.get_upgrade_level_count(&""), 0, "contagem de id vazio")
+	eq(Data.get_upgrade_level_def(&"nao_existe", 1), {}, "def de id inexistente")
+	eq(errors_since(mark).size(), 0, "sem push_error nessas duas consultas: %s" % str(errors_since(mark)))
+	# get_upgrade pushes an error (like every _lookup) and returns {}
+	expect_errors()
+	eq(Data.get_upgrade(&"nao_existe"), {}, "get_upgrade de id inexistente = {}")
+
+
+func test_upgrades_are_not_items() -> void:
+	eq(Data.get_item_category(&"knife"), &"", "faca nao e item")
+	eq(Data.get_item_category(&"backpack"), &"", "mochila nao e item")
+	eq(Data.get_item_def(&"backpack"), {}, "get_item_def nao ve a mochila")
+	ok(not Data.get_equipment_ids().has(&"backpack"), "mochila fora dos equipamentos")
+	ok(not Data.get_weapon_ids().has(&"knife"), "faca fora das armas")
+	for id: StringName in Data.get_upgrade_ids():
+		ok(not (Data.get_weapon_ids() + Data.get_equipment_ids() + Data.get_dog_ids()).has(id), "id de melhoria %s nao repete id de item" % id)
+	eq(Ids.BACKPACK, &"backpack", "Ids.BACKPACK")
+	eq(Ids.KNIFE, &"knife", "Ids.KNIFE")
+
+
+## Runs `mutate` on the live (deep-copied, then restored) backpack entry and returns the new errors _validate_upgrades adds.
+func _upgrade_errors_after(mutate: Callable) -> int:
+	var saved: Variant = (Data._raw["upgrades"] as Dictionary).duplicate(true)
+	var base: int = Data._errors.size()
+	var entry: Dictionary = (Data._raw["upgrades"]["upgrades"] as Array)[0]
+	mutate.call(entry)
+	Data._validate_upgrades()
+	var added: int = Data._errors.size() - base
+	Data._errors.resize(base)
+	Data._raw["upgrades"] = saved
+	return added
+
+
+func test_upgrades_validation_rejects_each_broken_rule() -> void:
+	# Pokes the live registry (restored after every case) to prove _validate_upgrades reports the problem.
+	eq(_upgrade_errors_after(func(_e: Dictionary) -> void: pass), 0, "controle: dados intactos nao geram erro")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][1]["level"] = 3) > 0, true, "nivel fora de ordem (2 -> 3)")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][0]["level"] = 0) > 0, true, "nivel 1 numerado 0")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][0]["price"] = 100) > 0, true, "preco do nivel 1 diferente de 0")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][1]["price"] = 0) > 0, true, "preco do nivel 2 igual a 0")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][2]["price"] = -5) > 0, true, "preco negativo")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][1]["price"] = 2000.5) > 0, true, "preco nao inteiro")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][2]["bonus_item_slots"] = 0) > 0, true, "bonus decrescente (1 -> 0)")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][0]["bonus_item_slots"] = 1) > 0, true, "bonus do nivel 1 diferente de 0")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][1]["bonus_item_slots"] = -1) > 0, true, "bonus negativo")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"][1].erase("bonus_item_slots")) > 0, true, "nivel da mochila sem bonus")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["id"] = "pa") > 0, true, "id 'pa' nao permitido")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["id"] = "medkit") > 0, true, "id igual ao de um equipamento (medkit)")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["currency"] = "gold") > 0, true, "moeda 'gold' nao permitida")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["name"] = "") > 0, true, "nome vazio")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["short_name"] = "Nome curto demais") > 0, true, "short_name com mais de 9 caracteres")
+	eq(_upgrade_errors_after(func(e: Dictionary) -> void: e["levels"] = []) > 0, true, "sem niveis")
+	eq(Data.get_load_errors().size(), 0, "registro restaurado sem erros")
+	eq(Data.get_upgrade_level_count(&"backpack"), 4, "dados restaurados")
+
+
+func test_upgrades_validation_medkit_id_yields_two_errors() -> void:
+	# The id is both outside the allowed list and a reused item id (hint from S1): two distinct rules fire.
+	var n: int = _upgrade_errors_after(func(e: Dictionary) -> void: e["id"] = "medkit")
+	eq(n, 2, "id 'medkit' gera dois erros (fora da lista + repete item)")

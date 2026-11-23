@@ -20,6 +20,33 @@ static func check(item_id: StringName, wallet: Wallet, inventory: Inventory) -> 
 	return &"ok"
 
 
+## Next-level purchase of an upgrade (backpack, knife). Same codes as check(), minus &"already_owned".
+static func check_upgrade(upgrade_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName:
+	if not Data.get_upgrade_ids().has(upgrade_id):
+		return &"unknown_item"
+	var level: int = inventory.get_upgrade_level(upgrade_id)
+	if level >= Data.get_upgrade_level_count(upgrade_id):
+		return &"max_reached"
+	var next: Dictionary = Data.get_upgrade_level_def(upgrade_id, level + 1)
+	var currency: StringName = StringName(str(Data.get_upgrade(upgrade_id).get("currency", "money")))
+	if not wallet.can_afford(int(next.get("price", 0)), currency):
+		return &"insufficient_funds"
+	return &"ok"
+
+
+## Spends the price and raises the upgrade by one level. No saving, no events.
+static func buy_upgrade(upgrade_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName:
+	var code: StringName = check_upgrade(upgrade_id, wallet, inventory)
+	if code != &"ok":
+		return code
+	var level: int = inventory.get_upgrade_level(upgrade_id)
+	var currency: StringName = StringName(str(Data.get_upgrade(upgrade_id).get("currency", "money")))
+	if not wallet.spend(int(Data.get_upgrade_level_def(upgrade_id, level + 1).get("price", 0)), currency):
+		return &"insufficient_funds"
+	inventory.upgrades[upgrade_id] = level + 1
+	return &"ok"
+
+
 static func buy(item_id: StringName, wallet: Wallet, inventory: Inventory) -> StringName:
 	var code: StringName = check(item_id, wallet, inventory)
 	if code != &"ok":

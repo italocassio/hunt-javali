@@ -3,6 +3,15 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.5 — 23/11/2026
+
+**Mochila.** Uma melhoria nova na Loja, no topo da aba Equipamentos.
+- A mochila define quantos equipamentos você leva para a caçada: 3 no nível 1 (o de hoje), 4, 5 e 6 no nível máximo.
+- Cada nível custa R$ 2.000, R$ 5.000 e R$ 10.000. A compra é permanente.
+- Na Preparação, o título mostra o nível da mochila e quantos espaços você tem. Com a mochila cheia, o aviso lembra
+  que dá para comprar uma maior.
+- Quem já joga começa com a mochila nível 1: nada muda no seu equipamento salvo.
+
 ## 0.9.4 — 21/11/2026
 
 **Cães em alto detalhe.** Os três cães foram refeitos no mesmo padrão do javali e do cenário.

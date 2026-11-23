@@ -90,13 +90,20 @@ static func sanitize(data: Dictionary) -> Dictionary:
 	var load_block: Dictionary = _dict(data.get("loadout"))
 	var max_consumable: int = maxi(1, int(Data.get_game().get("shop", {}).get("max_consumable_owned", 9)))
 	var weapon_slots: int = maxi(1, int(Data.get_game().get("loadout", {}).get("weapon_slots", 2)))
-	var item_slots: int = maxi(0, int(Data.get_game().get("loadout", {}).get("item_slots", 3)))
+
+	# Upgrades (no version bump: a missing or malformed block means every upgrade at level 1).
+	var upgrades_in: Dictionary = _dict(data.get("upgrades"))
+	var upgrades: Dictionary = {}
+	for uid: StringName in Data.get_upgrade_ids():
+		upgrades[String(uid)] = clampi(_int(upgrades_in.get(String(uid)), 1), 1, maxi(1, Data.get_upgrade_level_count(uid)))
+	var item_slots: int = item_slots_for_level(int(upgrades.get(String(Ids.BACKPACK), 1)))
 
 	var out: Dictionary = {
 		"format": FORMAT_NAME,
 		"version": maxi(CURRENT_VERSION, _int(data.get("version"), CURRENT_VERSION)),
 		"saved_at_unix": maxi(0, _int(data.get("saved_at_unix"), 0)),
 	}
+	out["upgrades"] = upgrades
 	out["wallet"] = {
 		"money": clampi(_int(wallet.get("money"), int(economy.get("start_money", 0))), 0, Wallet.MAX_BALANCE),
 		"gold": clampi(_int(wallet.get("gold"), int(economy.get("start_gold", 0))), 0, Wallet.MAX_BALANCE),
@@ -197,6 +204,13 @@ static func sanitize(data: Dictionary) -> Dictionary:
 		settings[key] = sanitize_setting(key, settings_in.get(key))
 	out["settings"] = settings
 	return out
+
+
+## Equipment slots for a backpack level: game.loadout.item_slots + that level's bonus_item_slots.
+static func item_slots_for_level(backpack_level: int) -> int:
+	var base: int = maxi(0, int(Data.get_game().get("loadout", {}).get("item_slots", 3)))
+	var bonus: int = int(Data.get_upgrade_level_def(Ids.BACKPACK, backpack_level).get("bonus_item_slots", 0))
+	return base + maxi(0, bonus)
 
 
 ## Valid onboarding hint id: an active/consumable equipment id, or "dog_command".

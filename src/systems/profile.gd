@@ -136,6 +136,41 @@ func buy(item_id: StringName) -> StringName:
 	return code
 
 
+# --- Upgrades (backpack, knife) ---
+
+## Equipment slots: game.loadout.item_slots + the backpack level's bonus_item_slots.
+func get_item_slots() -> int:
+	return SaveService.item_slots_for_level(get_upgrade_level(Ids.BACKPACK))
+
+
+## 1..max; 0 for an id that is not an upgrade.
+func get_upgrade_level(upgrade_id: StringName) -> int:
+	if not Data.get_upgrade_ids().has(upgrade_id):
+		return 0
+	return clampi(_inventory.get_upgrade_level(upgrade_id), 1, maxi(1, get_upgrade_max_level(upgrade_id)))
+
+
+func get_upgrade_max_level(upgrade_id: StringName) -> int:
+	return Data.get_upgrade_level_count(upgrade_id)
+
+
+## Same codes as buy_upgrade, without effect.
+func can_buy_upgrade(upgrade_id: StringName) -> StringName:
+	return Shop.check_upgrade(upgrade_id, _wallet, _inventory)
+
+
+## &"ok" | &"insufficient_funds" | &"max_reached" | &"unknown_item".
+func buy_upgrade(upgrade_id: StringName) -> StringName:
+	var code: StringName = Shop.buy_upgrade(upgrade_id, _wallet, _inventory)
+	if code != &"ok":
+		return code
+	save()
+	GameEvents.wallet_changed.emit(_wallet.money, _wallet.gold)
+	GameEvents.inventory_changed.emit()
+	GameEvents.loadout_changed.emit()
+	return code
+
+
 # --- Loadout ---
 
 func get_loadout_weapons() -> Array[StringName]:
@@ -185,8 +220,7 @@ func get_loadout_items() -> Array[StringName]:
 
 
 func set_loadout_items(item_ids: Array[StringName]) -> bool:
-	var slots: int = int(Data.get_game().get("loadout", {}).get("item_slots", 3))
-	if item_ids.size() > slots:
+	if item_ids.size() > get_item_slots():
 		return false
 	var seen: Array[StringName] = []
 	for id: StringName in item_ids:
@@ -389,8 +423,7 @@ func _auto_equip(item_id: StringName) -> void:
 			if inv.loadout_dog == &"":
 				inv.loadout_dog = item_id
 		&"equipment":
-			var slots: int = int(Data.get_game().get("loadout", {}).get("item_slots", 3))
-			if not inv.loadout_items.has(item_id) and inv.loadout_items.size() < slots:
+			if not inv.loadout_items.has(item_id) and inv.loadout_items.size() < get_item_slots():
 				inv.loadout_items.append(item_id)
 
 

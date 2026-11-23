@@ -75,3 +75,7 @@ const MODE_CONTRACT: StringName = &"contract"
 const MODE_HORDE: StringName = &"horde"
 const HP_INTERMISSION: StringName = &"intermission"
 const HP_WAVE: StringName = &"wave"
+
+# Upgrades bought with money (docs/plano_faca_mochila_folego.md). KNIFE is also HitInfo.weapon_id of a knife hit.
+const BACKPACK: StringName = &"backpack"
+const KNIFE: StringName = &"knife"

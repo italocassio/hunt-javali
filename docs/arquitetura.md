@@ -15,6 +15,11 @@ virtual (4:3 = 1280×960, não 960×720); 1.6 = HF7, só modo toque: layout esti
 Cura, botão Acessórios com lista, cartões de arma, chip do colete; §6.8, §8.4, §14) · Godot **4.7.2** ·
 GDScript tipado · Renderer **Compatibility** · Web sem threads.
 
+**1.7 (F1 mochila publicada em 0.9.5; F2–F4 pendentes, jogo 0.9.6–0.9.8): faca, mochila e fôlego.** Plano, contrato completo e fases F1–F4 em
+`docs/plano_faca_mochila_folego.md` (§2 é o contrato). Aqui ficam só os pontos de entrada: §1, §4, §6.2, §6.3, §9.11, §10 e
+§14; cada trecho diz a fase. Até a fase fechar, vale o plano; no fecho, a coordenação completa §6.8, §8.4, §8.11, §8.12 e o
+Apêndice A.
+
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
 estiver errado ou faltando, **faça o mínimo, não invente API, e relate** ao coordenador. Mudanças de
 contrato passam pelo `game-architect`. O detalhe do protocolo de rede do modo cooperativo (formatos de
@@ -38,7 +43,7 @@ no Brasil; o jogador é um controlador de fauna contratado por fazendeiros. Cada
 **5 contratos** de dificuldade crescente.
 
 **Loop:** Boot ("Toque para começar") → Menu principal → Seleção de mapa → Preparação (contrato + loadout:
-até 2 armas, até 3 equipamentos, 0–1 cão) → Caçada → Resultado → Loja → Preparação…
+até 2 armas, até 3 equipamentos (1.7: 3 a 6, pelo nível da mochila), 0–1 cão) → Caçada → Resultado → Loja → Preparação…
 
 **Caçada:** todos os javalis do contrato entram no mapa (em grupos com atraso), saem da mata e vão comer a
 lavoura, drenando a **saúde da lavoura** (100% → 0%). **Vitória:** todos abatidos. **Derrota:** lavoura em 0%
@@ -344,6 +349,11 @@ Registradas por **`InputSetup`** (`res://src/input/input_setup.gd`, Pacote A) em
 | `spectate_next` | F | — | — (no toque o espectador troca com Tiro ou Trocar) |
 | `pause` | Esc, P | — | botão Pausa |
 | `help` (jogo 0.8.2) | H | — | — (no toque não há legenda; os botões trazem os nomes, §8.4) |
+| `use_energy_drink` (1.7, F3, pendente) | T | — | botão Acessórios (o energético entra na lista) |
+| `knife` (1.7, F4, pendente) | X | — | botão Faca |
+
+1.7 (`docs/plano_faca_mochila_folego.md` §2.5): `ACTIONS` ganha no fim, nessa ordem, `"use_energy_drink"` (F3) e `"knife"`
+(F4), depois de `"interact"`; `ITEM_ACTIONS` ganha `&"energy_drink": &"use_energy_drink"` no fim (F3). `knife` não é item.
 
 O olhar (mouse e arrasto na metade direita) **não é ação**: é tratado pelo `Player` diretamente.
 
@@ -496,6 +506,12 @@ func get_net() -> Dictionary                          # data/net.json inteiro (�
 func get_horde() -> Dictionary                        # data/horde.json inteiro (§9.10); {} se ausente
 func get_item_def(id: StringName) -> Dictionary       # procura em weapons, equipment e dogs
 func get_item_category(id: StringName) -> StringName  # &"weapon" | &"equipment" | &"dog" | &""
+# 1.7 (F1, jogo 0.9.5): data/upgrades.json, melhorias compradas com dinheiro (mochila, faca). Não são itens:
+# get_item_def/get_item_category não as veem. docs/plano_faca_mochila_folego.md §2.2–2.3.
+func get_upgrade_ids() -> Array[StringName]                         # ordem do arquivo; [] sem o arquivo
+func get_upgrade(id: StringName) -> Dictionary                       # {} + push_error se não existir
+func get_upgrade_level_count(id: StringName) -> int                  # 0 se não existir
+func get_upgrade_level_def(id: StringName, level: int) -> Dictionary # levels[level - 1]; {} fora de 1..count
 ```
 **Armadilhas obrigatórias para todo leitor de dados:**
 1. `JSON.parse_string` devolve **todo número como `float`**. Converta: `int(def["price"])`.
@@ -529,8 +545,14 @@ func get_loadout_weapons() -> Array[StringName]           # sempre 2 entradas; &
 func set_loadout_weapon(slot: int, weapon_id: StringName) -> bool   # slot 0/1; &"" esvazia (slot 0 nunca vazio)
 func get_loadout_dog() -> StringName                      # &"" = sem cão
 func set_loadout_dog(dog_id: StringName) -> bool
-func get_loadout_items() -> Array[StringName]             # até game.loadout.item_slots (3)
+func get_loadout_items() -> Array[StringName]             # até game.loadout.item_slots (3); 1.7: até get_item_slots()
 func set_loadout_items(item_ids: Array[StringName]) -> bool
+# melhorias (1.7, F1, jogo 0.9.5; docs/plano_faca_mochila_folego.md §2.4)
+func get_item_slots() -> int                              # loadout.item_slots + bonus_item_slots da mochila. stub 3
+func get_upgrade_level(upgrade_id: StringName) -> int     # 1..máximo; id desconhecido = 0. stub 1
+func get_upgrade_max_level(upgrade_id: StringName) -> int
+func can_buy_upgrade(upgrade_id: StringName) -> StringName   # mesmos códigos de buy_upgrade, sem efeito
+func buy_upgrade(upgrade_id: StringName) -> StringName    # &"ok" | &"insufficient_funds" | &"max_reached" | &"unknown_item"; sobe 1 nível, salva
 # progressão
 func get_unlocked_contract_count(map_id: StringName) -> int        # >= 1 para mapa disponível
 func is_contract_unlocked(map_id: StringName, index: int) -> bool
@@ -2553,6 +2575,13 @@ no formato de grupo da §9.6). Esquema, regras de validação (inclusive o teto 
 seed: `docs/horda.md` §3. Dono: game-systems; leitores: B (`HuntController`, `HordeDirector`, `Boar`), systems
 (`Profile.horde_*`, lobby, resultado), `Net` (`map_id`).
 
+### 9.11 `data/upgrades.json` e acréscimos de 1.7 (F1 em 0.9.5; F2–F4 pendentes)
+Melhorias compradas com dinheiro, um nível por vez: `backpack` (F1; `bonus_item_slots` por nível) e `knife` (F4; `damage`
+por nível e `stats` do golpe). Arquivo novo em `Data.FILES` (`"upgrades"`), coberto pelo `include_filter="data/*.json"`.
+Mesmo ciclo: `data/game.json` ganha o bloco `stamina` (F2) e `loadout.item_slots` passa a ser o número de espaços da
+mochila nível 1; `data/equipment.json` ganha `energy_drink` depois de `medkit` (F3). Esquema, seed e validação:
+`docs/plano_faca_mochila_folego.md` §2.2. Dono: game-systems; leitores: `Profile`, loja, Preparação, A (`Player`), B (rede da faca).
+
 ---
 
 ## 10. Save
@@ -2625,6 +2654,11 @@ tipo errado → `{"learned": []}`; na lista, só ficam Strings que são id de eq
 `"dog_command"`, sem duplicatas, na ordem em que estavam. Não há o que inferir de um save antigo (quem já tem 3
 caçadas não vê dicas de qualquer forma), por isso não há passo `2 → 3`. Escrita: junto com qualquer `save()`;
 `mark_hint_learned` sozinho não grava (§6.3).
+
+`upgrades` (1.7, F1, jogo 0.9.5): bloco de topo `{"backpack": 1, "knife": 1}` (nível de cada melhoria de
+`Data.get_upgrade_ids()`). Migração **pelo `sanitize`, sem subir a versão**: ausente ou inválido → nível 1; valor preso em
+1..máximo; ids fora dos dados descartados; o limite de `loadout.items` passa a ser `loadout.item_slots` + bônus da mochila
+sanitizada. Save de hoje abre com mochila nível 1 (3 espaços, como antes). Detalhe: `docs/plano_faca_mochila_folego.md` §2.4.
 
 ---
 
@@ -3271,6 +3305,13 @@ Critérios de aceite:
   esquerda acima do Tiro esquerdo, não à direita dele, para não cruzar o painel de objetivos; (4) o cão passou de br (235, 350)
   para (235, 346).
 
+### Frente faca, mochila e fôlego — F1 a F4 (contrato 1.7, jogo 0.9.5–0.9.8; F1 publicada, F2–F4 pendentes)
+Plano, contrato, pacotes por fase (arquivos, donos, modelos, fora de escopo, aceite), prompts de sessão e riscos em
+`docs/plano_faca_mochila_folego.md`. Ordem: F1 Mochila → F2 Fôlego → F3 Energético (depende de F2) → F4 Faca (depende de
+F1); uma fase por vez. Acréscimos a `src/core/` por fase na §2.1 de lá (F1 `Ids.BACKPACK`/`Ids.KNIFE`; F3
+`Ids.I_ENERGY_DRINK`; F4 `HuntRequest.knife_level`, `WeaponViewBase.play_melee`, `NetCodec.KNIFE_WEAPON_INDEX`,
+`PlayerBase.bot_knife`). `project.godot` muda só em `config/version`; `GameEvents` não muda.
+
 ---
 
 ## Apêndice A — `src/core/` (verbatim; coordenador copia, ninguém edita)
@@ -3417,6 +3458,18 @@ const AMMO_CRATE: String = "res://assets/models/props/ammo_crate.tscn"
 `setup(ring_radius_m: float)`, `set_stock_pct(pct: float)`, `set_under_attack(on: bool)` e
 `static func create_fallback() -> CornStockVisualBase` (6 cones amarelos no anel que encolhem por estágio). O
 arquivo é a referência verbatim.
+
+### Acréscimos 1.7 (faca, mochila e fôlego) — aplicados por fase em `src/core/`
+
+Fonte: `docs/plano_faca_mochila_folego.md` §2.1. Todos aditivos. Os arquivos reais são a referência. F3 e F4 entram aqui no
+fecho de cada uma.
+
+```gdscript
+# ids.gd (fim) — F1, jogo 0.9.5
+# Upgrades bought with money (docs/plano_faca_mochila_folego.md). KNIFE is also HitInfo.weapon_id of a knife hit.
+const BACKPACK: StringName = &"backpack"
+const KNIFE: StringName = &"knife"
+```
 
 ### `src/core/game_events.gd`
 ```gdscript

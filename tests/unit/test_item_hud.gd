@@ -838,3 +838,143 @@ func test_touch_weapon_cards_tap_selects_with_button_priority() -> void:
 	eq(tc.get_weapon_card_rects().size(), 0, "sem cartoes")
 	InputSetup.set_touch_override("auto")
 	_free_belts()
+
+
+# --------------------------------------------------------------------------------------------
+# Backpack (F1): the biggest item bar the HUD can show (docs/plano_faca_mochila_folego.md 3, "F1")
+# --------------------------------------------------------------------------------------------
+
+## Just enough world for the Player and the Hud, with a dog (same idea as the one of test_weapon_health_hud).
+class DogWorld extends HuntWorld:
+	var player: PlayerBase = null
+
+	func get_map_rect() -> Rect2:
+		return Rect2(-128.0, -128.0, 256.0, 256.0)
+
+	func get_player() -> PlayerBase:
+		return player
+
+	func has_dog() -> bool:
+		return true
+
+
+var _hud_world: DogWorld = null
+var _saved_window_size: Vector2i = Vector2i.ZERO
+
+
+## The headless window is 64x64 (a 1280x1280 viewport with the project stretch): the layout tests need a real shape.
+func _set_window(size: Vector2i) -> void:
+	var win: Window = host.get_window()
+	if _saved_window_size == Vector2i.ZERO:
+		_saved_window_size = win.size
+	win.size = size
+
+
+## Frees the world (and its Hud, so nothing stays connected to GameEvents) and restores the window and the input mode.
+func _end_hud_test() -> void:
+	if _hud_world != null and is_instance_valid(_hud_world):
+		if _hud_world.get_parent() != null:
+			_hud_world.get_parent().remove_child(_hud_world)
+		_hud_world.free()
+	_hud_world = null
+	if _saved_window_size != Vector2i.ZERO:
+		host.get_window().size = _saved_window_size
+		_saved_window_size = Vector2i.ZERO
+	InputSetup.set_touch_override("auto")
+
+
+## A real Player (and its Hud) carrying `item_ids`, with the dog slot on. Returns the Hud (null + a failure otherwise).
+func _spawn_hud_with_dog(item_ids: Array[StringName]) -> Hud:
+	InputSetup.set_touch_override("off")
+	fresh_profile()
+	_hud_world = DogWorld.new()
+	track(_hud_world)
+	var player: Player = (load(ScenePaths.PLAYER) as PackedScene).instantiate() as Player
+	_hud_world.player = player
+	_hud_world.add_child(player)
+	player.global_position = Vector3.ZERO
+	var req: HuntRequest = HuntRequest.make_debug()
+	req.weapon_ids = Data.get_weapon_ids()   # the biggest weapon frame (5 weapons)
+	req.item_ids = item_ids
+	req.item_counts = {&"medkit": 1, &"corn_bait": 2, &"scout_drone": 3}
+	player.setup(req, _hud_world)
+	for child: Node in player.get_children():
+		if child is Hud:
+			await frames(4)
+			return child as Hud
+	fail("o Player nao criou o Hud")
+	return null
+
+
+func _rect(c: Control) -> Rect2:
+	return Rect2(c.global_position, c.size)
+
+
+## The five-slot bar (4 usable items + the dog) against the weapon frame, the kill message and the health strip.
+func _check_five_slot_bar(hud: Hud, label: String) -> void:
+	var qb: Quickbar = hud.get("_quickbar") as Quickbar
+	var frame: Control = hud.get("_weapon_frame") as Control
+	var kill: Control = hud.get("_kill_msg") as Control
+	var strip: Control = hud.get("_health") as Control
+	var root: Control = hud.get("_root") as Control
+	eq(qb.get_slot_ids().size(), 5, "%s: 4 itens usaveis + cao = 5 espacos" % label)
+	eq(qb.get_slot_ids()[4], Quickbar.DOG_SLOT, "%s: o cao e o ultimo" % label)
+	ok(qb.visible, "%s: barra visivel" % label)
+	var qb_rect: Rect2 = _rect(qb)
+	var frame_rect: Rect2 = _rect(frame)
+	var kill_rect: Rect2 = _rect(kill)
+	var strip_rect: Rect2 = _rect(strip)
+	var root_rect: Rect2 = Rect2(Vector2.ZERO, root.size)
+	var width: float = 5.0 * Quickbar.SLOT_SIZE_PX + 4.0 * float(Quickbar.SEPARATION_PX)
+	near(qb_rect.size.x, width, 1.0, "%s: largura da barra com 5 espacos (%s)" % [label, qb_rect])
+	near(qb_rect.size.y, Quickbar.SLOT_SIZE_PX, 1.0, "%s: altura de um espaco" % label)
+	near(qb_rect.get_center().x, root.size.x * 0.5, 1.0, "%s: barra centrada (%s)" % [label, qb_rect])
+	ok(root_rect.encloses(qb_rect), "%s: barra dentro da tela (%s em %s)" % [label, qb_rect, root_rect])
+	ok(not qb_rect.intersects(frame_rect), "%s: barra nao encosta no WeaponFrame (barra %s, quadro %s)" % [label, qb_rect, frame_rect])
+	ok(not qb_rect.intersects(kill_rect), "%s: barra nao encosta na mensagem de abate (barra %s, mensagem %s)" % [label, qb_rect, kill_rect])
+	ok(not qb_rect.intersects(strip_rect), "%s: barra nao encosta na faixa de vida (barra %s, faixa %s)" % [label, qb_rect, strip_rect])
+	ok(qb_rect.end.y <= strip_rect.position.y - Hud.BOTTOM_STACK_GAP_PX + 0.5, "%s: barra acima da faixa, com folga" % label)
+
+
+func test_quickbar_with_four_usable_items_and_dog_clears_weapon_frame_and_kill_message() -> void:
+	# Five slots (4 usable items + the dog) is the widest bar there is: ITEM_ACTIONS has exactly 4 usable items.
+	_set_window(Vector2i(1280, 720))
+	await frames(2)
+	var hud: Hud = await _spawn_hud_with_dog([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"] as Array[StringName])
+	if hud == null:
+		_end_hud_test()
+		return
+	var root: Control = hud.get("_root") as Control
+	near(root.size.x, 1280.0, 0.5, "pre-condicao: largura 1280 (%s)" % root.size)
+	near(root.size.y, 720.0, 0.5, "pre-condicao: altura 720")
+	_check_five_slot_bar(hud, "1280x720")
+	# with a reload on the panel the weapon frame is at its tallest
+	(hud.get("_weapon_panel") as WeaponPanel).set_reload(true, 0.5)
+	await frames(2)
+	_check_five_slot_bar(hud, "1280x720 recarregando")
+	_end_hud_test()
+
+
+func test_quickbar_five_slots_on_a_wide_phone_screen() -> void:
+	# 2340x1080 landscape: the project stretch (expand) makes it 1560x720; the weapon frame hugs the right edge.
+	_set_window(Vector2i(2340, 1080))
+	await frames(2)
+	var hud: Hud = await _spawn_hud_with_dog([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"] as Array[StringName])
+	if hud == null:
+		_end_hud_test()
+		return
+	_check_five_slot_bar(hud, "2340x1080")
+	_end_hud_test()
+
+
+func test_quickbar_never_grows_past_four_items_plus_dog_with_a_six_item_backpack() -> void:
+	# Backpack level 4 carries 6 items, but only 4 are usable by key (the other two are passive): the bar keeps 5 slots.
+	_set_window(Vector2i(1280, 720))
+	await frames(2)
+	var six: Array[StringName] = [&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"leather_vest", &"extra_ammo"]
+	var hud: Hud = await _spawn_hud_with_dog(six)
+	if hud == null:
+		_end_hud_test()
+		return
+	_check_five_slot_bar(hud, "mochila 6 itens")
+	_end_hud_test()

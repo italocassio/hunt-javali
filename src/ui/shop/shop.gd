@@ -15,7 +15,14 @@ const MESSAGES: Dictionary = {
 	&"unknown_item": "Item indisponível.",
 }
 
+const UPGRADE_MESSAGES: Dictionary = {
+	&"max_reached": "%s já está no nível máximo.",
+	&"insufficient_funds": "%s Saldo insuficiente.",
+	&"unknown_item": "%s Item indisponível.",
+}
+
 var _cards: Array[ItemCard] = []
+var _upgrade_cards: Array[UpgradeCard] = []
 var _tab_buttons: Array[Button] = []
 var _tab_pages: Array[Control] = []
 var _message: Label = null
@@ -44,6 +51,11 @@ func _ready() -> void:
 		var scroll: Control = scroller[0]
 		body.add_child(scroll)
 		_tab_pages.append(scroll)
+		if str(tab["key"]) == "equipment" and Data.get_upgrade_ids().has(Ids.BACKPACK):
+			var up_card: UpgradeCard = UpgradeCard.new()
+			scroller[1].add_child(up_card)
+			up_card.setup(Ids.BACKPACK, _on_buy_upgrade)
+			_upgrade_cards.append(up_card)
 		for id: StringName in _ids_for(str(tab["key"])):
 			var card: ItemCard = ItemCard.new()
 			scroller[1].add_child(card)
@@ -114,6 +126,17 @@ func _on_buy(id: StringName) -> void:
 	_refresh_cards()
 
 
+func _on_buy_upgrade(id: StringName) -> void:
+	var code: StringName = Profile.buy_upgrade(id)
+	var up_name: String = str(Data.get_upgrade(id).get("name", String(id)))
+	if code == &"ok":
+		Sfx.play(&"ui_buy")
+		_message.text = "Comprado: %s nível %d." % [up_name, Profile.get_upgrade_level(id)]
+	else:
+		_message.text = str(UPGRADE_MESSAGES.get(code, "%s Não foi possível comprar.")) % up_name
+	_refresh_cards()
+
+
 func _on_wallet_changed(_money: int, _gold: int) -> void:
 	_refresh_cards()
 
@@ -121,6 +144,8 @@ func _on_wallet_changed(_money: int, _gold: int) -> void:
 func _refresh_cards() -> void:
 	for card: ItemCard in _cards:
 		card.refresh()
+	for up_card: UpgradeCard in _upgrade_cards:
+		up_card.refresh()
 	_refresh_hint()
 
 

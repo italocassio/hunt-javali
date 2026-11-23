@@ -1,0 +1,19 @@
+{
+	"version": 1,
+	"upgrades": [
+		{
+			"id": "backpack",
+			"name": "Mochila",
+			"short_name": "Mochila",
+			"description": "Leve mais equipamentos para a caçada. Cada nível dá mais um espaço.",
+			"currency": "money",
+			"stats": {},
+			"levels": [
+				{"level": 1, "price": 0, "bonus_item_slots": 0},
+				{"level": 2, "price": 2000, "bonus_item_slots": 1},
+				{"level": 3, "price": 5000, "bonus_item_slots": 2},
+				{"level": 4, "price": 10000, "bonus_item_slots": 3}
+			]
+		}
+	]
+}

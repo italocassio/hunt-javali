@@ -12,6 +12,7 @@ extends HuntWorld
 ## --mag=<n> (rounds in the magazine of the weapon in hand, to see the low-ammo colour)
 ## Stamina (F2): --stamina=<0..100> (stamina of the hunter; 0 = exhausted, below the recover threshold = recovering)
 ## Knife (F4): --knife=<1..4> (knife level of the request, clamped by the Knife to the levels in the data),
+## --knife_equip (puts the knife in the hand and leaves it there, as a tap on Faca does),
 ## --knife_swing (keeps swinging the knife every swing_interval_s, so a windowed screenshot catches a swing)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
@@ -302,6 +303,8 @@ func _spawn_player() -> void:
 		_run_demo.call_deferred()
 	if _args.has("knife_swing"):
 		_run_knife_demo.call_deferred()
+	if _args.has("knife_equip"):
+		_run_knife_equip.call_deferred()
 	if _args.has("stick"):
 		_run_stick_demo.call_deferred()
 	if _args.has("help_key"):
@@ -332,6 +335,14 @@ func _run_help_key() -> void:
 	press.physical_keycode = KEY_H
 	press.pressed = true
 	Input.parse_input_event(press)
+
+
+## Screenshot helper (--knife_equip): puts the knife in the hand and leaves it there, as a tap on the Faca button
+## does (0.9.9). Waits out the hunt start, which always begins with the weapon in the hand.
+func _run_knife_equip() -> void:
+	await get_tree().create_timer(KNIFE_DEMO_DELAY_S).timeout
+	if player != null:
+		player.set_knife_equipped(true)
 
 
 ## Screenshot helper (--knife_swing): swings the knife over and over, so a windowed capture lands inside a swing.

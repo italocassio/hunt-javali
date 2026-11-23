@@ -758,15 +758,20 @@ func test_touch_buttons_do_not_overlap_each_other_the_cards_or_the_stick() -> vo
 # TouchControls: the Faca button (docs/plano_faca_mochila_folego.md 2.7; F4)
 # --------------------------------------------------------------------------------------------
 
-## A hunter the test steers: the knife level, a revive target (the Levantar button) and the fall are plain fields.
+## A hunter the test steers: the knife level, the knife in the hand, a revive target (the Levantar button) and the fall
+## are plain fields.
 ## Never added to the tree (no _ready); TouchControls only reads it through the Player getters.
 class KnifeStubPlayer extends Player:
 	var knife_level: int = 2
 	var revive_target: int = -1
 	var downed: bool = false
+	var knife_equipped: bool = false   # 0.9.9: the knife in the hand lights the Faca button
 
 	func get_knife_level() -> int:
 		return knife_level
+
+	func is_knife_equipped() -> bool:
+		return knife_equipped
 
 	func get_revive_target_slot() -> int:
 		return revive_target
@@ -818,6 +823,54 @@ func test_touch_knife_button_exists_only_with_a_knife_and_a_standing_hunter() ->
 	hunter.downed = false
 	tc._sync_revive_state()
 	ne(tc.get_button_center(&"knife"), Vector2.INF, "levantado: o botao Faca volta")
+	_drop_hunter(tc, hunter)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_knife_button_shows_the_equipped_state() -> void:
+	## 0.9.9: the Faca button is a toggle of the knife in the hand; it is drawn "on" while the knife is equipped.
+	var tc: TouchControls = _touch_with_hunter(_belt([&"medkit"]), KnifeStubPlayer.new())
+	var hunter: KnifeStubPlayer = tc._player as KnifeStubPlayer
+	ok(not tc.is_button_on(&"knife"), "faca na cintura: o botao Faca nao esta aceso")
+	hunter.knife_equipped = true
+	ok(tc.is_button_on(&"knife"), "faca na mao: o botao Faca fica aceso")
+	hunter.knife_equipped = false
+	ok(not tc.is_button_on(&"knife"), "faca guardada: o botao apaga")
+	ok(not tc.is_button_on(&"aim"), "a Mira nao acende por causa da faca")
+	# the other buttons are not lit by the knife
+	hunter.knife_equipped = true
+	ok(not tc.is_button_on(&"use_medkit"), "o kit nao acende com a faca na mao")
+	ok(not tc.is_button_on(&"fire"), "o Tiro nao acende com a faca na mao")
+	# a button that does not exist is never on, even with the knife out
+	hunter.knife_level = 0
+	tc._rebuild_buttons()
+	ok(not tc.is_button_on(&"knife"), "sem faca nos dados: nao ha botao, nao ha estado aceso")
+	ok(not tc.is_button_on(&"nada"), "id desconhecido: falso")
+	_drop_hunter(tc, hunter)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_aim_button_does_nothing_with_the_knife_in_the_hand() -> void:
+	## 0.9.9: no aim with the knife; the Mira toggle neither presses `aim` nor flips, and a toggle left on is dropped.
+	var tc: TouchControls = _touch_with_hunter(_belt([&"medkit"]), KnifeStubPlayer.new())
+	var hunter: KnifeStubPlayer = tc._player as KnifeStubPlayer
+	var c: Vector2 = tc.get_button_center(&"aim")
+	Input.action_release(&"aim")
+	hunter.knife_equipped = true
+	_tap(tc, 0, c)
+	ok(not Input.is_action_pressed(&"aim"), "faca na mao: tocar na Mira nao aperta aim")
+	ok(not tc.is_button_on(&"aim"), "faca na mao: a Mira nao liga")
+	hunter.knife_equipped = false
+	_tap(tc, 0, c)
+	ok(Input.is_action_pressed(&"aim"), "faca guardada: a Mira volta a ligar")
+	ok(tc.is_button_on(&"aim"), "faca guardada: a Mira fica ligada")
+	hunter.knife_equipped = true
+	tc._process(0.016)
+	ok(not Input.is_action_pressed(&"aim"), "pegar a faca com a Mira ligada solta aim")
+	ok(not tc.is_button_on(&"aim"), "pegar a faca desliga a Mira")
+	Input.action_release(&"aim")
 	_drop_hunter(tc, hunter)
 	InputSetup.set_touch_override("auto")
 	_free_belts()

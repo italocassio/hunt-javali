@@ -375,6 +375,146 @@ func test_panel_content_height_matches_the_doc() -> void:
 	_end()
 
 
+# Knife in the hand (jogo 0.9.9): the panel shows "Faca" and no ammunition, on keyboard and on touch
+
+func _big_portrait(panel: WeaponPanel) -> Texture2D:
+	return (panel.get_node("Main/Portrait") as TextureRect).texture
+
+
+func test_panel_knife_shows_the_name_and_no_ammunition() -> void:
+	var panel: WeaponPanel = _panel()
+	panel.set_ammo(5, 30, false, 10)
+	var weapon_art: Texture2D = _big_portrait(panel)
+	ok(not panel.is_knife_shown(), "comeca sem faca")
+	panel.set_knife(true)
+	ok(panel.is_knife_shown(), "set_knife(true): faca na mao")
+	eq(panel.get_name_text(), "Faca", "o nome e Faca")
+	eq(panel.get_mag_text(), "", "sem pente")
+	eq(panel.get_reserve_text(), "", "sem reserva")
+	eq((panel.get_node("Main/Ammo/Mag") as Label).text, "", "o rotulo do pente esta vazio")
+	eq((panel.get_node("Main/Ammo/Reserve") as Label).text, "", "o rotulo da reserva esta vazio")
+	ok(not panel.is_ammo_low(), "faca nao tem municao baixa")
+	ok(_big_portrait(panel) != null, "retrato da faca carregado")
+	ok(_big_portrait(panel) != weapon_art, "o retrato deixou de ser o da arma")
+	ok(not panel.get_name_text().contains("Carabina"), "o nome da arma sumiu")
+	_end()
+
+
+func test_panel_knife_ignores_ammo_updates_and_the_reload_bar() -> void:
+	var panel: WeaponPanel = _panel()
+	var bar: ProgressBar = panel.get_node("ReloadBar") as ProgressBar
+	panel.set_ammo(5, 30, false, 10)
+	panel.set_knife(true)
+	# the Hud keeps feeding the weapon in the pocket every frame: nothing of it may show
+	panel.set_ammo(4, 29, false, 10)
+	panel.set_ammo(0, 0, false, 10)
+	eq(panel.get_mag_text(), "", "set_ammo com a faca: pente continua vazio")
+	eq(panel.get_reserve_text(), "", "set_ammo com a faca: reserva continua vazia")
+	ok(not panel.is_ammo_low(), "pente zerado da arma no bolso nao acende o aviso")
+	panel.set_reload(true, 0.5)
+	ok(not bar.visible, "a barra de recarga nao aparece com a faca na mao")
+	panel.set_reload(false, 0.0)
+	_end()
+
+
+func test_panel_knife_put_away_brings_back_the_weapon_name_and_ammo() -> void:
+	var panel: WeaponPanel = _panel()
+	panel.set_active(1)
+	panel.set_ammo(5, 30, false, 10)
+	var weapon_art: Texture2D = _big_portrait(panel)
+	panel.set_knife(true)
+	panel.set_knife(false)
+	ok(not panel.is_knife_shown(), "set_knife(false): faca guardada")
+	eq(panel.get_name_text(), SHOTGUN_NAME, "volta o nome da arma que estava na mao")
+	ok(_big_portrait(panel) == weapon_art, "volta o retrato da arma")
+	# the Hud feeds the ammo again on the next frame, with the very same numbers as before the knife
+	panel.set_ammo(5, 30, false, 10)
+	eq(panel.get_mag_text(), "5", "o pente volta")
+	eq(panel.get_reserve_text(), "| 30", "a reserva volta")
+	eq((panel.get_node("Main/Ammo/Mag") as Label).text, "5", "rotulo do pente")
+	eq((panel.get_node("Main/Ammo/Reserve") as Label).text, "| 30", "rotulo da reserva")
+	ok(not panel.is_ammo_low(), "5 de 10 nao e baixa")
+	# a low magazine that was in the pocket comes back red
+	panel.set_knife(true)
+	panel.set_knife(false)
+	panel.set_ammo(1, 30, false, 10)
+	ok(panel.is_ammo_low(), "1 de 10: baixa")
+	ok(_mag_color(panel).is_equal_approx(WeaponPanel.COLOR_DANGER), "pente vermelho de novo")
+	_end()
+
+
+func test_panel_knife_repeated_and_switching_while_out_are_stable() -> void:
+	var panel: WeaponPanel = _panel()
+	panel.set_ammo(5, 30, false, 10)
+	panel.set_knife(true)
+	panel.set_knife(true)
+	eq(panel.get_name_text(), "Faca", "set_knife(true) repetido: continua")
+	panel.set_active(1)   # the weapon slot changes behind the knife
+	eq(panel.get_name_text(), "Faca", "trocar o slot com a faca na mao: o nome continua Faca")
+	eq(panel.get_mag_text(), "", "e sem pente")
+	panel.set_knife(false)
+	panel.set_knife(false)
+	eq(panel.get_name_text(), SHOTGUN_NAME, "set_knife(false) repetido: a arma do slot 1")
+	_end()
+
+
+func test_panel_knife_on_touch_turns_the_card_in_hand_into_the_knife_card() -> void:
+	var panel: WeaponPanel = _panel()
+	panel.set_touch(true)
+	panel.set_weapon_ammo(0, 10, 40, false, 10)
+	panel.set_weapon_ammo(1, 4, 12, false, 4)
+	panel.set_active(1)
+	var cards: Node = panel.get_node("Cards")
+	var pocket: Control = cards.get_child(0) as Control
+	var hand: Control = cards.get_child(1) as Control
+	eq(hand.get("name_text"), SHOTGUN_NAME, "antes: o cartao da mao e a espingarda")
+	eq(hand.get("mag_text"), "4", "antes: pente no cartao da mao")
+	var gun_art: Texture2D = hand.get("portrait") as Texture2D
+	panel.set_knife(true)
+	eq(hand.get("name_text"), "Faca", "toque: o cartao da mao vira Faca")
+	eq(hand.get("mag_text"), "", "toque: cartao da faca sem pente")
+	eq(hand.get("reserve_text"), "", "toque: cartao da faca sem reserva")
+	ok(not bool(hand.get("ammo_low")), "toque: cartao da faca sem aviso de municao")
+	ok(hand.get("portrait") != null and hand.get("portrait") != gun_art, "toque: retrato da faca")
+	eq(pocket.get("mag_text"), "10", "o cartao da arma no bolso nao muda: pente")
+	eq(pocket.get("reserve_text"), "| 40", "o cartao da arma no bolso nao muda: reserva")
+	ok(pocket.get("name_text") != "Faca", "o cartao do bolso continua com o nome da arma")
+	eq(panel.get_name_text(), "Faca", "o painel de teclado, escondido, tambem diz Faca")
+	# the pocket weapon keeps being fed while the knife is out; the knife card stays empty
+	panel.set_weapon_ammo(1, 3, 12, false, 4)
+	eq(hand.get("mag_text"), "", "toque: set_weapon_ammo nao reescreve o cartao da faca")
+	panel.set_weapon_ammo(0, 9, 40, false, 10)
+	eq(pocket.get("mag_text"), "9", "o cartao do bolso segue a municao")
+	# the recharge bar of the card is not shown with the knife
+	panel.set_reload(true, 0.5)
+	near(float(hand.get("reload")), -1.0, 0.001, "toque: sem barra de recarga no cartao da faca")
+	panel.set_reload(false, 0.0)
+	# put away: the card is the weapon again, with its current ammo
+	panel.set_knife(false)
+	eq(hand.get("name_text"), SHOTGUN_NAME, "guardada: o cartao volta a ser a espingarda")
+	eq(hand.get("mag_text"), "3", "guardada: o pente atual volta")
+	eq(hand.get("reserve_text"), "| 12", "guardada: a reserva volta")
+	ok(hand.get("portrait") == gun_art, "guardada: o retrato da arma")
+	_end()
+
+
+func test_panel_knife_survives_a_switch_between_touch_and_keyboard() -> void:
+	var panel: WeaponPanel = _panel()
+	panel.set_knife(true)
+	panel.set_touch(true)
+	var cards: Node = panel.get_node("Cards")
+	eq(cards.get_child(0).get("name_text"), "Faca", "entrar no toque com a faca: o cartao da mao e Faca")
+	eq(cards.get_child(1).get("name_text"), SHOTGUN_NAME, "e o outro cartao continua a espingarda")
+	eq(cards.get_child(0).get("mag_text"), "", "cartao da faca sem pente")
+	panel.set_touch(false)
+	ok(panel.is_knife_shown(), "voltar ao teclado: a faca continua na mao")
+	eq(panel.get_name_text(), "Faca", "voltar ao teclado: o nome continua Faca")
+	eq(panel.get_mag_text(), "", "voltar ao teclado: sem pente")
+	panel.set_knife(false)
+	eq(panel.get_name_text(), "Carabina .22", "guardada: a carabina")
+	_end()
+
+
 # --------------------------------------------------------------------------------------------
 # HealthStrip on its own (no Hud)
 # --------------------------------------------------------------------------------------------
@@ -838,6 +978,35 @@ func test_hud_weapon_switch_moves_the_panel() -> void:
 	player.bot_select_weapon(7)   # out of range: the player ignores it and the panel keeps
 	await frames(2)
 	eq(panel.get_active_index(), 0, "slot invalido: nada muda")
+	_end()
+
+
+func test_hud_knife_in_hand_shows_faca_without_ammo_and_the_weapon_comes_back() -> void:
+	var hud: Hud = await _spawn()
+	if hud == null:
+		_end()
+		return
+	var player: Player = _player_of(hud)
+	var panel: WeaponPanel = _panel_of(hud)
+	var weapon: Weapon = player.get_weapon()
+	ok(not panel.is_knife_shown(), "comeca sem faca no painel")
+	ok(player.set_knife_equipped(true), "o Player equipa a faca")
+	await frames(2)
+	ok(panel.is_knife_shown(), "o Hud passa a faca ao painel")
+	eq(panel.get_name_text(), "Faca", "nome Faca")
+	eq(panel.get_mag_text(), "", "sem pente")
+	eq(panel.get_reserve_text(), "", "sem reserva")
+	weapon.ammo_in_mag = 1   # the Hud keeps reading the weapon in the pocket every frame
+	await frames(2)
+	eq(panel.get_mag_text(), "", "a arma no bolso mudou: o painel continua sem pente")
+	ok(not panel.is_ammo_low(), "e sem aviso de municao")
+	eq(player.toggle_knife(), false, "toggle_knife guarda a faca")
+	await frames(2)
+	ok(not panel.is_knife_shown(), "faca guardada: o painel volta")
+	eq(panel.get_name_text(), "Carabina .22", "nome da arma")
+	eq(panel.get_mag_text(), "1", "o pente atual da arma")
+	eq(panel.get_reserve_text(), "| %d" % player.get_ammo_reserve(), "a reserva da arma")
+	ok(panel.is_ammo_low(), "1 no pente: baixa de novo")
 	_end()
 
 

@@ -182,6 +182,7 @@ func test_energy_drink_action_is_t_and_the_last_item_slot() -> void:
 
 func test_knife_action_is_x_and_not_an_item() -> void:
 	## docs/plano_faca_mochila_folego.md 2.5 (F4): `knife` is key X, the LAST of ACTIONS, and is not an item.
+	## 0.9.9: X now puts the knife in the hand and `fire` swings it, but no action was created for that.
 	ok(InputSetup.ACTIONS.has("knife"), "knife em InputSetup.ACTIONS")
 	ok(InputMap.has_action("knife"), "knife registrada no InputMap")
 	eq(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 1], "knife", "knife e a ultima de ACTIONS")
@@ -223,11 +224,36 @@ func test_knife_action_is_x_and_not_an_item() -> void:
 	await frames(2)
 	_end_input_test()
 	ok(not Input.is_action_pressed("knife"), "knife solta ao fim")
-	# a real mouse button never swings the knife
+	# a real mouse button never presses `knife`: the click is `fire`, which swings only while the knife is in the hand
+	# (a Player rule, tests/unit/test_weapon_health_hud.gd and the player_knife sandbox)
 	_begin_input_test("off")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
 	ok(not Input.is_action_pressed("knife"), "o mouse nao aperta knife")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	_end_input_test()
+
+
+func test_equippable_knife_created_no_new_action() -> void:
+	## 0.9.9: the knife in the hand reuses `knife` (X, toggles it), `fire` (the swing) and `weapon_1`..`weapon_5` /
+	## `weapon_swap` (put it away). No action for equip, unequip or swing exists.
+	var knife_like: Array[String] = []
+	for action_name: String in InputSetup.ACTIONS:
+		if action_name.contains("knife") or action_name.contains("melee") or action_name.contains("swing") or action_name.contains("equip") or action_name.contains("stab"):
+			knife_like.append(action_name)
+	eq(knife_like, ["knife"] as Array[String], "so existe a acao knife (nada de equip/swing/melee)")
+	for action_name: String in ["fire", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5", "weapon_swap"]:
+		ok(InputSetup.ACTIONS.has(action_name), "%s continua em ACTIONS (o golpe e a troca usam as acoes de sempre)" % action_name)
+		ok(InputMap.has_action(action_name), "%s registrada no InputMap" % action_name)
+	# `fire` keeps the left mouse button (it is driven by InputSetup._input, not by an InputMap event): the knife is
+	# swung by the same click as the gun
+	_begin_input_test("off")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
+	ok(Input.is_action_pressed("fire"), "o clique esquerdo aperta fire (o golpe da faca e o mesmo clique do tiro)")
+	ok(not Input.is_action_pressed("knife"), "e nao aperta knife")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	ok(not Input.is_action_pressed("fire"), "soltar o clique solta fire")
+	# the knife has no state of its own in the item table: no quickbar slot, no accessory row
+	ok(not InputSetup.ITEM_ACTIONS.has(Ids.KNIFE), "a faca na mao nao e item")
 	_end_input_test()
 
 

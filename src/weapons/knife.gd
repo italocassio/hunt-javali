@@ -1,8 +1,15 @@
 class_name Knife
 extends Node
-## The hunting knife: a quick melee swing that never takes a loadout slot
-## (docs/plano_faca_mochila_folego.md 1.4, 1.7, 2.6). Child of the Player, which owns the gates
-## (dead, downed, spectating, binoculars, item in use, reviving, weapon switch) and calls swing().
+## The hunting knife: a melee weapon that never takes a loadout slot
+## (docs/plano_faca_mochila_folego.md 1.4, 1.7, 2.6).
+##
+## Jogo 0.9.9: the knife is **equipped**, not a one-off swing. The Player puts it in the hand with the
+## `knife` action (X / the Faca button) and it stays there until the hunter asks for a weapon again;
+## while it is in the hand the `fire` action swings it. Equipping and unequipping are instant (the knife
+## is always on the belt): no draw time, no animation to wait for.
+##
+## Child of the Player, which owns the gates (dead, downed, spectating, binoculars, item in use,
+## reviving, weapon switch) and calls set_equipped() and swing().
 ## Every number comes from data/upgrades.json through Data.get_upgrade(Ids.KNIFE): reach, aim assist,
 ## swing time, cadence, noise and the damage of the level. No knife in the data = no knife at all.
 ##
@@ -31,8 +38,10 @@ var _swing_left: float = 0.0
 var _holder: Node3D = null
 var _view: WeaponViewBase = null
 ## The view stands in a rest pose from Player.setup until hunt_started, so the pre-warm compiles its
-## materials behind the loading overlay (risk R3). After that it only shows during a swing.
+## materials behind the loading overlay (risk R3). After that it shows while the knife is in the hand.
 var _rest_visible: bool = true
+## The knife is in the hand (0.9.9): the Player hides the weapon view and routes `fire` to swing().
+var _equipped: bool = false
 var _active_vfx: int = 0
 
 
@@ -91,11 +100,30 @@ func is_ready() -> bool:
 	return _level > 0 and _cooldown_left <= 0.0 and _swing_left <= 0.0
 
 
-## The hunt started: the view leaves the rest pose and only shows during a swing (section 1.7).
+## True while the knife is in the hand (0.9.9). The Player keeps the weapon view hidden meanwhile.
+func is_equipped() -> bool:
+	return _equipped and _level > 0
+
+
+## Puts the knife in the hand, or back on the belt. Instant: no draw time, the view swaps the same frame.
+## Refused without a knife in the data or in the middle of a swing (the swing_s lock also locks the toggle).
+## Returns true when the knife is in the requested state after the call.
+func set_equipped(on: bool) -> bool:
+	if _level <= 0:
+		return not on
+	if on == _equipped:
+		return true
+	if is_swinging():
+		return false
+	_equipped = on
+	_refresh_view()
+	return true
+
+
+## The hunt started: the view leaves the rest pose and shows only while the knife is in the hand (section 1.7).
 func set_rest_visible(on: bool) -> void:
 	_rest_visible = on
-	if not is_swinging():
-		_set_view_visible(_rest_visible)
+	_refresh_view()
 
 
 ## Driven by the Player (no _process of its own, so the order inside the frame is fixed).
@@ -105,10 +133,12 @@ func tick(delta: float) -> void:
 	if _swing_left > 0.0:
 		_swing_left = maxf(_swing_left - delta, 0.0)
 		if _swing_left <= 0.0:
-			_set_view_visible(_rest_visible)   # the Player shows the weapon again, without a draw
+			_refresh_view()   # still in the hand: the knife stays, back to its rest pose
 
 
-## One swing. The gates of section 1.4 are the Player's; here only the cadence and the data.
+## One swing, one click of `fire` (the Player only swings with the knife in the hand; a swing asked with the knife
+## on the belt still works and shows the view for its duration, which the sandbox and the tests use).
+## The gates of section 1.4 are the Player's; here only the cadence and the data.
 ## Returns true when the swing happened.
 func swing(cam: Camera3D, exclude: Array[RID], vfx_parent: Node) -> bool:
 	if not is_ready() or cam == null or not cam.is_inside_tree():
@@ -128,14 +158,14 @@ func swing(cam: Camera3D, exclude: Array[RID], vfx_parent: Node) -> bool:
 	# and package B counts the swing as a shot. The swing never touches the net shot sequence.
 	GameEvents.shot_fired.emit(Ids.KNIFE, origin, forward, get_noise_radius_m())
 	if _swing_left <= 0.0:
-		_set_view_visible(_rest_visible)
+		_refresh_view()
 	return true
 
 
-## A swing that must not finish (death, going down): no view, no lock, cadence kept.
+## A swing that must not finish (death, going down): no lock, cadence kept. The Player unequips right after.
 func abort_swing() -> void:
 	_swing_left = 0.0
-	_set_view_visible(_rest_visible)
+	_refresh_view()
 
 
 func _stat(key: String) -> float:
@@ -267,6 +297,11 @@ func _create_view() -> void:
 	_holder.add_child(_view)
 	_view.setup(Ids.KNIFE)
 	_view.visible = _rest_visible
+
+
+## The knife is seen while it is in the hand, while a swing plays and in the rest pose before hunt_started.
+func _refresh_view() -> void:
+	_set_view_visible(_equipped or _rest_visible or is_swinging())
 
 
 func _set_view_visible(on: bool) -> void:

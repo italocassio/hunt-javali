@@ -24,7 +24,7 @@ extends Node
 ##   net_mode       room mode (L_LOBBY / L_START byte of the mode), host_select_mode                NET_MODE_SELFTEST
 ##   player_horde2  A1: horde level 2 player rules: counted ammo, crates, confine, downed / revive, bleed-out   RESULT:
 ##   player_stamina F2: stamina: sprint drain, exhaustion, regen, recover threshold, message, HealthStrip bar   RESULT:
-##   player_knife   F4: knife swing (hit at the press, aim assist, cadence, gates, shot ids), Faca button, legend   RESULT:
+##   player_knife   F4/0.9.9: equippable knife (X equips, fire swings, hit at the press, cadence, gates, shot ids), Faca button   RESULT:
 ##   net_knife      F4: the client's knife swing as C_SHOT with weapon byte 254; host validates damage and reach   RESULT:
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
 ##   minimap_bake   1.4 (HF5): Mato Grosso baked to the minimap image: size, orientation, determinism   RESULT:

@@ -131,6 +131,7 @@ var _probe_enabled: bool = false   # Web build opened with ?probe=1 (QA hook, se
 var _probe_t: float = 0.0
 var _thermal: bool = false
 var _last_weapon_slot: int = -1       # slot the weapon panel shows (-1 until bind)
+var _last_knife_equipped: bool = false   # F4 (0.9.9): the panel shows "Faca" while the knife is in the hand
 var _dog_slots_on: bool = false       # the Quickbar / touch dog slot is currently shown
 var _hunter_names: Dictionary = {}   # slot -> display name seen on hunter_joined (the roster forgets who left)
 var _stall_banner: Label = null
@@ -759,8 +760,9 @@ func _touch_cards_frame_rect(block: Dictionary) -> Rect2:
 
 
 ## Tells TouchControls where the weapon cards are (this is the single source of the rectangles) and what a tap on
-## each one presses: `weapon_<n>` of its weapon, nothing for the weapon in hand. No cards: outside touch mode, in the
-## spectator view, or without a weapon.
+## each one presses: `weapon_<n>` of its weapon, nothing for the weapon in hand. With the knife in the hand (0.9.9)
+## every card presses its `weapon_<n>`, so a tap on the active one puts the knife away. No cards: outside touch mode,
+## in the spectator view, or without a weapon.
 func _sync_touch_cards() -> void:
 	if _touch == null or not is_inside_tree():
 		return
@@ -771,10 +773,12 @@ func _sync_touch_cards() -> void:
 		var frame: Rect2 = _touch_cards_frame_rect(block)
 		var screen_h: float = get_viewport().get_visible_rect().size.y
 		var indices: Array[int] = _weapon_panel.get_card_weapon_indices()
+		var knife: bool = _player != null and _player.is_knife_equipped()
 		for i: int in indices.size():
 			rects.append(Rect2(Vector2(frame.position.x + float(i) * (float(block["card_w"]) + float(WeaponPanel.CARD_GAP_PX)),
 				screen_h + frame.position.y), Vector2(float(block["card_w"]), WeaponPanel.CARD_H_PX)))
-			actions.append(&"" if indices[i] == _weapon_panel.get_active_index() else StringName("weapon_%d" % (indices[i] + 1)))
+			var in_hand: bool = indices[i] == _weapon_panel.get_active_index() and not knife
+			actions.append(&"" if in_hand else StringName("weapon_%d" % (indices[i] + 1)))
 	_touch.set_weapon_card_rects(rects, actions)
 
 
@@ -939,6 +943,11 @@ func _update_weapon() -> void:
 		_last_weapon_slot = slot
 		_weapon_panel.set_active(slot)
 		_apply_touch_bottom()   # the cards, the frame and the touch hit rectangles follow the weapon in hand
+	var knife: bool = _player.is_knife_equipped()
+	if knife != _last_knife_equipped:
+		_last_knife_equipped = knife
+		_weapon_panel.set_knife(knife)
+		_sync_touch_cards()   # with the knife out, a tap on the active card goes back to that weapon
 	_feed_card_ammo()
 	_weapon_panel.set_ammo(w.ammo_in_mag, w.ammo_reserve, _player.has_infinite_reserve(), int(w.def.get("mag_size", 1)))
 	_weapon_panel.set_reload(w.is_reloading(), w.get_reload_progress())

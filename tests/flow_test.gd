@@ -804,6 +804,14 @@ func _step_knife_hunt() -> void:
 		_t.call("eq", player.get_knife_level(), 2, "o jogador chega com a faca nivel 2")
 		_t.call("near", player.get_knife_damage(), 45.0, 0.0001, "dano do golpe = 45")
 		_t.call("eq", player.get_weapon_count(), request.weapon_ids.size() if request != null else -1, "a faca nao e uma arma do cinto")
+		# 0.9.9: the hunt starts with the weapon in hand; X puts the knife in the hand and X again brings the weapon back
+		_t.call("ok", not player.is_knife_equipped(), "a cacada comeca com a arma na mao, nao com a faca")
+		var slot_before: int = player.get_weapon_slot()
+		_t.call("eq", player.toggle_knife(), true, "toggle_knife: a faca vai para a mao")
+		_t.call("ok", player.is_knife_equipped(), "is_knife_equipped depois de equipar")
+		_t.call("eq", player.toggle_knife(), false, "toggle_knife de novo: volta a arma")
+		_t.call("ok", not player.is_knife_equipped(), "faca guardada")
+		_t.call("eq", player.get_weapon_slot(), slot_before, "a arma que estava na mao e a mesma")
 	_ended.clear()
 	hunt.debug_force_end(HuntResult.Outcome.ABANDONED)
 	if await _wait_scene(ScenePaths.RESULT, 30.0):

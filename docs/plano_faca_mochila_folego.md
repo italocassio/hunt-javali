@@ -21,6 +21,14 @@ Identificadores em inglês; texto do jogador em PT-BR **exatamente** como na §2
 
 Quem fecha uma fase troca "pendente" por "publicada em DD/MM/AAAA (main `<hash>`, gh-pages `<hash>`)" e anota resíduos.
 
+> **Mudança de desenho depois da F4 (jogo 0.9.9, pedida pelo dono).** A faca deixou de ser golpe avulso e virou **arma
+> branca equipável**: X (botão Faca) **equipa e desequipa**, ela **fica na mão**, e quem golpeia é o **clique do mouse**
+> (botão Tiro no toque), um golpe por aperto. `weapon_1`..`weapon_5`, `weapon_swap` e o toque num cartão de arma voltam
+> para a arma. O `WeaponPanel` mostra "Faca" sem munição enquanto ela está na mão. Onde a §1.4 e a §2.6 deste plano dizem
+> "golpe rápido sem trocar de arma" e "um golpe por aperto da ação `knife`", vale a descrição nova; **o resto da §2.6
+> (alcance, ajuda de mira, dano por nível, som, efeito, ordem do `shot_fired`) e a §2.8 inteira (rede) continuam valendo
+> sem mudança**. Detalhe em `docs/arquitetura.md` (§6.8, §14 e a nota de 0.9.9 na seção da frente 1.7).
+
 **Resíduos da F4** (nada bloqueia; o dono decide se vale mexer):
 1. `Player._update_input` **não existe**: a função que lê as teclas discretas é `_pump_discrete_input(delta)`, e é lá que a
    ação `knife` é lida (depois de `weapon_swap`, antes do laço de itens). A §2.6 citava um nome errado.

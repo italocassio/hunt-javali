@@ -255,7 +255,9 @@ const CLASSES: Array[Dictionary] = [
 				"restore_stamina(frac: float) -> void", "debug_set_stamina(value: float) -> void",
 				# docs/plano_faca_mochila_folego.md section 2.6 (F4): knife
 				"get_knife_level() -> int", "get_knife_damage() -> float", "is_knife_swinging() -> bool",
-				"get_knife_cooldown_frac() -> float", "bot_knife() -> bool"]},
+				"get_knife_cooldown_frac() -> float", "bot_knife() -> bool",
+				# jogo 0.9.9: the knife is an equippable melee weapon (X toggles, `fire` swings)
+				"is_knife_equipped() -> bool", "set_knife_equipped(on: bool) -> bool", "toggle_knife() -> bool"]},
 	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
 	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
 		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
@@ -271,7 +273,9 @@ const CLASSES: Array[Dictionary] = [
 			"tick(delta: float) -> void", "abort_swing() -> void", "is_swinging() -> bool", "get_cooldown_frac() -> float",
 			"get_level() -> int", "get_damage() -> float", "get_reach_m() -> float", "get_swing_s() -> float",
 			"get_swing_interval_s() -> float", "get_noise_radius_m() -> float", "is_ready() -> bool",
-			"set_rest_visible(on: bool) -> void", "get_view() -> WeaponViewBase"]},
+			"set_rest_visible(on: bool) -> void", "get_view() -> WeaponViewBase",
+			# jogo 0.9.9: in the hand or on the belt
+			"is_equipped() -> bool", "set_equipped(on: bool) -> bool"]},
 	{"name": "WeaponHolder", "path": "res://src/weapons/weapon_holder.gd", "base": "Node3D", "pkg": "A"},
 	{"name": "Hitscan", "path": "res://src/weapons/hitscan.gd", "base": "RefCounted", "pkg": "A",
 		"methods": ["cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array) -> Dictionary"]},
@@ -316,7 +320,9 @@ const CLASSES: Array[Dictionary] = [
 			# HF7: touch cards (the Hud feeds them, TouchControls handles the taps)
 			"set_card_width(width_px: float) -> void",
 			"set_weapon_ammo(index: int, in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void",
-			"get_card_count() -> int", "get_card_weapon_indices() -> Array[int]", "is_cards_visible() -> bool"]},
+			"get_card_count() -> int", "get_card_weapon_indices() -> Array[int]", "is_cards_visible() -> bool",
+			# jogo 0.9.9: the knife in the hand replaces the weapon face / card with "Faca" and no ammo
+			"set_knife(on: bool) -> void", "is_knife_shown() -> bool"]},
 	{"name": "HealthStrip", "path": "res://src/hud/health_strip.gd", "base": "Control", "pkg": "A",
 		"methods": ["set_health(hp: float, max_hp: float) -> void", "set_vest(on: bool) -> void",
 			"set_touch(touch: bool) -> void", "get_value_text() -> String", "get_fill_pct() -> float",
@@ -370,7 +376,9 @@ const CLASSES: Array[Dictionary] = [
 			"get_weapon_card_rects() -> Array[Rect2]", "get_bottom_block() -> Dictionary",
 			"get_probe_buttons() -> Dictionary", "get_accessory_current() -> StringName",
 			"get_accessory_ids() -> Array[StringName]", "is_accessory_menu_open() -> bool",
-				"select_accessory(item_id: StringName) -> bool"],
+				"select_accessory(item_id: StringName) -> bool",
+				# jogo 0.9.9: the Faca button is drawn "on" while the knife is in the hand (tests)
+				"is_button_on(button_id: StringName) -> bool"],
 		"signals": ["layout_changed()"]},
 	{"name": "TouchJoystick", "path": "res://src/hud/touch/virtual_joystick.gd", "base": "Control", "pkg": "A"},
 	# docs/multiplayer.md section 3.3 / 3.6: an ally in the world. The PlayerBase virtuals it overrides.

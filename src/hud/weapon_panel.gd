@@ -57,6 +57,9 @@ const CARD_RADIUS_PX: int = 8
 const CARD_OUTLINE_PX: int = 4
 const CARD_MAX_SHOWN: int = 2
 const COLOR_CARD_BG: Color = Color(0.12, 0.10, 0.086, 0.72)
+## Knife in the hand (F4, jogo 0.9.9): the panel shows this name and no ammunition at all, on keyboard and on touch
+## (the card of the weapon in hand becomes the knife card). Text the player reads: PT-BR.
+const KNIFE_NAME: String = "Faca"
 
 
 ## One weapon chip of the row. Children: Portrait, Key. The border of the active one is drawn here.
@@ -207,6 +210,9 @@ var _shown: Array[int] = []            # weapon index of each card on screen
 var _card_w: float = CARD_W_DEFAULT_PX
 var _reload_on: bool = false
 var _reload_progress: float = 0.0
+var _knife_on: bool = false            # knife in the hand (F4, 0.9.9): name "Faca", no ammunition
+var _knife_texture: Texture2D = null
+var _knife_loaded: bool = false
 
 var _name_label: Label = Label.new()
 var _main: HBoxContainer = HBoxContainer.new()
@@ -336,15 +342,68 @@ func set_active(index: int) -> void:
 	if index < 0 or index >= _weapon_ids.size():
 		return
 	_active = index
-	_name_label.text = _names[index]
-	_portrait.texture = _textures[index]
+	_apply_face()
 	for i: int in _chips.size():
 		_chips[i].set_active(i == index)
 	_rebuild_cards()
 
 
-## Magazine and reserve. Text and colour are touched only when a value changes.
+## Knife in the hand or back on the belt (F4, 0.9.9): the panel shows "Faca" and no magazine, no reserve and no reload
+## bar while it is out, and goes back to the weapon in the hand when it is put away. Works in both modes: on touch the
+## card of the weapon in hand becomes the knife card.
+func set_knife(on: bool) -> void:
+	if on == _knife_on:
+		return
+	_knife_on = on
+	if on:
+		_mag_text = ""
+		_reserve_text = ""
+		_ammo_low = false
+		_mag_label.text = ""
+		_reserve_label.text = ""
+		_mag_label.add_theme_color_override("font_color", COLOR_TEXT)
+	else:
+		_has_ammo = false   # the next set_ammo writes the numbers of the weapon again
+	_apply_face()
+	_reload_bar.visible = _reload_on and not _touch and not _knife_on
+	for card: Card in _cards:
+		_apply_card_face(card)
+		_fill_card_ammo(card)
+
+
+## True while the panel shows the knife instead of the weapon in the hand (tests).
+func is_knife_shown() -> bool:
+	return _knife_on
+
+
+## Big name and portrait: the knife while it is in the hand, otherwise the active weapon.
+func _apply_face() -> void:
+	if _knife_on:
+		_name_label.text = KNIFE_NAME
+		_portrait.texture = _knife_art()
+	elif _active >= 0 and _active < _weapon_ids.size():
+		_name_label.text = _names[_active]
+		_portrait.texture = _textures[_active]
+
+
+## The knife portrait (assets/ui/weapons/knife.png, or its SVG icon), loaded at most once.
+func _knife_art() -> Texture2D:
+	if _knife_loaded:
+		return _knife_texture
+	_knife_loaded = true
+	var path: String = ScenePaths.weapon_art(Ids.KNIFE)
+	if not AssetLoader.exists(path):
+		path = ScenePaths.icon(Ids.KNIFE)
+	if AssetLoader.exists(path):
+		_knife_texture = AssetLoader.load_resource(path) as Texture2D
+	return _knife_texture
+
+
+## Magazine and reserve. Text and colour are touched only when a value changes. Ignored while the knife is in the
+## hand: the knife has no ammunition (0.9.9).
 func set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void:
+	if _knife_on:
+		return
 	if _has_ammo and in_mag == _last_mag and infinite == _last_infinite and mag_size == _last_mag_size \
 			and (infinite or reserve == _last_reserve):
 		return
@@ -363,7 +422,7 @@ func set_ammo(in_mag: int, reserve: int, infinite: bool, mag_size: int) -> void:
 
 ## The amber bar under the ammunition: visible only while reloading. `progress` is 0-1.
 func set_reload(active: bool, progress: float) -> void:
-	_reload_bar.visible = active and not _touch
+	_reload_bar.visible = active and not _touch and not _knife_on
 	if active:
 		_reload_bar.value = progress * 100.0
 	if active != _reload_on or (active and not is_equal_approx(progress, _reload_progress)):
@@ -378,7 +437,7 @@ func set_touch(touch: bool) -> void:
 	_touch = touch
 	_apply_mode()
 	_refresh_keys()
-	_reload_bar.visible = _reload_on and not _touch
+	_reload_bar.visible = _reload_on and not _touch and not _knife_on
 
 
 ## Width of each touch card (the Hud derives it from the free width at the bottom of the screen).
@@ -417,6 +476,22 @@ func get_card_weapon_indices() -> Array[int]:
 
 func is_cards_visible() -> bool:
 	return _cards_box.visible
+
+
+## Name drawn on the card of weapon `index` ("" without that card). For tests.
+func get_card_name_text(index: int) -> String:
+	for card: Card in _cards:
+		if card.weapon_index == index:
+			return card.name_text
+	return ""
+
+
+## Magazine text drawn on the card of weapon `index` ("" without that card, and "" on the knife card). For tests.
+func get_card_mag_text(index: int) -> String:
+	for card: Card in _cards:
+		if card.weapon_index == index:
+			return card.mag_text
+	return ""
 
 
 func get_weapon_ids() -> Array[StringName]:
@@ -490,9 +565,8 @@ func _rebuild_cards() -> void:
 			var card: Card = Card.new()
 			card.name = "Card_%d" % (index + 1)
 			card.weapon_index = index
-			card.portrait = _textures[index]
-			card.name_text = _names[index]
 			card.custom_minimum_size = Vector2(_card_w, CARD_H_PX)
+			_apply_card_face(card)
 			_cards_box.add_child(card)
 			_cards.append(card)
 			_fill_card_ammo(card)
@@ -505,12 +579,30 @@ func _rebuild_cards() -> void:
 func _has_card_text(index: int) -> bool:
 	for card: Card in _cards:
 		if card.weapon_index == index:
-			return card.mag_text != ""
+			return card.mag_text != "" or (_knife_on and index == _active)   # the knife card shows no ammunition
 	return true
+
+
+## Portrait and name of a card: the knife on the card of the weapon in hand while it is out, the weapon otherwise.
+func _apply_card_face(card: Card) -> void:
+	var index: int = card.weapon_index
+	if index < 0 or index >= _weapon_ids.size():
+		return
+	var knife: bool = _knife_on and index == _active
+	card.portrait = _knife_art() if knife else _textures[index]
+	card.name_text = KNIFE_NAME if knife else _names[index]
+	card._name_for_width = -1.0   # the name changed: trim it again for this width
+	card.queue_redraw()
 
 
 func _fill_card_ammo(card: Card) -> void:
 	var index: int = card.weapon_index
+	if _knife_on and index == _active:
+		card.mag_text = ""
+		card.reserve_text = ""
+		card.ammo_low = false
+		card.queue_redraw()
+		return
 	card.mag_text = str(_w_mag[index])
 	card.reserve_text = INFINITE_RESERVE_TEXT if _w_infinite[index] else RESERVE_FORMAT % _w_reserve[index]
 	card.ammo_low = _w_mag[index] <= 0 or float(_w_mag[index]) <= float(_w_mag_size[index]) * LOW_AMMO_FRAC
@@ -519,7 +611,7 @@ func _fill_card_ammo(card: Card) -> void:
 
 func _refresh_card_reload() -> void:
 	for card: Card in _cards:
-		var value: float = _reload_progress if (_reload_on and card.weapon_index == _active) else -1.0
+		var value: float = _reload_progress if (_reload_on and not _knife_on and card.weapon_index == _active) else -1.0
 		if not is_equal_approx(card.reload, value):
 			card.reload = value
 			card.queue_redraw()

@@ -236,8 +236,10 @@ func _setup_knife(request: HuntRequest) -> void:
 
 
 ## The knife view leaves its rest pose once the hunt starts (the pre-warm compiled its materials, risk R3).
+## The hunt always begins with the weapon in the hand, never with the knife.
 func _on_hunt_started(_started: HuntRequest) -> void:
 	if _knife != null:
+		_knife.set_equipped(false)
 		_knife.set_rest_visible(false)
 
 
@@ -458,6 +460,44 @@ func is_knife_swinging() -> bool:
 ## 1 right after a swing .. 0 ready (the veil of the touch button).
 func get_knife_cooldown_frac() -> float:
 	return _knife.get_cooldown_frac() if _knife != null else 0.0
+
+
+## True while the knife is in the hand (jogo 0.9.9): the weapon view is hidden, `fire` swings and there is no aim,
+## no reload and no gun shot until the hunter asks for a weapon again.
+func is_knife_equipped() -> bool:
+	return _knife != null and _knife.is_equipped()
+
+
+## Puts the knife in the hand, or the weapon back. Instant, no draw time. Equipping is refused without a knife in the
+## data, dead, downed, spectating, while reviving an ally, with the binoculars up, with an item in use, during a weapon
+## switch and during the swing lock; putting it back is refused only during the swing lock. Returns true when the knife
+## is in the requested state after the call.
+func set_knife_equipped(on: bool) -> bool:
+	if _knife == null:
+		return not on
+	if on == _knife.is_equipped():
+		return true
+	if is_knife_swinging():
+		return false
+	if on and not _can_equip_knife():
+		return false
+	return _knife.set_equipped(on)
+
+
+## The `knife` action (X / the Faca button): knife in the hand, or back to the weapon that was in the hand.
+## Returns the state after the call (true = knife in the hand).
+func toggle_knife() -> bool:
+	set_knife_equipped(not is_knife_equipped())
+	return is_knife_equipped()
+
+
+## Gates of equipping: the blocks of docs 1.4 minus the cadence (which only holds back the swing).
+func _can_equip_knife() -> bool:
+	if not _alive or _downed or _reviving or is_spectating():
+		return false
+	if not _input_open() and not _bot:
+		return false
+	return _switch_left <= 0.0 and not _items_busy() and not is_binocular_view()
 
 
 func get_display_name() -> String:
@@ -830,8 +870,8 @@ func _read_move() -> Vector2:
 
 
 func _want_aim() -> bool:
-	if not _alive or _reviving or is_knife_swinging():
-		return false   # the swing drops the aim as if the button had been released; it comes back at the end
+	if not _alive or _reviving or is_knife_equipped():
+		return false   # the knife drops the aim as if the button had been released; it comes back when it goes away
 	if _bot:
 		return _bot_aim
 	return _input_open() and Input.is_action_pressed(&"aim")
@@ -878,9 +918,15 @@ func _pump_discrete_input(delta: float) -> void:
 	if not Input.is_action_pressed(&"fire"):
 		_ignore_fire_until_release = false
 	var fire_down: bool = Input.is_action_pressed(&"fire")
-	if fire_down and not _fire_was_down and _fire_allowed_by_input():   # edge detect: robust to event order
-		_fire_buffer = FIRE_BUFFER_S
+	var fire_pressed: bool = fire_down and not _fire_was_down and _fire_allowed_by_input()   # edge: robust to event order
 	_fire_was_down = fire_down
+	if is_knife_equipped():
+		# Knife in the hand (0.9.9): one click of fire is one swing, never a buffered one and never a burst while held.
+		_fire_buffer = 0.0
+		if fire_pressed:
+			_try_knife()
+	elif fire_pressed:
+		_fire_buffer = FIRE_BUFFER_S
 	if _reviving:
 		_fire_buffer = 0.0
 	if _fire_buffer > 0.0 and _fire_allowed_by_input() and _try_fire():
@@ -900,10 +946,10 @@ func _pump_discrete_input(delta: float) -> void:
 	if Input.is_action_just_pressed(&"weapon_swap"):
 		_select_weapon((_slot + 1) % maxi(_weapons.size(), 1))
 	if Input.is_action_just_pressed(&"knife"):
-		_try_knife()
+		toggle_knife()
 	if _items != null and not _reviving and not is_knife_swinging():
 		for item_id: StringName in InputSetup.ITEM_ACTIONS:
-			if Input.is_action_just_pressed(InputSetup.ITEM_ACTIONS[item_id] as StringName):
+			if Input.is_action_just_pressed(InputSetup.ITEM_ACTIONS[item_id] as StringName) and _item_allowed(item_id):
 				_items.use_item(item_id)
 	if Input.is_action_just_pressed(&"dog_command"):
 		GameEvents.dog_command_requested.emit()
@@ -946,9 +992,9 @@ func _update_aim(delta: float) -> void:
 	if is_zero_approx(previous - _ads_t) and not wants:
 		pass
 	# Scoped weapon disappears once the overlay is (almost) opaque; binoculars hide it entirely.
-	# A knife swing hides it too: the knife takes its place until the swing ends (F4).
+	# The knife hides it too: it takes its place for as long as it is in the hand (F4, 0.9.9).
 	var hide_weapon: bool = binoc or (w != null and w.is_scoped() and _ads_t >= SCOPE_HIDE_WEAPON_AT)
-	_holder.set_weapon_hidden(hide_weapon or not _alive or is_knife_swinging())
+	_holder.set_weapon_hidden(hide_weapon or not _alive or is_knife_equipped())
 
 
 func _can_aim() -> bool:
@@ -957,6 +1003,12 @@ func _can_aim() -> bool:
 
 func _items_busy() -> bool:
 	return _items != null and _items.is_busy()
+
+
+## The binoculars and the knife are exclusive (0.9.9): the binoculars never come up with the knife in the hand, and
+## the knife never comes out with the binoculars up (_can_equip_knife). Every other item works with the knife out.
+func _item_allowed(item_id: StringName) -> bool:
+	return not (is_knife_equipped() and item_id == Ids.I_BINOCULARS)
 
 
 func _update_thermal() -> void:
@@ -1122,7 +1174,10 @@ func _reset_zoom() -> void:
 	_zoom_value = get_zoom_range().x
 
 
+## The `fire` action: a gun shot, or a knife swing while the knife is in the hand (0.9.9).
 func _try_fire() -> bool:
+	if is_knife_equipped():
+		return _try_knife()
 	var w: Weapon = _weapon()
 	if w == null or not _alive or _reviving or not _input_open() and not _bot:
 		return false
@@ -1132,10 +1187,11 @@ func _try_fire() -> bool:
 	return w.fire(_camera, _ads_t, _move_frac(), exclude, get_parent())
 
 
-## One knife swing (F4). Blocked while dead, downed, spectating, reviving an ally, with the binoculars up,
-## an item in use, a weapon switch in progress or the knife still on cooldown (docs 1.4, "Bloqueios").
+## One knife swing (F4), asked by `fire` with the knife in the hand. Blocked without the knife in the hand, while
+## dead, downed, spectating, reviving an ally, with the binoculars up, an item in use, a weapon switch in progress
+## or the knife still on cooldown (docs 1.4, "Bloqueios").
 func _try_knife() -> bool:
-	if _knife == null or not _alive or _downed or _reviving or is_spectating():
+	if _knife == null or not _knife.is_equipped() or not _alive or _downed or _reviving or is_spectating():
 		return false
 	if not _input_open() and not _bot:
 		return false
@@ -1145,7 +1201,7 @@ func _try_knife() -> bool:
 
 
 ## The swing begins: it cancels the reload in progress and drops any buffered shot. The weapon view is
-## hidden by _update_aim while is_knife_swinging() and comes back at the end without a draw.
+## hidden by _update_aim for as long as the knife is in the hand, and comes back without a draw when it goes away.
 func _on_knife_swing_started(_duration_s: float) -> void:
 	var w: Weapon = _weapon()
 	if w != null:
@@ -1155,14 +1211,19 @@ func _on_knife_swing_started(_duration_s: float) -> void:
 
 func _start_reload() -> void:
 	var w: Weapon = _weapon()
-	if w == null or not _alive or _reviving or _items_busy() or _switch_left > 0.0 or is_knife_swinging():
+	if w == null or not _alive or _reviving or _items_busy() or _switch_left > 0.0 or is_knife_equipped():
 		return
 	w.start_reload()
 
 
+## weapon_1..weapon_5 / weapon_swap (on touch, a tap on a weapon card). With the knife in the hand it goes back to
+## the belt first (0.9.9), so asking for the weapon already in the hand is how the hunter drops the knife.
 func _select_weapon(slot: int) -> void:
-	if slot == _slot or slot < 0 or slot >= _weapons.size() or not _alive or _reviving or _items_busy() \
-			or is_knife_swinging():
+	if slot < 0 or slot >= _weapons.size() or not _alive or _reviving or _items_busy() or is_knife_swinging():
+		return
+	if is_knife_equipped() and not set_knife_equipped(false):
+		return
+	if slot == _slot:
 		return
 	_weapon().holster()
 	_holder.stop_reload()
@@ -1278,6 +1339,7 @@ func _go_down() -> void:
 		w.holster()
 	if _knife != null:
 		_knife.abort_swing()
+		_knife.set_equipped(false)   # a hunter who falls comes back up with the weapon, never with the knife
 	for weapon: Weapon in _weapons:
 		weapon.set_process(false)   # no auto reload while down
 	_holder.stop_reload()
@@ -1403,6 +1465,7 @@ func _die() -> void:
 		_items.set_binoculars(false)
 	if _knife != null:
 		_knife.abort_swing()
+		_knife.set_equipped(false)   # death (and the spectator view that follows it) leaves the knife on the belt
 	_holder.set_weapon_hidden(true)
 	if _thermal_emitted:
 		_thermal_emitted = false
@@ -1493,8 +1556,11 @@ func bot_fire() -> bool:
 	return _try_fire()
 
 
-## One knife swing (F4); true when the swing happened.
+## One knife swing (F4): puts the knife in the hand if it is not already there, then swings once (it stays in the
+## hand afterwards, as it does for the player). True when the swing happened.
 func bot_knife() -> bool:
+	if not is_knife_equipped() and not set_knife_equipped(true):
+		return false
 	return _try_knife()
 
 
@@ -1508,7 +1574,7 @@ func bot_select_weapon(slot: int) -> void:
 
 
 func bot_use_item(item_id: StringName) -> bool:
-	if _items == null or not _alive or is_knife_swinging():
+	if _items == null or not _alive or is_knife_swinging() or not _item_allowed(item_id):
 		return false
 	return _items.use_item(item_id)
 

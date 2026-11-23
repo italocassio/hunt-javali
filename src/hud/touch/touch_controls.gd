@@ -45,9 +45,11 @@ const DOG_SLOT: StringName = &"dog_command"
 const INTERACT_ACTION: StringName = &"interact"   # horde level 2: a downed ally ("Levantar") or an ammo crate in reach
 const INTERACT_LABEL_CRATE: String = "Pegar"      # the same button over an ammo crate (no revive target)
 const PAUSE_ACTION: StringName = &"pause"
-## F4: the knife button exists only with a knife in the data and a hunter on his feet (like Reload).
+## F4: the knife button exists only with a knife in the data and a hunter on his feet (like Reload). A tap puts the
+## knife in the hand (highlighted while it is there, 0.9.9) or back on the belt; the Fire button then swings it.
 const KNIFE_ACTION: StringName = &"knife"
 const FIRE_ACTION: StringName = &"fire"
+const AIM_ACTION: StringName = &"aim"
 const FLASH_HZ: float = 2.0
 const DIM_ALPHA: float = 0.35
 const BUSY_VEIL: Color = Color(0.0, 0.0, 0.0, 0.55)
@@ -322,6 +324,16 @@ func get_button_label(button_id: StringName) -> String:
 	return ""
 
 
+## True when an existing button is drawn in its "on" state (a toggle that is on, or the Faca button with the knife
+## in the hand, 0.9.9). False for a button that does not exist. For tests.
+func is_button_on(button_id: StringName) -> bool:
+	if not _radii.has(button_id):
+		return false
+	if button_id == KNIFE_ACTION:
+		return _knife_equipped()
+	return bool(_toggled.get(_action_of(button_id), false))
+
+
 ## The accessory the main button uses now (an item id, &"" = none carried) and whether the list is open.
 func get_accessory_current() -> StringName:
 	return _acc_current
@@ -392,6 +404,11 @@ func _rebuild_buttons() -> void:
 ## The hunter carries a knife (data/upgrades.json has the entry): without it there is no Faca button.
 func _has_knife() -> bool:
 	return _player != null and _player.get_knife_level() > 0
+
+
+## The knife is in the hand (0.9.9): the Faca button stays highlighted and the Aim button does nothing.
+func _knife_equipped() -> bool:
+	return _player != null and _player.is_knife_equipped()
 
 
 func _item_def(item_id: StringName, action_name: StringName, diameter: float, from: String) -> Dictionary:
@@ -587,8 +604,8 @@ func _process(_delta: float) -> void:
 	_sync_revive_state()
 	if _items != null and not _downed and _sync_accessory_current():
 		_rebuild_buttons()
-	# The aim toggle must follow the player: if the player dropped the aim (death, pause), reset it.
-	if _player != null and bool(_toggled.get(&"aim", false)) and not _player.is_alive():
+	# The aim toggle must follow the player: if the player dropped the aim (death, pause, knife in the hand), reset it.
+	if _player != null and bool(_toggled.get(&"aim", false)) and (not _player.is_alive() or _knife_equipped()):
 		_toggled[&"aim"] = false
 		Input.action_release(&"aim")
 	# A locked run ends when the hunter aims, crouches, or is gone.
@@ -756,6 +773,8 @@ func _press_button(finger: int, button_id: StringName, action_name: StringName) 
 	if action_name == &"":
 		return
 	if _mode_of(button_id) == "toggle":
+		if button_id == AIM_ACTION and _knife_equipped():
+			return   # with the knife in the hand there is no aim: the button does nothing (0.9.9)
 		var on: bool = not bool(_toggled.get(action_name, false))
 		_toggled[action_name] = on
 		if on:
@@ -828,6 +847,8 @@ func _draw_surface() -> void:
 		var r: float = float(_radii.get(button_id, 0.0))
 		var down: bool = bool(_down.get(button_id, false))
 		var on: bool = bool(_toggled.get(def["action"], false))
+		if button_id == KNIFE_ACTION and _knife_equipped():
+			on = true   # knife in the hand: the Faca button stays lit like a toggle that is on (0.9.9)
 		var fire: bool = def["action"] == FIRE_ACTION
 		var slot_id: StringName = def.get("slot", &"")
 		var is_slot: bool = slot_id != &""

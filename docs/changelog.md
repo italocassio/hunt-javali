@@ -3,6 +3,20 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.9 — 23/11/2026
+
+**A faca agora fica na mão.** A pedido do dono do jogo, a faca deixou de ser um golpe avulso e virou uma arma de verdade.
+- **X** passa a *pegar* a faca, e ela fica na mão até você guardá-la. Para golpear, use o **clique do mouse**, igual
+  a atirar. No celular é o mesmo: o botão **Faca** pega a faca, e o botão **Tiro** golpeia.
+- Para voltar à arma, use o atalho de sempre (**1**, **2** ou a troca de arma). Apertar **X** de novo também guarda
+  a faca. No celular, basta tocar num cartão de arma.
+- É um golpe por clique: segurar o botão não sai golpeando sem parar.
+- O painel do canto mostra **"Faca"**, sem munição, enquanto ela está na mão, e volta para a arma quando você a guarda.
+  No celular o botão Faca fica aceso enquanto a faca está na mão.
+- Com a faca na mão não dá para mirar, recarregar nem usar o binóculo. Ao morrer, cair ou ser levantado, o caçador
+  volta com a arma na mão.
+- Alcance, cadência, dano por nível e o silêncio do golpe continuam os mesmos da 0.9.8.
+
 ## 0.9.8 — 23/11/2026
 
 **Faca de caça.** Todo caçador já entra na mata com uma, sempre na cintura.

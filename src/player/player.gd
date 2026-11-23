@@ -55,6 +55,7 @@ var _cfg: Dictionary = {}
 var _request: HuntRequest = null
 var _world: HuntWorld = null
 var _items: ItemBelt = null
+var _knife: Knife = null                      # F4: null when the data has no knife (no swing, no touch button)
 var _hud: Node = null
 var _spectator: SpectatorCamera = null
 var _weapons: Array[Weapon] = []
@@ -207,6 +208,7 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		_holder.select(0)
 		_holder.play_draw(DRAW_TIME_S)
 		_reset_zoom()
+	_setup_knife(request)
 	_hud = AssetLoader.instantiate(ScenePaths.HUD)
 	if _hud != null:
 		add_child(_hud)
@@ -215,6 +217,28 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		GameEvents.hunt_ended.connect(_on_hunt_ended)
 	if not GameEvents.player_died.is_connected(_on_local_died):
 		GameEvents.player_died.connect(_on_local_died)
+	if not GameEvents.hunt_started.is_connected(_on_hunt_started):
+		GameEvents.hunt_started.connect(_on_hunt_started)
+
+
+## The knife (F4, docs/plano_faca_mochila_folego.md 2.6): level from the request, clamped by the Knife to
+## 1..Data.get_upgrade_level_count. No knife in the data = no Knife node at all. Built before the HUD, which
+## asks get_knife_level() to decide on the touch button.
+func _setup_knife(request: HuntRequest) -> void:
+	var knife: Knife = Knife.new()
+	knife.name = "Knife"
+	add_child(knife)
+	if not knife.setup(request.knife_level, _holder):
+		knife.queue_free()
+		return
+	knife.swing_started.connect(_on_knife_swing_started)
+	_knife = knife
+
+
+## The knife view leaves its rest pose once the hunt starts (the pre-warm compiled its materials, risk R3).
+func _on_hunt_started(_started: HuntRequest) -> void:
+	if _knife != null:
+		_knife.set_rest_visible(false)
 
 
 ## Horde level rules: ammo, revive and confinement blocks of Data.get_horde_level(world.get_horde_level()).
@@ -414,6 +438,26 @@ func _update_stamina(delta: float) -> void:
 			Sfx.play(&"breath_tired")
 	else:
 		_breath_t = 0.0
+
+
+## Knife level 1..max (F4); 0 when the data has no knife: there is no swing and no touch button.
+func get_knife_level() -> int:
+	return _knife.get_level() if _knife != null else 0
+
+
+## Damage of one swing of the current level, before the zone multiplier.
+func get_knife_damage() -> float:
+	return _knife.get_damage() if _knife != null else 0.0
+
+
+## True during the swing_s lock: no shot, no aim, no reload, no weapon switch and no item.
+func is_knife_swinging() -> bool:
+	return _knife != null and _knife.is_swinging()
+
+
+## 1 right after a swing .. 0 ready (the veil of the touch button).
+func get_knife_cooldown_frac() -> float:
+	return _knife.get_cooldown_frac() if _knife != null else 0.0
 
 
 func get_display_name() -> String:
@@ -786,8 +830,8 @@ func _read_move() -> Vector2:
 
 
 func _want_aim() -> bool:
-	if not _alive or _reviving:
-		return false
+	if not _alive or _reviving or is_knife_swinging():
+		return false   # the swing drops the aim as if the button had been released; it comes back at the end
 	if _bot:
 		return _bot_aim
 	return _input_open() and Input.is_action_pressed(&"aim")
@@ -811,6 +855,8 @@ func _process(delta: float) -> void:
 		_update_downed(delta)
 		_update_web_pause()
 		return
+	if _knife != null:
+		_knife.tick(delta)
 	_pump_discrete_input(delta)
 	_update_revive(delta)
 	_update_ammo_crate()
@@ -853,7 +899,9 @@ func _pump_discrete_input(delta: float) -> void:
 		_select_weapon(4)
 	if Input.is_action_just_pressed(&"weapon_swap"):
 		_select_weapon((_slot + 1) % maxi(_weapons.size(), 1))
-	if _items != null and not _reviving:
+	if Input.is_action_just_pressed(&"knife"):
+		_try_knife()
+	if _items != null and not _reviving and not is_knife_swinging():
 		for item_id: StringName in InputSetup.ITEM_ACTIONS:
 			if Input.is_action_just_pressed(InputSetup.ITEM_ACTIONS[item_id] as StringName):
 				_items.use_item(item_id)
@@ -898,8 +946,9 @@ func _update_aim(delta: float) -> void:
 	if is_zero_approx(previous - _ads_t) and not wants:
 		pass
 	# Scoped weapon disappears once the overlay is (almost) opaque; binoculars hide it entirely.
+	# A knife swing hides it too: the knife takes its place until the swing ends (F4).
 	var hide_weapon: bool = binoc or (w != null and w.is_scoped() and _ads_t >= SCOPE_HIDE_WEAPON_AT)
-	_holder.set_weapon_hidden(hide_weapon or not _alive)
+	_holder.set_weapon_hidden(hide_weapon or not _alive or is_knife_swinging())
 
 
 func _can_aim() -> bool:
@@ -1077,21 +1126,43 @@ func _try_fire() -> bool:
 	var w: Weapon = _weapon()
 	if w == null or not _alive or _reviving or not _input_open() and not _bot:
 		return false
-	if _switch_left > 0.0 or _items_busy() or is_binocular_view():
+	if _switch_left > 0.0 or _items_busy() or is_binocular_view() or is_knife_swinging():
 		return false
 	var exclude: Array[RID] = [get_rid()]
 	return w.fire(_camera, _ads_t, _move_frac(), exclude, get_parent())
 
 
+## One knife swing (F4). Blocked while dead, downed, spectating, reviving an ally, with the binoculars up,
+## an item in use, a weapon switch in progress or the knife still on cooldown (docs 1.4, "Bloqueios").
+func _try_knife() -> bool:
+	if _knife == null or not _alive or _downed or _reviving or is_spectating():
+		return false
+	if not _input_open() and not _bot:
+		return false
+	if _switch_left > 0.0 or _items_busy() or is_binocular_view():
+		return false
+	return _knife.swing(_camera, [get_rid()], get_parent())
+
+
+## The swing begins: it cancels the reload in progress and drops any buffered shot. The weapon view is
+## hidden by _update_aim while is_knife_swinging() and comes back at the end without a draw.
+func _on_knife_swing_started(_duration_s: float) -> void:
+	var w: Weapon = _weapon()
+	if w != null:
+		w.cancel_reload()
+	_fire_buffer = 0.0
+
+
 func _start_reload() -> void:
 	var w: Weapon = _weapon()
-	if w == null or not _alive or _reviving or _items_busy() or _switch_left > 0.0:
+	if w == null or not _alive or _reviving or _items_busy() or _switch_left > 0.0 or is_knife_swinging():
 		return
 	w.start_reload()
 
 
 func _select_weapon(slot: int) -> void:
-	if slot == _slot or slot < 0 or slot >= _weapons.size() or not _alive or _reviving or _items_busy():
+	if slot == _slot or slot < 0 or slot >= _weapons.size() or not _alive or _reviving or _items_busy() \
+			or is_knife_swinging():
 		return
 	_weapon().holster()
 	_holder.stop_reload()
@@ -1205,6 +1276,8 @@ func _go_down() -> void:
 	var w: Weapon = _weapon()
 	if w != null:
 		w.holster()
+	if _knife != null:
+		_knife.abort_swing()
 	for weapon: Weapon in _weapons:
 		weapon.set_process(false)   # no auto reload while down
 	_holder.stop_reload()
@@ -1328,6 +1401,8 @@ func _die() -> void:
 	if _items != null:
 		_items.cancel_use()
 		_items.set_binoculars(false)
+	if _knife != null:
+		_knife.abort_swing()
 	_holder.set_weapon_hidden(true)
 	if _thermal_emitted:
 		_thermal_emitted = false
@@ -1418,6 +1493,11 @@ func bot_fire() -> bool:
 	return _try_fire()
 
 
+## One knife swing (F4); true when the swing happened.
+func bot_knife() -> bool:
+	return _try_knife()
+
+
 func bot_reload() -> void:
 	_start_reload()
 
@@ -1428,7 +1508,7 @@ func bot_select_weapon(slot: int) -> void:
 
 
 func bot_use_item(item_id: StringName) -> bool:
-	if _items == null or not _alive:
+	if _items == null or not _alive or is_knife_swinging():
 		return false
 	return _items.use_item(item_id)
 

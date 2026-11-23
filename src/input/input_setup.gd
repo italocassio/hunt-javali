@@ -5,7 +5,7 @@ extends Node
 const ACTIONS: PackedStringArray = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 	"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
 	"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
-	"spectate_next", "pause", "help", "interact", "use_energy_drink"]
+	"spectate_next", "pause", "help", "interact", "use_energy_drink", "knife"]
 ## Usable item id -> its action. The insertion order is THE order of the item slots (quickbar, touch row).
 const ITEM_ACTIONS: Dictionary = {&"medkit": &"use_medkit", &"corn_bait": &"use_corn_bait",
 	&"scout_drone": &"use_scout_drone", &"binoculars": &"use_binoculars", &"energy_drink": &"use_energy_drink"}
@@ -46,6 +46,8 @@ const _KEYS: Dictionary = {
 	# player is alive, spectate_next only while the spectator camera is active, so they never act together.
 	"interact": [KEY_F],
 	"use_energy_drink": [KEY_T],
+	# The knife is not an item: it has no entry in ITEM_ACTIONS (no quickbar slot, no accessory row).
+	"knife": [KEY_X],
 }
 const _LEFT_ONLY: Array[int] = [KEY_SHIFT, KEY_CTRL]
 

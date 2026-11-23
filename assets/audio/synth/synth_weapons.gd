@@ -13,13 +13,14 @@ const IDS: Array[StringName] = [&"dry_fire", &"reload_start", &"reload_end", &"b
 
 
 ## Ids synthesized on first use only (no recorded file expected), see build_lazy().
-const LAZY_IDS: Array[StringName] = [&"breath_tired", &"energy_drink"]
+const LAZY_IDS: Array[StringName] = [&"breath_tired", &"energy_drink", &"knife_swing"]
 
 
 static func build_lazy(id: StringName) -> AudioStreamWAV:
 	match id:
 		&"breath_tired": return _breath_tired()
 		&"energy_drink": return _energy_drink()
+		&"knife_swing": return _knife_swing()
 	return null
 
 
@@ -249,6 +250,31 @@ static func _energy_drink() -> AudioStreamWAV:
 	# Satisfied exhale.
 	SynthDsp.noise(b, 0.7, 0.1, 0.1, 0.04, 0.35, 0.2, 0.02)
 	return SynthDsp.to_stream(b, 0.8)
+
+
+## Knife swing, ~0.25 s: a blade cutting the air. White noise through a narrow two-pole band-pass whose centre
+## sweeps up and back down (the Doppler-like "shhhk"), with a bell envelope peaking at 40% and a faint thin ring.
+static func _knife_swing() -> AudioStreamWAV:
+	var dur: float = 0.25
+	var b: PackedFloat32Array = SynthDsp.buf(dur)
+	var n: int = b.size()
+	var rate: float = float(SynthDsp.RATE)
+	var y1: float = 0.0
+	var y2: float = 0.0
+	var ph: float = 0.0
+	for i in n:
+		var t: float = float(i) / rate
+		var u: float = t / dur
+		var env: float = pow(sin(PI * pow(u, 0.75)), 2.0)
+		var f: float = 1500.0 + 3300.0 * sin(PI * pow(u, 0.8))
+		var r: float = 0.93
+		var c1: float = 2.0 * r * cos(TAU * f / rate)
+		var yn: float = SynthDsp.rnd() * (1.0 - r) + c1 * y1 - r * r * y2
+		y2 = y1
+		y1 = yn
+		ph += (5200.0 + 1200.0 * u) / rate
+		b[i] = (yn * 3.0 + sin(TAU * ph) * 0.03) * env
+	return SynthDsp.to_stream(b, 0.55)
 
 
 static func _tick() -> AudioStreamWAV:

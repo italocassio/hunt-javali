@@ -41,6 +41,7 @@ const C_BAIT: int = 0x43
 const C_DOG_CMD: int = 0x44
 const C_REVIVE: int = 0x45             ## Horde level 2: target_slot u8
 const C_AMMO_CRATE: int = 0x46         ## Horde level 2: crate u8
+const KNIFE_WEAPON_INDEX: int = 254    ## C_SHOT weapon byte of a knife swing (data/weapons.json never reaches 254 entries)
 
 # Hunter state flags
 const HF_CROUCH: int = 1

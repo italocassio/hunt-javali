@@ -26,6 +26,7 @@
     {"id": "heartbeat", "duration_s": 1.0, "prompt": "Single strong human heartbeat, deep muffled lub-dub, close and tense"},
     {"id": "energy_drink", "duration_s": 0.8, "prompt": "Energy drink can opening with a sharp tab pop and carbonation fizz, then two quick gulps and a satisfied exhale, close and dry, no music"},
     {"id": "breath_tired", "duration_s": 0.9, "prompt": "Tired hunter panting after a sprint, one heavy open-mouth exhale with a faint breathy voiced sigh, then a short soft inhale, close and dry, no wind, no music"},
+    {"id": "knife_swing", "duration_s": 0.25, "prompt": "Hunting knife blade slicing through the air, one fast thin metallic swish, close and dry, no impact, no music"},
     {"id": "binocular_in", "duration_s": 0.5, "prompt": "Raising binoculars, soft strap rustle and small plastic click"},
     {"id": "hit_marker", "duration_s": 0.5, "prompt": "Very short crisp tick, game hit confirmation click, clean and dry"},
     {"id": "kill_confirm", "duration_s": 0.7, "prompt": "Short satisfying low thump with a soft metallic ring, game kill confirmation, not musical"},

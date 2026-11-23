@@ -151,6 +151,10 @@ func bot_fire() -> bool:   # true if a shot was fired
 	return false
 
 
+func bot_knife() -> bool:   ## one knife swing (tests); true if the swing happened
+	return false
+
+
 func bot_reload() -> void:
 	pass
 

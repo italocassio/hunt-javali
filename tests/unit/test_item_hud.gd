@@ -700,10 +700,13 @@ func test_touch_dog_button_comes_and_goes() -> void:
 ## Every button of the largest layout (kit, accessories, dog, interact) against each other, the weapon cards and the
 ## stick, on the three reference screens: hit circles (radius + padding) never touch.
 func test_touch_buttons_do_not_overlap_each_other_the_cards_or_the_stick() -> void:
+	var hunter: KnifeStubPlayer = KnifeStubPlayer.new()   # F4: the Faca button is part of the largest layout
 	var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars"]))
+	tc._player = hunter
 	tc.set_dog_present(true)
 	tc._revive_on = true
 	tc._rebuild_buttons()
+	ok(tc.get_button_center(&"knife") != Vector2.INF, "pre-condicao: o botao Faca esta no layout testado")
 	var pad: float = TouchControls.HIT_PADDING_PX
 	for size_px: Vector2 in [Vector2(1532.0, 720.0), Vector2(1280.0, 720.0), Vector2(1280.0, 960.0)]:
 		var block: Dictionary = TouchControls.compute_bottom_block(size_px, 242.0 + 90.0)
@@ -746,8 +749,164 @@ func test_touch_buttons_do_not_overlap_each_other_the_cards_or_the_stick() -> vo
 		ok(card_w >= TouchControls.CARD_W_MIN_PX - 0.01 and card_w <= TouchControls.CARD_W_MAX_PX + 0.01,
 			"%s: largura do cartao %.1f" % [size_px, card_w])
 		ok(float(block["acc_x"]) + 35.0 + 2.0 * pad <= size_px.x - 359.0 - 32.0 + 0.01, "%s: Acessorios antes do Recarregar" % size_px)
+	_drop_hunter(tc, hunter)
 	InputSetup.set_touch_override("auto")
 	_free_belts()
+
+
+# --------------------------------------------------------------------------------------------
+# TouchControls: the Faca button (docs/plano_faca_mochila_folego.md 2.7; F4)
+# --------------------------------------------------------------------------------------------
+
+## A hunter the test steers: the knife level, a revive target (the Levantar button) and the fall are plain fields.
+## Never added to the tree (no _ready); TouchControls only reads it through the Player getters.
+class KnifeStubPlayer extends Player:
+	var knife_level: int = 2
+	var revive_target: int = -1
+	var downed: bool = false
+
+	func get_knife_level() -> int:
+		return knife_level
+
+	func get_revive_target_slot() -> int:
+		return revive_target
+
+	func is_downed() -> bool:
+		return downed
+
+
+## A TouchControls with the belt injected and `player` bound as its hunter (private fields, the way bind() would).
+func _touch_with_hunter(belt: ItemBelt, player: Player) -> TouchControls:
+	var tc: TouchControls = _touch(belt)
+	tc._player = player
+	tc._rebuild_buttons()
+	return tc
+
+
+## Detaches the stub from a TouchControls before it is freed (the controls keep processing until the frame ends).
+func _drop_hunter(tc: TouchControls, player: Player) -> void:
+	tc._player = null
+	tc._rebuild_buttons()
+	player.free()
+
+
+func test_touch_knife_button_exists_only_with_a_knife_and_a_standing_hunter() -> void:
+	var belt: ItemBelt = _belt([&"medkit"])
+	var tc: TouchControls = _touch(belt)
+	eq(tc.get_button_center(TouchControls.KNIFE_ACTION), Vector2.INF, "sem caçador ligado: sem botao Faca")
+	eq(tc.get_button_radius(TouchControls.KNIFE_ACTION), 0.0, "sem caçador ligado: raio 0")
+	var hunter: KnifeStubPlayer = KnifeStubPlayer.new()
+	tc._player = hunter
+	tc._rebuild_buttons()
+	var s: Vector2 = _screen(tc)
+	eq(tc.get_button_center(&"knife"), Vector2(s.x - 100.0, s.y - 190.0), "Faca: br (100, 190), sem ajuste")
+	near(tc.get_button_radius(&"knife"), 34.0, 0.001, "Faca de 68 px")
+	eq(tc.get_button_label(&"knife"), "Faca", "texto do botao")
+	ok(tc.get_button_diameters().has(&"knife"), "o botao entra em get_button_diameters")
+	# a knife of level 0 = no knife in the data: no button
+	hunter.knife_level = 0
+	tc._rebuild_buttons()
+	eq(tc.get_button_center(&"knife"), Vector2.INF, "faca nivel 0 (sem faca nos dados): sem botao")
+	hunter.knife_level = 4
+	tc._rebuild_buttons()
+	ne(tc.get_button_center(&"knife"), Vector2.INF, "faca nivel 4: com botao")
+	# a fallen hunter keeps only Pause (like Reload)
+	hunter.downed = true
+	tc._sync_revive_state()
+	eq(tc.get_button_center(&"knife"), Vector2.INF, "caido: o botao Faca some")
+	ne(tc.get_button_center(&"pause"), Vector2.INF, "caido: o Pause fica")
+	hunter.downed = false
+	tc._sync_revive_state()
+	ne(tc.get_button_center(&"knife"), Vector2.INF, "levantado: o botao Faca volta")
+	_drop_hunter(tc, hunter)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+func test_touch_knife_button_press_holds_the_knife_action() -> void:
+	var tc: TouchControls = _touch_with_hunter(_belt([&"medkit"]), KnifeStubPlayer.new())
+	var hunter: Player = tc._player
+	var c: Vector2 = tc.get_button_center(&"knife")
+	Input.action_release(&"knife")
+	_touch_at(tc, 0, c, true)
+	ok(Input.is_action_pressed(&"knife"), "tocar no botao aperta a acao knife")
+	_touch_at(tc, 0, c, false)
+	ok(not Input.is_action_pressed(&"knife"), "soltar o dedo solta a acao knife")
+	# a tap anywhere else never presses it
+	var free_spot: Vector2 = Vector2(c.x - 300.0, c.y)
+	_tap(tc, 1, free_spot)
+	ok(not Input.is_action_pressed(&"knife"), "um toque longe do botao nao aperta knife")
+	_drop_hunter(tc, hunter)
+	InputSetup.set_touch_override("auto")
+	_free_belts()
+
+
+## The Faca button in the largest layout (dog, Levantar, kit, accessories, all 4 accessory rows open) against every other
+## button, the weapon cards and the screen edges, on the three reference screens. Same general rule as the F3 test
+## (`>= -0.01`), no exception for any pair.
+func test_touch_knife_button_does_not_overlap_anything_on_the_three_screens() -> void:
+	var sizes: Array[Vector2i] = [Vector2i(1532, 720), Vector2i(1280, 720), Vector2i(1280, 960)]
+	var expected: Dictionary = {Vector2i(1532, 720): Vector2(1432.0, 530.0), Vector2i(1280, 720): Vector2(1180.0, 530.0),
+		Vector2i(1280, 960): Vector2(1180.0, 770.0)}
+	await frames(2)   # nodes freed by the previous test still listen to the window size until the end of the frame
+	for win_size: Vector2i in sizes:
+		_set_window(win_size)
+		await frames(2)
+		var hunter: KnifeStubPlayer = KnifeStubPlayer.new()
+		hunter.revive_target = 0   # the Levantar button is on
+		var tc: TouchControls = _touch(_belt([&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"energy_drink"], {&"energy_drink": 3}))
+		tc._player = hunter
+		tc.set_dog_present(true)
+		tc._sync_revive_state()
+		await frames(2)
+		var size_px: Vector2 = _screen(tc)
+		var label: String = "%dx%d" % [win_size.x, win_size.y]
+		near(size_px.x, float(win_size.x), 0.5, "%s: pre-condicao, largura da viewport" % label)
+		near(size_px.y, float(win_size.y), 0.5, "%s: pre-condicao, altura da viewport" % label)
+		var knife_at: Vector2 = tc.get_button_center(&"knife")
+		eq(knife_at, expected[win_size], "%s: centro do botao Faca" % label)
+		near(tc.get_button_radius(&"knife"), 34.0, 0.001, "%s: raio do botao Faca" % label)
+		ok(tc.get_probe_buttons().has("interact") and tc.get_probe_buttons().has("dog_command"),
+			"%s: pre-condicao, Levantar e Cao presentes (pior caso)" % label)
+		var arrow: Vector3 = tc.get_probe_buttons()["accessory_menu"]
+		_tap(tc, 1, Vector2(arrow.x, arrow.y))
+		ok(tc.is_accessory_menu_open(), "%s: lista aberta" % label)
+		var probe: Dictionary = tc.get_probe_buttons()
+		var rows: Array[Rect2] = []
+		for key: Variant in probe:
+			if String(key).begins_with("accessory_item_"):
+				rows.append(_row_rect(probe[key] as Vector3))
+		eq(rows.size(), 4, "%s: 4 linhas na lista" % label)
+		ok(probe.has("knife"), "%s: o botao Faca esta no probe" % label)
+		# every button against every other one (hit circles = radius + padding), the same rule as the general test
+		var pad: float = TouchControls.HIT_PADDING_PX
+		var ids: Array = []
+		for key: Variant in probe:
+			var pname: String = String(key)
+			if pname.begins_with("accessory_item_") or pname.begins_with("weapon_card_") or pname == String(TouchControls.MENU_ID):
+				continue
+			ids.append(key)
+		for i: int in ids.size():
+			for j: int in range(i + 1, ids.size()):
+				var a: Vector3 = probe[ids[i]] as Vector3
+				var b: Vector3 = probe[ids[j]] as Vector3
+				var gap: float = Vector2(a.x, a.y).distance_to(Vector2(b.x, b.y)) - (a.z + pad) - (b.z + pad)
+				ok(gap >= -0.01, "%s: %s e %s se sobrepoem (folga %.1f px)" % [label, ids[i], ids[j], gap])
+		# the knife button against the open list, the arrow and the weapon cards
+		var knife_box: Rect2 = Rect2(knife_at - Vector2.ONE * (34.0 + pad), Vector2.ONE * (34.0 + pad) * 2.0)
+		for i: int in rows.size():
+			var gap_row: float = rows[i].get_center().distance_to(knife_at) - rows[i].size.x * 0.5 - 34.0
+			ok(gap_row >= -0.01, "%s: a linha %d toca o botao Faca (folga %.1f px)" % [label, i, gap_row])
+		var block: Dictionary = tc.get_bottom_block()
+		var card_w: float = float(block["card_w"])
+		for i: int in 2:
+			var card: Rect2 = Rect2(Vector2(float(block["center_x"]) - card_w - 4.0 + float(i) * (card_w + 8.0),
+				size_px.y - 8.0 - 28.0 - 6.0 - 55.0), Vector2(card_w, 55.0))
+			ok(not knife_box.intersects(card), "%s: o botao Faca toca o cartao de arma %d" % [label, i])
+		ok(Rect2(Vector2.ZERO, size_px).encloses(knife_box.grow(-pad)), "%s: o botao Faca sai da tela" % label)
+		_drop_hunter(tc, hunter)
+		_end_hud_test()
+		_free_belts()
 
 
 func test_touch_bottom_block_matches_the_mockup_at_1532() -> void:

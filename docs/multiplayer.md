@@ -1,7 +1,9 @@
-# Caçada ao Javali — Proposta de multiplayer cooperativo
+# Caçada ao Javali — Multiplayer cooperativo
 
-Estado: **proposta, aguardando aprovação do dono do jogo**. Nada aqui vale como contrato até o merge em
-`docs/arquitetura.md` (§7 deste documento traz os deltas prontos). Base: código da versão 0.3.4.
+Estado: **implementado** (fases F0 a F8; ver §9). O contrato foi mesclado em `docs/arquitetura.md`, que é a fonte
+da verdade; este documento guarda o detalhe do protocolo, do servidor e das decisões. Pendências: sessão manual
+com 3 aparelhos reais (F6) e medição em celular real como anfitrião de 4 (F8). Texto escrito originalmente como
+proposta sobre o código da versão 0.3.4.
 Identificadores em inglês; texto do jogador em PT-BR. Referências `arquivo:linha` são do código atual.
 
 ---
@@ -628,6 +630,18 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 Horda (0.5.0, `docs/horda.md` §9): `H_SNAPSHOT` não muda (`crop` = estoque do celeiro, `flags b0` = javalis no
 celeiro); `killed`/`total` contam a partida inteira (≤ 255, `NetCodec.MAX_BOARS_PER_HUNT`); não há `EV_CROP_EATEN`.
 `PROTOCOL_VERSION` continua 1 (o servidor não lê registros de jogo; `config/version` 0.5.0 separa as salas).
+
+Faca (1.7, F4, jogo 0.9.8; `docs/plano_faca_mochila_folego.md` §2.8): o golpe usa o mesmo `C_SHOT`, com `weapon =
+NetCodec.KNIFE_WEAPON_INDEX` (254) e no máximo 1 acerto. O anfitrião valida com `damage` ≤ dano do último nível da faca
+(`data/upgrades.json`) e `dist` ≤ `stats.reach_m`, mais as folgas de hoje; ruído 0. Nenhum registro ou byte novo; o golpe
+não incrementa `shot_seq` do `HUNTER_STATE`. `config/version` 0.9.8 separa as salas.
+
+Implementação: `hunt_replica.gd:_on_shot_fired` manda 254 quando `weapon_id == Ids.KNIFE`; `hunt_host_sync.gd` monta
+`_knife_def` **uma vez** no `setup` (`{damage: <último nível>, pellets: 1, max_range_m: stats.reach_m, noise_radius_m:
+stats.noise_radius_m}`) e o usa em `_apply_shot`, com todo o resto da validação inalterado. Faca ausente dos dados →
+`_knife_def` vazio → golpe rejeitado, como qualquer arma desconhecida. Como o anfitrião não conhece o nível do cliente,
+ele aceita dano até o do nível 4 (risco R2 do plano: "favor the shooter", coerente com o tiro; o cooperativo é privado e
+sem PvP).
 
 `msg` de `EV_MESSAGE`: 0 vara entrou, 1 solitário, 2 cachaço (`hunt_controller.gd:13–15`); 3 cão não
 farejou, 4 cão recuou, 5 cão pronto (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`, `NET_MSG_RECOVERED`; texto em
@@ -1458,7 +1472,7 @@ Conexão ao servidor tem prazo `net.connect_timeout_s` (8); nenhuma tela bloquei
 
 ---
 
-## 7. Deltas para `docs/arquitetura.md` (colar depois da aprovação)
+## 7. Deltas para `docs/arquitetura.md` (já mesclados; mantidos como registro)
 
 | Seção | Mudança |
 |---|---|

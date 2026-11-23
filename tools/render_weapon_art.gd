@@ -20,7 +20,7 @@ extends SceneTree
 ## right, bore horizontal; every gun fills FILL_WIDTH of the width (same convention for the five).
 ## Rendered SUPERSAMPLE times larger without MSAA and downsampled premultiplied, so edges have no dark fringe.
 
-const WEAPON_IDS: PackedStringArray = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338"]
+const WEAPON_IDS: PackedStringArray = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338", "knife"]
 const MODEL_PATH: String = "res://assets/models/weapons/showcase/%s_hd.gd"
 const DEFAULT_OUT: String = "res://assets/ui/weapons"
 const OUT_SIZE: Vector2i = Vector2i(1024, 512)

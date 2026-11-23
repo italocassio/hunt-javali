@@ -24,6 +24,8 @@ extends Node
 ##   net_mode       room mode (L_LOBBY / L_START byte of the mode), host_select_mode                NET_MODE_SELFTEST
 ##   player_horde2  A1: horde level 2 player rules: counted ammo, crates, confine, downed / revive, bleed-out   RESULT:
 ##   player_stamina F2: stamina: sprint drain, exhaustion, regen, recover threshold, message, HealthStrip bar   RESULT:
+##   player_knife   F4: knife swing (hit at the press, aim assist, cadence, gates, shot ids), Faca button, legend   RESULT:
+##   net_knife      F4: the client's knife swing as C_SHOT with weapon byte 254; host validates damage and reach   RESULT:
 ##   remote_hunter  RemoteHunter over the byte path of the network (wall clock, no --fixed-fps)        remote_sandbox:
 ##   minimap_bake   1.4 (HF5): Mato Grosso baked to the minimap image: size, orientation, determinism   RESULT:
 ##                  (src/world/debug/minimap_selftest.tscn; prints MINIMAP_BAKE_MS, budget <= 150 ms)
@@ -56,10 +58,18 @@ const SANDBOXES: Array[Dictionary] = [
 	{"name": "net_sync", "scene": "res://src/hunt/debug/net_sync_test.tscn", "limit_s": 90.0,
 		"must_pass": ["minimap_same_on_both"]},
 	{"name": "net_horde", "scene": "res://src/hunt/debug/net_horde_test.tscn", "limit_s": 120.0},
-	{"name": "net_horde2", "scene": "res://src/hunt/debug/net_horde2_test.tscn", "limit_s": 120.0},
+	# net_horde2 waits for the end of the hunt in GAME seconds (END_WAIT_S 3.0) while the byte path of the two hunts is
+	# pumped in REAL time: under --fixed-fps 60 the headless run outpaces the wall clock and "both_down_defeat_death" /
+	# "bleed_client_downed" fail most of the time (found in QA4 2026-11-23: 5 of 6 runs fail at 0.9.7 and 6 of 6 at 0.9.4, before
+	# the F1-F4 plan; 0 of 4 fail in real time). So it runs in wall-clock mode, about 85 s.
+	{"name": "net_horde2", "scene": "res://src/hunt/debug/net_horde2_test.tscn", "limit_s": 180.0, "wall_clock": true},
 	{"name": "net_mode", "scene": "res://src/net/debug/net_mode_selftest.tscn", "limit_s": 60.0},
 	{"name": "player_horde2", "scene": "res://src/player/debug/player_horde2_test.tscn", "limit_s": 120.0},
 	{"name": "player_stamina", "scene": "res://src/player/debug/player_stamina_test.tscn", "limit_s": 120.0},
+	{"name": "player_knife", "scene": "res://src/player/debug/player_knife_test.tscn", "limit_s": 120.0},
+	{"name": "net_knife", "scene": "res://src/hunt/debug/net_knife_test.tscn", "limit_s": 90.0,
+		"must_pass": ["knife_claim_is_one_c_shot_with_weapon_254", "host_rejects_damage_above_top_level",
+			"host_rejects_hit_beyond_reach_3m", "host_rejects_swing_without_knife_in_data", "gun_claim_unchanged"]},
 	{"name": "remote_hunter", "scene": "res://src/player/debug/remote_sandbox.tscn", "limit_s": 60.0, "wall_clock": true},
 	{"name": "minimap_bake", "scene": "res://src/world/debug/minimap_selftest.tscn", "limit_s": 60.0},
 ]

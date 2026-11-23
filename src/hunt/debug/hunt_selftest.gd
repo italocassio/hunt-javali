@@ -1,12 +1,15 @@
 extends Node
 ## Package B self-test: runs hunt.tscn headless and checks the rules of the hunt.
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/hunt/debug/hunt_selftest.tscn -- \
-##            --fallback-player [--only=flow,ends,charge,bait,dog,perf]
+##            --fallback-player [--only=flow,ends,charge,bait,dog,perf,knife]
+## The "knife" case needs the real Player (PlayerBase.bot_knife); with --fallback-player it is skipped.
 ## Not part of the game; the qa-tester owns the real tests in tests/.
 
 const WATCHDOG_REAL_S: float = 280.0
 const FAR_CORNER: Vector3 = Vector3(-118.0, 0.0, -118.0)
 const CHARGE_OVERSHOOT_M: float = 4.0   # contract 8.9: a charge stops 4 m past the locked point
+const KNIFE_STAND_M: float = 1.5        # distance of the knife swing to the boar (reach is 2.2 m)
+const KNIFE_SWING_GAP_S: float = 1.0    # more than swing_interval_s (0.6 s)
 
 var _passed: int = 0
 var _failed: int = 0
@@ -25,6 +28,7 @@ var _attack_flags: Array[bool] = []
 var _watchdog_start_ms: int = 0
 var _hits: Array = []
 var _kills: Array[KillInfo] = []
+var _knife_level: int = 1             # HuntRequest.knife_level of the next _open()
 
 
 func _ready() -> void:
@@ -49,7 +53,7 @@ func _ready() -> void:
 	var all: Dictionary = {
 		"flow": _test_flow, "ends": _test_ends, "charge": _test_charge, "bait": _test_bait,
 		"shoot": _test_shoot, "dog": _test_dog, "perf": _test_perf, "closeup": _test_closeup,
-		"obstacle": _test_obstacle, "misc": _test_misc,
+		"obstacle": _test_obstacle, "misc": _test_misc, "knife": _test_knife,
 	}
 	for key: String in all.keys():
 		if only.is_empty() or only.has(key):
@@ -99,6 +103,7 @@ func _open(contract_index: int, dog_id: StringName = &"", rng_seed: int = 12345)
 	var req: HuntRequest = HuntRequest.make_debug(&"mato_grosso", contract_index)
 	req.rng_seed = rng_seed
 	req.dog_id = dog_id
+	req.knife_level = _knife_level
 	req.quality = Ids.Q_MEDIUM
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--quality="):
@@ -764,3 +769,81 @@ func _test_misc() -> void:
 	get_tree().paused = false
 	await _sleep(0.5)
 	_check("pause_freezes_hunt", frozen and _hunt.get_elapsed_s() > e0, "elapsed %.2f -> %.2f" % [e0, _hunt.get_elapsed_s()])
+
+
+## Knife swing with the real Player (level 4 = the top damage): one boar_hit of damage x zone multiplier, counted as a
+## shot (and a hit), and a boar whose health is within the damage dies "one_shot". docs/plano_faca_mochila_folego.md 1.4.
+func _test_knife() -> void:
+	_knife_level = Data.get_upgrade_level_count(Ids.KNIFE)
+	if _knife_level < 1:
+		_check("knife_in_data", false, "no knife in data/upgrades.json")
+		_knife_level = 1
+		return
+	await _open(0)
+	var player: PlayerBase = _hunt.get_player()
+	if player is FallbackPlayer:
+		print("SKIP knife: the fallback player has no knife")
+		_knife_level = 1
+		return
+	var damage: float = float(Data.get_upgrade_level_def(Ids.KNIFE, _knife_level).get("damage", 0.0))
+	var mults: Dictionary = Data.get_boar_rules()["zone_multipliers"]
+	_park_player()
+	var ok: bool = await _wait(func() -> bool: return _boars_in_state(Ids.BS_EAT) >= 4, 200.0)
+	_check("knife_boars_eating", ok, "eating=%d" % _boars_in_state(Ids.BS_EAT))
+	var first: int = _hunt.get_alive_boar_ids()[0]
+	var boar: Boar = _hunt.spawner.get_boar(first)
+	await _wait(func() -> bool: return boar.state == Ids.BS_EAT, 60.0)
+	# Swing 1: 1.5 m from the first boar, looking at its body; the damage is the knife's times the zone hit.
+	var hits0: int = _hits.size()
+	var shots0: int = _hunt._result.shots_fired
+	var hit0: int = _hunt._result.shots_hit
+	var health0: float = boar.health
+	await _knife_swing_at(boar, first)
+	_check("knife_swing_counts_as_shot", _hunt._result.shots_fired == shots0 + 1, "shots_fired %d -> %d" % [shots0, _hunt._result.shots_fired])
+	var mine: Array = []
+	for h: Array in _hits.slice(hits0):
+		if int(h[0]) == first:
+			mine.append(h)
+	_check("knife_exactly_one_boar_hit", mine.size() == 1, str(mine))
+	if mine.size() == 1:
+		var zone: StringName = StringName(mine[0][1])
+		var expected: float = damage * float(mults.get(String(zone), 1.0))
+		_check("knife_damage_is_level_damage_times_zone", is_equal_approx(float(mine[0][2]), expected),
+			"zone=%s damage=%.1f expected=%.1f (level %d: %.1f)" % [zone, float(mine[0][2]), expected, _knife_level, damage])
+		_check("knife_boar_lost_that_health", is_equal_approx(health0 - maxf(boar.health, 0.0), minf(expected, health0)),
+			"health %.1f -> %.1f" % [health0, boar.health])
+		_check("knife_hit_counts_for_precision", _hunt._result.shots_hit == hit0 + 1, "shots_hit %d -> %d" % [hit0, _hunt._result.shots_hit])
+	# Swing 2: a boar whose health is within the knife damage (the weakest one; lowered to the worst zone's damage if need be).
+	var weak: Boar = null
+	for id: int in _hunt.get_alive_boar_ids():
+		var cand: Boar = _hunt.spawner.get_boar(id)
+		if cand != boar and cand.is_alive() and (weak == null or cand.health < weak.health):
+			weak = cand
+	var worst_case: float = damage * float(mults["rear"])
+	if weak.health > worst_case:
+		print("trace knife: lowest health %.1f > %.1f, set to the worst-zone damage" % [weak.health, worst_case])
+		weak.health = worst_case
+	await _wait(func() -> bool: return weak.state == Ids.BS_EAT, 60.0)
+	var kills0: int = _kills.size()
+	await _sleep(KNIFE_SWING_GAP_S)
+	await _knife_swing_at(weak, weak.boar_id)
+	_check("knife_kills_weak_boar", not weak.is_alive() and _kills.size() == kills0 + 1 and _kills[-1].boar_id == weak.boar_id,
+		"alive=%s kills %d -> %d" % [weak.is_alive(), kills0, _kills.size()])
+	if _kills.size() == kills0 + 1:
+		_check("knife_kill_is_one_shot", _kills[-1].one_shot and _kills[-1].killer_slot == _hunt.get_local_slot(),
+			JSON.stringify(_kills[-1].to_dict()))
+	_knife_level = 1
+
+
+## Stands KNIFE_STAND_M from the boar (side on), looks at its body and swings once.
+func _knife_swing_at(boar: Boar, boar_id: int) -> void:
+	var player: PlayerBase = _hunt.get_player()
+	var side: Vector3 = boar.global_transform.basis.x
+	_place_player(boar.position.x + side.x * KNIFE_STAND_M, boar.position.z + side.z * KNIFE_STAND_M)
+	for i: int in 3:
+		await get_tree().physics_frame
+	player.bot_look_at(_hunt.get_boar_zone_position(boar_id, Ids.ZONE_BODY))
+	await get_tree().physics_frame
+	_check("bot_knife_returns_true", player.bot_knife())
+	await get_tree().physics_frame
+	await get_tree().process_frame

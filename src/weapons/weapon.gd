@@ -45,6 +45,14 @@ static func peek_next_shot_id() -> int:
 	return _next_shot_id
 
 
+## Takes the next shot id and advances the counter. Shots and knife swings share it, so no id ever repeats
+## (docs/plano_faca_mochila_folego.md 2.6).
+static func take_shot_id(shooter_slot: int) -> int:
+	var shot_id: int = NetCodec.make_shot_id(shooter_slot, _next_shot_id)
+	_next_shot_id += 1
+	return shot_id
+
+
 func setup(id: StringName, reserve_mult: float = 1.0, p_infinite_reserve: bool = false) -> bool:
 	weapon_id = id
 	infinite_reserve = p_infinite_reserve
@@ -123,9 +131,7 @@ func fire(cam: Camera3D, aim_t: float, move_frac: float, exclude: Array[RID], vf
 	_cooldown_s = get_def_float("fire_interval_s")
 	if get_def_float("cycle_s") > 0.0:
 		_cycle_delay_left = CYCLE_DELAY_S
-	var shooter_slot: int = Net.get_local_slot()
-	var shot_id: int = NetCodec.make_shot_id(shooter_slot, _next_shot_id)
-	_next_shot_id += 1
+	var shot_id: int = take_shot_id(Net.get_local_slot())
 	var xf: Transform3D = cam.global_transform
 	var forward: Vector3 = -xf.basis.z
 	var spread_deg: float = get_spread_deg(aim_t, move_frac)

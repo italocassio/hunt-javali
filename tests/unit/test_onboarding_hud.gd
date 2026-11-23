@@ -316,8 +316,8 @@ func test_marks_follow_the_row_states() -> void:
 
 func test_legend_rows_without_items_or_dog() -> void:
 	var l: ControlsLegend = _legend()
-	eq(l.get_row_ids(), [&"move", &"mouse_buttons", &"reload", &"sprint", &"crouch", &"weapons", &"help"] as Array[StringName],
-		"linhas fixas e a de ajuda")
+	eq(l.get_row_ids(), [&"move", &"mouse_buttons", &"reload", &"sprint", &"crouch", &"weapons", &"knife", &"help"] as Array[StringName],
+		"linhas fixas (a faca logo depois das armas) e a de ajuda")
 	_end()
 
 
@@ -325,11 +325,26 @@ func test_legend_rows_with_items_and_dog_in_order() -> void:
 	var l: ControlsLegend = _legend()
 	l.set_items(ALL_ITEMS)
 	l.set_dog_present(true)
-	eq(l.get_row_ids(), [&"move", &"mouse_buttons", &"reload", &"sprint", &"crouch", &"weapons",
+	eq(l.get_row_ids(), [&"move", &"mouse_buttons", &"reload", &"sprint", &"crouch", &"weapons", &"knife",
 		&"medkit", &"corn_bait", &"scout_drone", &"binoculars", &"dog_command", &"help"] as Array[StringName],
 		"fixas, itens, cao e ajuda")
 	l.set_dog_present(false)
 	ok(not l.get_row_ids().has(&"dog_command"), "sem cao, sem a linha do cao")
+	_end()
+
+
+func test_legend_knife_row_comes_right_after_the_weapons() -> void:
+	## docs/plano_faca_mochila_folego.md 2.7 (F4): ROW_KNIFE ("X", "Faca") sits logo depois de `weapons`, with or without items.
+	eq(ControlsLegend.ROW_KNIFE, &"knife", "ROW_KNIFE")
+	var l: ControlsLegend = _legend()
+	for with_items: bool in [false, true]:
+		l.set_items(ALL_ITEMS if with_items else ([] as Array[StringName]))
+		var ids: Array[StringName] = l.get_row_ids()
+		eq(ids.find(&"knife"), ids.find(&"weapons") + 1, "faca logo depois das armas (itens: %s)" % str(with_items))
+	eq(l.get_key_text(&"knife"), InputSetup.get_key_label(&"knife"), "tecla da linha = tecla da acao")
+	eq(l.get_key_text(&"knife"), "X", "tecla X")
+	eq(l.get_row_text(&"knife"), "Faca", "texto Faca")
+	eq(l.get_node("Rows").get_child_count(), l.get_row_ids().size() * 2, "dois filhos por linha, a faca inclusa")
 	_end()
 
 
@@ -474,10 +489,10 @@ func test_legend_set_items_same_list_keeps_rows() -> void:
 
 func test_help_action_is_h_and_last() -> void:
 	ok(InputMap.has_action(&"help"), "InputMap tem 'help'")
-	# docs/plano_horda_nivel2.md 4.9: `interact` comes right after `help`; the energy drink (F3) closes the list after both
+	# docs/plano_horda_nivel2.md 4.9: `interact` comes right after `help`; the energy drink (F3) and the knife (F4) close the list after both
 	var help_at: int = InputSetup.ACTIONS.find("help")
 	ok(help_at >= 0, "help esta em ACTIONS")
-	eq(String(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 3]), "help", "help e a antepenultima ACTIONS (interact e use_energy_drink vem depois)")
+	eq(String(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 4]), "help", "help e a quarta de tras para frente (interact, use_energy_drink e knife vem depois)")
 	eq(String(InputSetup.ACTIONS[help_at + 1]), "interact", "interact logo depois de help")
 	eq(String(InputSetup.ACTIONS[help_at + 2]), "use_energy_drink", "use_energy_drink logo depois de interact (F3)")
 	var found: bool = false

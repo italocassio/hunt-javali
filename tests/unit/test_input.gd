@@ -87,9 +87,10 @@ func test_interact_action_is_f_after_help_and_shared_only_with_spectate_next() -
 	ok(acts.has("interact"), "interact em InputSetup.ACTIONS")
 	ok(InputMap.has_action("interact"), "interact registrada no InputMap")
 	eq(acts.find("interact"), acts.find("help") + 1, "interact logo depois de help")
-	# the energy drink (F3) closes the list: interact stays right before it
-	eq(acts[acts.size() - 2], "interact", "interact e a penultima acao (use_energy_drink fecha a lista)")
-	eq(acts[acts.size() - 1], "use_energy_drink", "use_energy_drink e a ultima acao")
+	# the energy drink (F3) and the knife (F4) close the list, in that order: interact comes right before them
+	eq(acts[acts.size() - 3], "interact", "interact e a antepenultima acao (use_energy_drink e knife vem depois)")
+	eq(acts[acts.size() - 2], "use_energy_drink", "use_energy_drink e a penultima acao")
+	eq(acts[acts.size() - 1], "knife", "knife e a ultima acao")
 	var keys: Array[int] = []
 	for ev: InputEvent in InputMap.action_get_events("interact"):
 		ok(ev is InputEventKey, "interact so tem teclas (o toque vem do InteractButton)")
@@ -175,6 +176,57 @@ func test_energy_drink_action_is_t_and_the_last_item_slot() -> void:
 	_begin_input_test("off")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
 	ok(not Input.is_action_pressed("use_energy_drink"), "o mouse nao aperta use_energy_drink")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
+	_end_input_test()
+
+
+func test_knife_action_is_x_and_not_an_item() -> void:
+	## docs/plano_faca_mochila_folego.md 2.5 (F4): `knife` is key X, the LAST of ACTIONS, and is not an item.
+	ok(InputSetup.ACTIONS.has("knife"), "knife em InputSetup.ACTIONS")
+	ok(InputMap.has_action("knife"), "knife registrada no InputMap")
+	eq(InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 1], "knife", "knife e a ultima de ACTIONS")
+	eq(InputSetup.get_key_label(&"knife"), "X", "legenda da tecla da faca")
+	# the knife has no slot: it is not an ITEM_ACTIONS entry (no quickbar space, no accessory row)
+	ok(not InputSetup.ITEM_ACTIONS.values().has(&"knife"), "knife fora de ITEM_ACTIONS (valores)")
+	ok(not InputSetup.ITEM_ACTIONS.has(&"knife"), "knife fora de ITEM_ACTIONS (ids)")
+	eq(InputSetup.get_item_action(&"knife"), &"", "get_item_action(knife) vazio")
+	ok(not InputSetup.ITEM_ACTIONS.keys().has(Ids.KNIFE), "Ids.KNIFE nao e um item usavel")
+	var keys: Array[int] = []
+	for ev: InputEvent in InputMap.action_get_events("knife"):
+		ok(ev is InputEventKey, "knife so tem teclas (o toque vem do botao Faca)")
+		if ev is InputEventKey:
+			keys.append(int((ev as InputEventKey).physical_keycode))
+	eq(keys, [int(KEY_X)] as Array[int], "knife: so a tecla X")
+	# X collides with no other action
+	var owners: Array[String] = []
+	for action_name: String in InputSetup.ACTIONS:
+		for ev: InputEvent in InputMap.action_get_events(action_name):
+			if ev is InputEventKey and int((ev as InputEventKey).physical_keycode) == int(KEY_X):
+				owners.append(action_name)
+	eq(owners, ["knife"] as Array[String], "X so pertence a knife")
+	# a held X drives the action and nothing else; release_all_actions lets go of it
+	_begin_input_test("off")
+	var press: InputEventKey = InputEventKey.new()
+	press.physical_keycode = KEY_X
+	press.pressed = true
+	Input.parse_input_event(press)
+	await frames(2)
+	ok(Input.is_action_pressed("knife"), "X aperta knife")
+	for other: String in InputSetup.ACTIONS:
+		if other != "knife":
+			ok(not Input.is_action_pressed(other), "X nao aperta %s" % other)
+	InputSetup.release_all_actions()
+	ok(not Input.is_action_pressed("knife"), "release_all_actions solta knife")
+	var up: InputEventKey = press.duplicate() as InputEventKey
+	up.pressed = false
+	Input.parse_input_event(up)
+	await frames(2)
+	_end_input_test()
+	ok(not Input.is_action_pressed("knife"), "knife solta ao fim")
+	# a real mouse button never swings the knife
+	_begin_input_test("off")
+	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, true))
+	ok(not Input.is_action_pressed("knife"), "o mouse nao aperta knife")
 	InputSetup._input(_mouse_button(MOUSE_BUTTON_LEFT, false))
 	_end_input_test()
 

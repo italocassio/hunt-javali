@@ -255,7 +255,7 @@ func _check_autoload_signatures() -> void:
 			var expected: Array[String] = ["move_forward", "move_back", "move_left", "move_right", "fire", "aim",
 				"zoom_in", "zoom_out", "reload", "sprint", "crouch", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "weapon_5",
 				"weapon_swap", "dog_command", "use_medkit", "use_corn_bait", "use_scout_drone", "use_binoculars",
-					"spectate_next", "pause", "help", "interact", "use_energy_drink"]
+					"spectate_next", "pause", "help", "interact", "use_energy_drink", "knife"]
 			var got: Array[String] = []
 			for a: Variant in iconsts["ACTIONS"]:
 				got.append(str(a))

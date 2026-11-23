@@ -252,13 +252,26 @@ const CLASSES: Array[Dictionary] = [
 				"get_weapon_ids() -> Array[StringName]", "debug_set_health(hp: float) -> void",
 				# docs/plano_faca_mochila_folego.md section 2.6 (F2): stamina
 				"get_stamina_frac() -> float", "get_stamina_recover_frac() -> float", "is_exhausted() -> bool",
-				"restore_stamina(frac: float) -> void", "debug_set_stamina(value: float) -> void"]},
+				"restore_stamina(frac: float) -> void", "debug_set_stamina(value: float) -> void",
+				# docs/plano_faca_mochila_folego.md section 2.6 (F4): knife
+				"get_knife_level() -> int", "get_knife_damage() -> float", "is_knife_swinging() -> bool",
+				"get_knife_cooldown_frac() -> float", "bot_knife() -> bool"]},
 	# docs/multiplayer.md 6.8 (F6): the view of a fallen local hunter. Created by Player only when an ally stands.
 	{"name": "SpectatorCamera", "path": "res://src/player/spectator_camera.gd", "base": "Camera3D", "pkg": "A",
 		"methods": ["begin(local: PlayerBase, world: HuntWorld, view_camera: Camera3D) -> void",
 			"get_target_slot() -> int", "get_candidates() -> Array[PlayerBase]", "switch_target() -> bool",
 			"is_active() -> bool"]},
-	{"name": "Weapon", "path": "res://src/weapons/weapon.gd", "base": "Node", "pkg": "A"},
+	{"name": "Weapon", "path": "res://src/weapons/weapon.gd", "base": "Node", "pkg": "A",
+		# docs/plano_faca_mochila_folego.md section 2.6 (F4): shots and knife swings share one shot_id counter
+		"methods": ["take_shot_id(shooter_slot: int) -> int"]},
+	# docs/plano_faca_mochila_folego.md sections 1.4 and 2.6 (F4): the hunting knife (no loadout slot, not a Weapon)
+	{"name": "Knife", "path": "res://src/weapons/knife.gd", "base": "Node", "pkg": "A",
+		"signals": ["swing_started(duration_s: float)"],
+		"methods": ["setup(level: int, holder: Node3D) -> bool", "swing(cam: Camera3D, exclude: Array[RID], vfx_parent: Node) -> bool",
+			"tick(delta: float) -> void", "abort_swing() -> void", "is_swinging() -> bool", "get_cooldown_frac() -> float",
+			"get_level() -> int", "get_damage() -> float", "get_reach_m() -> float", "get_swing_s() -> float",
+			"get_swing_interval_s() -> float", "get_noise_radius_m() -> float", "is_ready() -> bool",
+			"set_rest_visible(on: bool) -> void", "get_view() -> WeaponViewBase"]},
 	{"name": "WeaponHolder", "path": "res://src/weapons/weapon_holder.gd", "base": "Node3D", "pkg": "A"},
 	{"name": "Hitscan", "path": "res://src/weapons/hitscan.gd", "base": "RefCounted", "pkg": "A",
 		"methods": ["cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array) -> Dictionary"]},
@@ -322,6 +335,7 @@ const CLASSES: Array[Dictionary] = [
 			"get_row_ids() -> Array[StringName]", "get_row_text(row_id: StringName) -> String",
 			"get_row_state(row_id: StringName) -> int", "get_kills_goal() -> int", "get_crop_min_pct() -> float"]},
 	{"name": "ControlsLegend", "path": "res://src/hud/controls_legend.gd", "base": "VBoxContainer", "pkg": "A",
+		"consts": {"ROW_KNIFE": &"knife"},
 		"methods": ["set_items(item_ids: Array[StringName]) -> void", "set_dog_present(present: bool) -> void",
 			"set_open(open: bool) -> void", "toggle() -> void", "is_open() -> bool",
 			"get_row_ids() -> Array[StringName]", "get_key_text(row_id: StringName) -> String",
@@ -345,6 +359,7 @@ const CLASSES: Array[Dictionary] = [
 		"methods": ["bind(player: PlayerBase, world: HuntWorld) -> void"]},
 	{"name": "PauseOverlay", "path": "res://src/hud/pause_overlay.gd", "base": "CanvasLayer", "pkg": "A"},
 	{"name": "TouchControls", "path": "res://src/hud/touch/touch_controls.gd", "base": "CanvasLayer", "pkg": "A",
+		"consts": {"KNIFE_ACTION": &"knife"},
 		"methods": ["bind(player: Player) -> void", "set_dog_present(present: bool) -> void",
 			"set_dog_state(state: StringName) -> void", "flash_slot(slot_id: StringName, on: bool) -> void",
 			"get_button_center(action_name: StringName) -> Vector2", "get_button_radius(action_name: StringName) -> float",
@@ -619,6 +634,8 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"EV_HUNTER_REVIVED": 0x2D, "EV_AMMO_CRATE": 0x2E,
 			"C_STATE": 0x40, "C_SHOT": 0x41, "C_CHARGE_HIT": 0x42, "C_BAIT": 0x43, "C_DOG_CMD": 0x44,
 			"C_REVIVE": 0x45, "C_AMMO_CRATE": 0x46,
+			# docs/plano_faca_mochila_folego.md section 2.1 (F4): the C_SHOT weapon byte of a knife swing
+			"KNIFE_WEAPON_INDEX": 254,
 			"HF_CROUCH": 1, "HF_AIM": 2, "HF_SPRINT": 4, "HF_ALIVE": 8, "HF_RELOAD": 16, "HF_UNARMED": 32, "HF_AWAY": 64,
 			"HF_DOWNED": 128}},
 	{"name": "NetPeerInfo", "path": "res://src/core/net_peer_info.gd", "base": "RefCounted",
@@ -626,7 +643,7 @@ const CORE_CLASSES: Array[Dictionary] = [
 	{"name": "HunterVisualBase", "path": "res://src/core/hunter_visual_base.gd", "base": "Node3D",
 		"methods": ["setup(slot: int, weapon_id: StringName) -> void", "play_death(instant: bool = false) -> void",
 			"slot_color(slot: int) -> Color"]},
-	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count", "mode", "horde_level"],
+	{"name": "HuntRequest", "path": "res://src/core/hunt_request.gd", "base": "RefCounted", "props": ["player_count", "mode", "horde_level", "knife_level"],
 		"methods": ["make_debug(p_map_id: StringName = &\"mato_grosso\", p_contract_index: int = 0, p_mode: StringName = &\"contract\", p_horde_level: int = 1) -> HuntRequest",
 			"is_horde() -> bool"]},
 	{"name": "HuntResult", "path": "res://src/core/hunt_result.gd", "base": "RefCounted",
@@ -646,6 +663,8 @@ const CORE_CLASSES: Array[Dictionary] = [
 			"get_revive_progress() -> float", "bot_set_interact(held: bool) -> void",
 			# Q4 (owner): the ammo crate is taken with a press of interact
 			"get_ammo_crate_target() -> int",
+			# docs/plano_faca_mochila_folego.md section 2.1 (F4): one knife swing (tests); false in the base
+			"bot_knife() -> bool",
 			"setup_remote(slot: int, display_name: String, weapon_id: StringName, world: HuntWorld) -> void",
 			"is_local() -> bool", "is_present() -> bool", "get_display_name() -> String",
 			"net_write_state(out: StreamPeerBuffer) -> void", "net_apply_state(inp: StreamPeerBuffer) -> void"]},
@@ -680,7 +699,12 @@ const CORE_CLASSES: Array[Dictionary] = [
 	{"name": "Ids", "path": "res://src/core/ids.gd", "base": "RefCounted",
 		"consts": {"MODE_CONTRACT": &"contract", "MODE_HORDE": &"horde", "HP_INTERMISSION": &"intermission", "HP_WAVE": &"wave",
 				# docs/plano_faca_mochila_folego.md section 2.1 (F3)
-				"I_ENERGY_DRINK": &"energy_drink"}},
+				"I_ENERGY_DRINK": &"energy_drink",
+				# section 2.1 (F1): upgrades bought with money (KNIFE is also the HitInfo.weapon_id of a knife hit)
+				"BACKPACK": &"backpack", "KNIFE": &"knife"}},
+	# docs/plano_faca_mochila_folego.md section 2.1 (F4): the no-op that the gun views inherit and the knife view overrides
+	{"name": "WeaponViewBase", "path": "res://src/core/weapon_view_base.gd", "base": "Node3D",
+		"methods": ["play_melee(duration_s: float) -> void"]},
 ]
 
 

@@ -45,6 +45,8 @@ const DOG_SLOT: StringName = &"dog_command"
 const INTERACT_ACTION: StringName = &"interact"   # horde level 2: a downed ally ("Levantar") or an ammo crate in reach
 const INTERACT_LABEL_CRATE: String = "Pegar"      # the same button over an ammo crate (no revive target)
 const PAUSE_ACTION: StringName = &"pause"
+## F4: the knife button exists only with a knife in the data and a hunter on his feet (like Reload).
+const KNIFE_ACTION: StringName = &"knife"
 const FIRE_ACTION: StringName = &"fire"
 const FLASH_HZ: float = 2.0
 const DIM_ALPHA: float = 0.35
@@ -97,7 +99,8 @@ const MENU_ID: StringName = &"accessory_menu"
 ## get_bottom_block). Two buttons can press the same action (fire / fire_left).
 ## The dog button only exists while there is a dog (set_dog_present); the interact button ("Levantar") only while a
 ## downed ally is in reach, or ("Pegar") an ammo crate worth taking, and a downed hunter keeps only the pause button
-## and the look drag. The Cure and Accessories buttons are added by _rebuild_buttons from the item belt.
+## and the look drag. The Faca button (F4) exists only with a knife in the data, and shows a busy veil while the knife
+## is on cooldown. The Cure and Accessories buttons are added by _rebuild_buttons from the item belt.
 const BUTTONS: Array[Dictionary] = [
 	{"id": &"fire", "action": &"fire", "d": FIRE_D, "label": "Tiro", "icon": &"btn_fire", "from": "br", "ox": 245.0, "oy": 181.0, "mode": "hold", "above": true},
 	{"id": &"fire_left", "action": &"fire", "d": FIRE_LEFT_D, "label": "Tiro", "icon": &"btn_fire", "from": "bl", "ox": FIRE_LEFT_FROM_LEFT_PX, "oy": FIRE_LEFT_FROM_BOTTOM_PX, "mode": "hold"},
@@ -106,6 +109,7 @@ const BUTTONS: Array[Dictionary] = [
 	{"id": &"crouch", "action": &"crouch", "d": CROUCH_D, "label": "Agachar", "icon": &"btn_crouch", "from": "br", "ox": 253.0, "oy": 53.0, "mode": "hold"},
 	{"id": &"dog_command", "action": &"dog_command", "d": 76.0, "label": "Cão", "icon": &"btn_dog", "from": "br", "ox": 235.0, "oy": 346.0, "mode": "hold", "slot": &"dog_command"},
 	{"id": &"interact", "action": &"interact", "d": 100.0, "label": "Levantar", "icon": &"", "from": "br", "ox": 340.0, "oy": 380.0, "mode": "hold"},
+	{"id": &"knife", "action": &"knife", "d": 68.0, "label": "Faca", "icon": &"btn_knife", "from": "br", "ox": 100.0, "oy": 190.0, "mode": "hold"},
 	{"id": &"pause", "action": &"pause", "d": 64.0, "label": "II", "icon": &"btn_pause", "from": "tl", "ox": 56.0, "oy": 56.0, "mode": "hold"},
 ]
 
@@ -355,6 +359,8 @@ func _rebuild_buttons() -> void:
 			continue
 		if button_id == INTERACT_ACTION and not _revive_on and not _crate_on:
 			continue
+		if button_id == KNIFE_ACTION and not _has_knife():
+			continue
 		if _downed and button_id != PAUSE_ACTION:
 			continue
 		if button_id == INTERACT_ACTION and not _revive_on:
@@ -381,6 +387,11 @@ func _rebuild_buttons() -> void:
 		if not _radii.has(held) and not String(held).begins_with(CARD_ID_PREFIX):
 			_release_button_finger(finger)
 			_finger_to_action.erase(finger)
+
+
+## The hunter carries a knife (data/upgrades.json has the entry): without it there is no Faca button.
+func _has_knife() -> bool:
+	return _player != null and _player.get_knife_level() > 0
 
 
 func _item_def(item_id: StringName, action_name: StringName, diameter: float, from: String) -> Dictionary:
@@ -848,6 +859,11 @@ func _draw_surface() -> void:
 			_draw_text(font, label, c + Vector2(0.0, 7.0), FONT_SIZE if label.length() < 8 else 15)
 		if is_slot:
 			_draw_slot_state(font, c, r, state, flash_on and _flashing.has(slot_id))
+		elif button_id == KNIFE_ACTION:
+			# The knife has no item slot: its cooldown is drawn like the Cure busy sector (F4).
+			var knife_frac: float = _player.get_knife_cooldown_frac() if _player != null else 0.0
+			if knife_frac > 0.0:
+				_draw_slot_state(font, c, r, {"count": -1, "busy": 1.0 - knife_frac}, false)
 	_draw_cards()
 	if _arrow_on:
 		_draw_accessory_tab(flash_on)

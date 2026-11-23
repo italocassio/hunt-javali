@@ -231,6 +231,33 @@ func test_corn_stock_fallback_visual() -> void:
 		near(Vector2(p.x, p.z).length(), 10.0, 0.001, "monte no anel de 10 m")
 
 
+func test_knife_core_additions() -> void:
+	## docs/plano_faca_mochila_folego.md 2.1 (F4): HuntRequest.knife_level, NetCodec.KNIFE_WEAPON_INDEX,
+	## PlayerBase.bot_knife and WeaponViewBase.play_melee.
+	eq(HuntRequest.new().knife_level, 1, "HuntRequest.knife_level padrao 1")
+	eq(HuntRequest.make_debug().knife_level, 1, "make_debug() deixa a faca no nivel 1")
+	eq(HuntRequest.make_debug(&"mato_grosso", 0, Ids.MODE_HORDE, 2).knife_level, 1, "make_debug(horda 2) deixa a faca no nivel 1")
+	eq(NetCodec.KNIFE_WEAPON_INDEX, 254, "NetCodec.KNIFE_WEAPON_INDEX = 254")
+	ok(NetCodec.KNIFE_WEAPON_INDEX <= 255, "o indice cabe no byte de arma do C_SHOT")
+	ok(Data.get_weapon_ids().size() <= NetCodec.KNIFE_WEAPON_INDEX, "o catalogo de armas nunca chega ao indice 254")
+	eq(Ids.KNIFE, &"knife", "Ids.KNIFE (tambem o weapon_id do golpe)")
+	var p: PlayerBase = PlayerBase.new()
+	track(p)
+	eq(p.bot_knife(), false, "PlayerBase.bot_knife() padrao false (sem golpe)")
+	# the weapon view base exposes play_melee as a no-op that guns inherit
+	var script: Script = load("res://src/core/weapon_view_base.gd")
+	var methods: Array[String] = []
+	for m: Dictionary in script.get_script_method_list():
+		methods.append(str(m["name"]))
+	ok(methods.has("play_melee"), "WeaponViewBase tem play_melee")
+	var view: WeaponViewBase = WeaponViewBase.new()
+	track(view)
+	ok(view.has_method("play_melee"), "instancia tem play_melee")
+	view.play_melee(0.45)   # no-op: guns ignore it (must not crash)
+	view.play_melee(0.0)
+	ok(is_instance_valid(view), "play_melee da base e inofensivo")
+
+
 func test_hit_info_defaults() -> void:
 	var h: HitInfo = HitInfo.new()
 	eq(h.target_id, -1, "target_id padrao -1")

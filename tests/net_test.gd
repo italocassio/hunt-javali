@@ -28,6 +28,9 @@ extends Node
 ##                     client sees the level in its lobby (L_LOBBY) and both HuntRequests come out horde_level 2
 ##   horde             net_hunt_e2e --scenario=horde (docs/horda.md 14): 8 waves with two players over the relay -> VICTORY
 ##                     on both, result.mode == horde on both, kills add up to the planned total
+##   knife             tests/net_knife_e2e (F4, docs/plano_faca_mochila_folego.md 2.8): the "victory" scenario with a client that
+##                     kills ONLY with the level 4 knife (C_SHOT weapon byte 254): VICTORY on both, same killers, scoreboard,
+##                     money and crop, the client's magazine untouched, every claim accepted by the host
 ## Without Bun (PATH, $BUN, ~/.bun/bin or -- --bun=<path>) every selected scenario is reported as SKIP, explicitly.
 ## Exit code 1 if any scenario fails, times out or the child dies without its summary line.
 ##
@@ -40,6 +43,7 @@ const TestCase := preload("res://tests/lib/test_case.gd")
 const ChildRunner := preload("res://tests/lib/child_runner.gd")
 
 const E2E_SCENE: String = "res://src/net/debug/net_e2e.tscn"
+const KNIFE_SCENE: String = "res://tests/net_knife_e2e.tscn"
 const HUNT_SCENE: String = "res://src/hunt/debug/net_hunt_e2e.tscn"
 const ONLY_ARG: String = "--only="
 const WATCHDOG_SLACK_S: float = 30.0
@@ -66,6 +70,8 @@ const SCENARIOS: Array[Dictionary] = [
 	{"name": "relay_horde", "group": "relay", "scene": E2E_SCENE, "args": ["--horde"], "limit_s": 60.0},
 	{"name": "relay_horde2", "group": "relay", "scene": E2E_SCENE, "args": ["--level2"], "limit_s": 60.0},
 	{"name": "horde", "group": "hunt", "scene": HUNT_SCENE, "args": ["--scenario=horde"], "limit_s": 400.0},
+	# F4 (2026-11-23): about 70 s measured; the limit is 2x like the others.
+	{"name": "knife", "group": "hunt", "scene": KNIFE_SCENE, "args": ["--scenario=victory"], "limit_s": 150.0},
 ]
 
 var _totals: Dictionary = {}

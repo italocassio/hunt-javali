@@ -1,7 +1,7 @@
 extends Control
-## Preview: the 5 HUD item icons at 40 px and 76 px, on HudPanel and on the touch translucent circle.
+## Preview: the HUD item icons and the knife icons at 40 px and 76 px, on HudPanel and on the touch translucent circle.
 
-const ICONS: Array[String] = ["medkit", "corn_bait", "scout_drone", "binoculars", "btn_dog"]
+const ICONS: Array[String] = ["medkit", "corn_bait", "scout_drone", "binoculars", "btn_dog", "knife", "btn_knife"]
 const SIZES: Array[int] = [40, 76]
 
 

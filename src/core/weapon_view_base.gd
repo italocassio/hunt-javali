@@ -24,6 +24,10 @@ func play_draw(_duration_s: float) -> void:
 	pass
 
 
+func play_melee(_duration_s: float) -> void:   ## knife swing (knife view only); guns ignore it
+	pass
+
+
 func get_muzzle() -> Node3D:
 	return get_node_or_null(^"Muzzle") as Node3D
 

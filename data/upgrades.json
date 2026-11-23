@@ -14,6 +14,20 @@
 				{"level": 3, "price": 5000, "bonus_item_slots": 2},
 				{"level": 4, "price": 10000, "bonus_item_slots": 3}
 			]
+		},
+		{
+			"id": "knife",
+			"name": "Faca de caça",
+			"short_name": "Faca",
+			"description": "Sempre na cintura, não ocupa espaço da mochila. Golpe de perto: cada nível corta mais fundo.",
+			"currency": "money",
+			"stats": {"reach_m": 2.2, "assist_radius_m": 0.35, "swing_s": 0.45, "swing_interval_s": 0.6, "noise_radius_m": 0.0},
+			"levels": [
+				{"level": 1, "price": 0, "damage": 30.0},
+				{"level": 2, "price": 1500, "damage": 45.0},
+				{"level": 3, "price": 4000, "damage": 65.0},
+				{"level": 4, "price": 8000, "damage": 90.0}
+			]
 		}
 	]
 }

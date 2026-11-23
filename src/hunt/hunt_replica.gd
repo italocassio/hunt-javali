@@ -545,7 +545,7 @@ func _on_shot_fired(weapon_id: StringName, origin: Vector3, _direction: Vector3,
 	var shot_id: int = _pending_shot_id if not _pending_hits.is_empty() \
 		else NetCodec.make_shot_id(_world.get_local_slot(), 0)
 	var n: int = mini(_pending_hits.size(), 255)
-	var weapon_index: int = _weapon_ids.find(weapon_id)
+	var weapon_index: int = NetCodec.KNIFE_WEAPON_INDEX if weapon_id == Ids.KNIFE else _weapon_ids.find(weapon_id)
 	var at: int = _begin_claim(NetCodec.C_SHOT)
 	_claims.put_u32(shot_id)
 	_claims.put_u8(weapon_index if weapon_index >= 0 and weapon_index < NO_INDEX else NO_INDEX)

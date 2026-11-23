@@ -8,6 +8,8 @@ const TABS: Array[Dictionary] = [
 	{"key": "equipment", "title": "Equipamentos"},
 	{"key": "dogs", "title": "Cães"},
 ]
+## Permanent upgrade shown as the first card of each tab.
+const UPGRADE_FOR_TAB: Dictionary = {"weapons": &"knife", "equipment": &"backpack"}
 const MESSAGES: Dictionary = {
 	&"insufficient_funds": "Saldo insuficiente.",
 	&"already_owned": "Você já possui este item.",
@@ -51,10 +53,11 @@ func _ready() -> void:
 		var scroll: Control = scroller[0]
 		body.add_child(scroll)
 		_tab_pages.append(scroll)
-		if str(tab["key"]) == "equipment" and Data.get_upgrade_ids().has(Ids.BACKPACK):
+		var tab_upgrade: StringName = UPGRADE_FOR_TAB.get(str(tab["key"]), &"")
+		if tab_upgrade != &"" and Data.get_upgrade_ids().has(tab_upgrade):
 			var up_card: UpgradeCard = UpgradeCard.new()
 			scroller[1].add_child(up_card)
-			up_card.setup(Ids.BACKPACK, _on_buy_upgrade)
+			up_card.setup(tab_upgrade, _on_buy_upgrade)
 			_upgrade_cards.append(up_card)
 		for id: StringName in _ids_for(str(tab["key"])):
 			var card: ItemCard = ItemCard.new()

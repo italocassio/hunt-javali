@@ -13,6 +13,7 @@ var rng_seed: int = 0                                 # 0 = randomize
 var player_count: int = 1
 var mode: StringName = &"contract"                    # Ids.MODE_CONTRACT | Ids.MODE_HORDE (docs/horda.md)
 var horde_level: int = 1                              ## Horde level (1-based); only read in horde mode
+var knife_level: int = 1                              ## Knife upgrade level (1-based), from Profile.build_hunt_request
 
 
 static func make_debug(p_map_id: StringName = &"mato_grosso", p_contract_index: int = 0, p_mode: StringName = &"contract", p_horde_level: int = 1) -> HuntRequest:

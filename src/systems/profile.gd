@@ -284,6 +284,7 @@ func build_hunt_request(map_id: StringName, contract_index: int) -> HuntRequest:
 		item_ids.append(id)
 	r.item_ids = item_ids
 	r.item_counts = counts
+	r.knife_level = maxi(1, get_upgrade_level(Ids.KNIFE))
 	return r
 
 

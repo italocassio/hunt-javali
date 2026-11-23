@@ -296,7 +296,7 @@ func test_pix_config_has_placeholders_flagged() -> void:
 
 func test_upgrades_load_and_lookups() -> void:
 	eq(Data.get_load_errors().size(), 0, "sem erros de carga: %s" % str(Data.get_load_errors()))
-	eq(Data.get_upgrade_ids(), [&"backpack"] as Array[StringName], "so a mochila na F1")
+	eq(Data.get_upgrade_ids(), [&"backpack", &"knife"] as Array[StringName], "mochila (F1) e faca (F4), nessa ordem")
 	eq(Data.get_upgrade_level_count(&"backpack"), 4, "mochila tem 4 niveis")
 	eq(Data.get_upgrade_level_def(&"backpack", 1).get("price"), 0, "nivel 1 custa 0")
 	eq(Data.get_upgrade_level_def(&"backpack", 1).get("bonus_item_slots"), 0, "nivel 1 sem bonus")
@@ -381,6 +381,108 @@ func test_upgrades_validation_medkit_id_yields_two_errors() -> void:
 	# The id is both outside the allowed list and a reused item id (hint from S1): two distinct rules fire.
 	var n: int = _upgrade_errors_after(func(e: Dictionary) -> void: e["id"] = "medkit")
 	eq(n, 2, "id 'medkit' gera dois erros (fora da lista + repete item)")
+
+
+# --- Knife (docs/plano_faca_mochila_folego.md 1.4 and 2.2; F4) ---
+
+func test_knife_seed_values() -> void:
+	eq(Data.get_load_errors().size(), 0, "sem erros de carga: %s" % str(Data.get_load_errors()))
+	eq(Data.get_upgrade_level_count(&"knife"), 4, "faca tem 4 niveis")
+	var damage: Array[float] = [30.0, 45.0, 65.0, 90.0]
+	var price: Array[int] = [0, 1500, 4000, 8000]
+	for lv: int in range(1, 5):
+		var level_def: Dictionary = Data.get_upgrade_level_def(&"knife", lv)
+		near(float(level_def.get("damage", -1.0)), damage[lv - 1], 0.0001, "dano do nivel %d" % lv)
+		eq(int(level_def.get("price", -1)), price[lv - 1], "preco do nivel %d" % lv)
+		eq(int(level_def.get("level", -1)), lv, "numero do nivel %d" % lv)
+	near(float(Data.get_upgrade_level_def(&"knife", 3).get("damage", 0.0)), 65.0, 0.0001, "nivel 3 = dano 65")
+	eq(Data.get_upgrade_level_def(&"knife", 5), {}, "nivel 5 nao existe")
+	eq(Data.get_upgrade_level_def(&"knife", 0), {}, "nivel 0 nao existe")
+	var def: Dictionary = Data.get_upgrade(&"knife")
+	var stats: Dictionary = def.get("stats", {})
+	near(float(stats.get("reach_m", 0.0)), 2.2, 0.0001, "alcance 2,2 m")
+	near(float(stats.get("assist_radius_m", -1.0)), 0.35, 0.0001, "ajuda de mira 0,35 m")
+	near(float(stats.get("swing_s", 0.0)), 0.45, 0.0001, "golpe 0,45 s")
+	near(float(stats.get("swing_interval_s", 0.0)), 0.6, 0.0001, "intervalo 0,6 s")
+	near(float(stats.get("noise_radius_m", -1.0)), 0.0, 0.0001, "silenciosa")
+	eq(str(def.get("currency", "")), "money", "moeda money")
+	eq(str(def.get("short_name", "")), "Faca", "short_name")
+	ok(str(def.get("short_name", "")).length() <= Data.SHORT_NAME_MAX_CHARS, "short_name curto")
+
+
+func test_knife_is_not_an_item_nor_a_weapon() -> void:
+	eq(Data.get_item_category(&"knife"), &"", "faca nao e item (categoria vazia)")
+	eq(Data.get_item_def(&"knife"), {}, "get_item_def nao ve a faca")
+	ok(not Data.get_weapon_ids().has(&"knife"), "faca fora de get_weapon_ids")
+	ok(not Data.get_equipment_ids().has(&"knife"), "faca fora dos equipamentos")
+	ok(not Data.get_dog_ids().has(&"knife"), "faca fora dos caes")
+	ok(Data.get_weapon_ids().size() < NetCodec.KNIFE_WEAPON_INDEX, "indice 254 nunca colide com uma arma do catalogo")
+
+
+## Runs `mutate` on the live (deep-copied, then restored) knife entry and returns the errors _validate_upgrades adds.
+func _knife_errors_after(mutate: Callable) -> PackedStringArray:
+	var saved: Variant = (Data._raw["upgrades"] as Dictionary).duplicate(true)
+	var base: int = Data._errors.size()
+	var entry: Dictionary = {}
+	for u: Variant in Data._raw["upgrades"]["upgrades"]:
+		if u is Dictionary and str((u as Dictionary).get("id", "")) == "knife":
+			entry = u
+	mutate.call(entry)
+	Data._validate_upgrades()
+	var added: PackedStringArray = PackedStringArray()
+	for i: int in range(base, Data._errors.size()):
+		added.append(Data._errors[i])
+	Data._errors.resize(base)
+	Data._raw["upgrades"] = saved
+	return added
+
+
+func _knife_stat(key: String, value: Variant) -> Callable:
+	return func(e: Dictionary) -> void: e["stats"][key] = value
+
+
+func test_knife_validation_rejects_each_broken_rule() -> void:
+	# Pokes the live registry (restored after every case) to prove _validate_upgrades reports each knife rule (2.2).
+	eq(_knife_errors_after(func(_e: Dictionary) -> void: pass).size(), 0, "controle: dados intactos nao geram erro")
+	var cases: Array[Dictionary] = [
+		{"label": "reach_m = 0", "mutate": _knife_stat("reach_m", 0.0), "text": "reach_m"},
+		{"label": "reach_m negativo", "mutate": _knife_stat("reach_m", -1.0), "text": "reach_m"},
+		{"label": "assist_radius_m = reach_m", "mutate": _knife_stat("assist_radius_m", 2.2), "text": "assist_radius_m"},
+		{"label": "assist_radius_m > reach_m", "mutate": _knife_stat("assist_radius_m", 3.0), "text": "assist_radius_m"},
+		{"label": "assist_radius_m negativo", "mutate": _knife_stat("assist_radius_m", -0.1), "text": "assist_radius_m"},
+		{"label": "swing_s = 0", "mutate": _knife_stat("swing_s", 0.0), "text": "swing_s"},
+		{"label": "swing_s negativo", "mutate": _knife_stat("swing_s", -0.5), "text": "swing_s"},
+		{"label": "swing_interval_s < swing_s", "mutate": _knife_stat("swing_interval_s", 0.4), "text": "swing_interval_s"},
+		{"label": "noise_radius_m negativo", "mutate": _knife_stat("noise_radius_m", -1.0), "text": "noise_radius_m"},
+		{"label": "stat ausente (reach_m)", "mutate": func(e: Dictionary) -> void: e["stats"].erase("reach_m"), "text": "reach_m"},
+		{"label": "stat nao numerico (swing_s)", "mutate": _knife_stat("swing_s", "rapido"), "text": "swing_s"},
+		{"label": "stats ausente", "mutate": func(e: Dictionary) -> void: e.erase("stats"), "text": "stats"},
+		{"label": "dano igual ao do nivel anterior", "mutate": func(e: Dictionary) -> void: e["levels"][2]["damage"] = 45.0, "text": "damage must increase"},
+		{"label": "dano decrescente", "mutate": func(e: Dictionary) -> void: e["levels"][3]["damage"] = 10.0, "text": "damage must increase"},
+		{"label": "dano do nivel 1 = 0", "mutate": func(e: Dictionary) -> void: e["levels"][0]["damage"] = 0.0, "text": "damage must be > 0"},
+		{"label": "dano negativo", "mutate": func(e: Dictionary) -> void: e["levels"][1]["damage"] = -5.0, "text": "damage must be > 0"},
+		{"label": "nivel sem dano", "mutate": func(e: Dictionary) -> void: e["levels"][1].erase("damage"), "text": "damage must be > 0"},
+		{"label": "preco do nivel 1 diferente de 0", "mutate": func(e: Dictionary) -> void: e["levels"][0]["price"] = 100, "text": "level 1 price must be 0"},
+		{"label": "preco do nivel 2 igual a 0", "mutate": func(e: Dictionary) -> void: e["levels"][1]["price"] = 0, "text": "price must be an integer > 0"},
+		{"label": "nivel fora de ordem (2 -> 3)", "mutate": func(e: Dictionary) -> void: e["levels"][1]["level"] = 3, "text": "'level' must be 2"},
+		{"label": "id 'pa' nao permitido", "mutate": func(e: Dictionary) -> void: e["id"] = "pa", "text": "not allowed"},
+		{"label": "moeda 'gold'", "mutate": func(e: Dictionary) -> void: e["currency"] = "gold", "text": "currency"},
+		{"label": "short_name com mais de 9 caracteres", "mutate": func(e: Dictionary) -> void: e["short_name"] = "Faca de caca", "text": "short_name"},
+		{"label": "sem niveis", "mutate": func(e: Dictionary) -> void: e["levels"] = [], "text": "at least one level"},
+	]
+	for c: Dictionary in cases:
+		var errs: PackedStringArray = _knife_errors_after(c["mutate"])
+		ok(errs.size() > 0, "%s gera erro" % c["label"])
+		if errs.size() > 0:
+			ok(errs[0].begins_with("Data: "), "%s: mensagem comeca com 'Data: ' (%s)" % [c["label"], errs[0]])
+			ok(errs[0].contains(str(c["text"])), "%s: a mensagem cita '%s' (%s)" % [c["label"], c["text"], errs[0]])
+	# the limits that stay valid
+	eq(_knife_errors_after(_knife_stat("assist_radius_m", 0.0)).size(), 0, "assist_radius_m = 0 e valido (sem ajuda de mira)")
+	eq(_knife_errors_after(_knife_stat("noise_radius_m", 0.0)).size(), 0, "noise_radius_m = 0 e valido")
+	eq(_knife_errors_after(_knife_stat("swing_interval_s", 0.45)).size(), 0, "swing_interval_s = swing_s e valido")
+	eq(Data.get_load_errors().size(), 0, "registro restaurado sem erros")
+	eq(Data.get_upgrade_level_count(&"knife"), 4, "dados restaurados")
+	near(float(Data.get_upgrade_level_def(&"knife", 4)["damage"]), 90.0, 0.0001, "dados restaurados (dano do nivel 4)")
 
 
 # --- Stamina (docs/plano_faca_mochila_folego.md 1.2 and 2.2; F2) ---

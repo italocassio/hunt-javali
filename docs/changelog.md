@@ -3,6 +3,20 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.8 — 23/11/2026
+
+**Faca de caça.** Todo caçador já entra na mata com uma, sempre na cintura.
+- Um golpe rápido de perto, sem trocar de arma: a espingarda some, a faca corta e a arma volta à mão. No teclado
+  é a tecla **X**; no celular, o botão **Faca**, à direita da tela.
+- Não ocupa espaço da mochila nem um dos seus slots de arma. É silenciosa: o javali só reage se for atingido.
+- Alcance de 2,2 m, pouco menos de dois golpes por segundo. Acerto na cabeça ou nos vitais corta muito mais fundo,
+  como no tiro.
+- Na Loja, no topo da aba Armas, dá para afiar a faca em 4 níveis: dano 30, 45, 65 e 90 por golpe, por
+  R$ 1.500, R$ 4.000 e R$ 8.000. No nível 1 ela já resolve quase todo leitão; no nível 4, fêmeas e machos
+  de até 128 kg. Cachaço continua pedindo três golpes ou mais.
+- Serve bem no javali que o cão acuou ou agarrou, e quando a arma está recarregando — o golpe cancela a recarga.
+- Vale no contrato, na horda e no cooperativo.
+
 ## 0.9.7 — 23/11/2026
 
 **Energético.** Um consumível novo na Loja, para quem ficou sem fôlego.

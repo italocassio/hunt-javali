@@ -12,6 +12,7 @@ const ROW_RELOAD: StringName = &"reload"
 const ROW_SPRINT: StringName = &"sprint"
 const ROW_CROUCH: StringName = &"crouch"
 const ROW_WEAPONS: StringName = &"weapons"
+const ROW_KNIFE: StringName = &"knife"
 const ROW_DOG: StringName = &"dog_command"
 const ROW_HELP: StringName = &"help"
 
@@ -23,6 +24,7 @@ const ROWS_BEFORE_ITEMS: Array[Dictionary] = [
 	{"id": ROW_SPRINT, "actions": [&"sprint"], "joiner": "", "text": "Correr"},
 	{"id": ROW_CROUCH, "actions": [&"crouch"], "joiner": "", "text": "Agachar"},
 	{"id": ROW_WEAPONS, "actions": [&"weapon_1", &"weapon_5"], "joiner": "–", "text": "Armas"},
+	{"id": ROW_KNIFE, "actions": [&"knife"], "joiner": "", "text": "Faca"},
 ]
 const TEXT_DOG: String = "Mandar o cão"
 const TEXT_HELP_OPEN: String = "Recolher"

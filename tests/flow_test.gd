@@ -11,6 +11,10 @@ extends Node
 ## The two cases after the backpack route are the energy drink (docs/plano_faca_mochila_folego.md, F3): menu -> shop (buy
 ## 2, once without enough money) -> preparation (swap one item for the drink) -> hunt carrying 2 drinks.
 ##
+## The two cases after the energy drink are the knife (docs/plano_faca_mochila_folego.md, F4): menu -> shop (Buy_knife is
+## the first card of the weapons tab; buy level 2 with money added through Profile.add_money) -> preparation -> hunt with
+## request.knife_level == 2.
+##
 ## The last six cases are the horde route (docs/horda.md section 14): level 1, then level 2 (docs/plano_horda_nivel2.md).
 ##
 ## Run: tools/godot.sh --headless --fixed-fps 60 --path . res://tests/flow_test.tscn [-- --strict]
@@ -153,6 +157,8 @@ func _run() -> void:
 	await _case("backpack_preparation_four_items_and_hunt", _step_backpack_preparation)
 	await _case("energy_drink_shop_purchase", _step_energy_shop)
 	await _case("energy_drink_preparation_and_hunt", _step_energy_preparation)
+	await _case("knife_shop_purchase", _step_knife_shop)
+	await _case("knife_preparation_and_hunt", _step_knife_hunt)
 	await _case("horde_menu_to_hunt", _step_horde_hunt)
 	await _case("horde_result_and_shop", _step_horde_result)
 	await _case("horde_shop_back_to_menu", _step_horde_back_to_menu)
@@ -684,6 +690,125 @@ func _step_energy_preparation() -> void:
 	if await _wait_scene(ScenePaths.RESULT, 30.0):
 		_t.call("eq", _ended.size(), 1, "hunt_ended 1x")
 		_t.call("eq", Profile.get_item_count(Ids.I_ENERGY_DRINK), 2, "nenhum energetico usado: o estoque segue em 2")
+		if _press("MenuButton"):
+			await _wait_scene(ScenePaths.MAIN_MENU)
+
+
+# --------------------------------------------------------------------------------------------
+# Knife route (docs/plano_faca_mochila_folego.md, F4): menu -> shop (Buy_knife, first card of the weapons tab) -> buy level 2
+# -> preparation -> hunt carrying a level 2 knife. The knife is not an item: it takes no loadout slot.
+# --------------------------------------------------------------------------------------------
+
+## Menu -> shop: Buy_knife is the first weapons card; one real short keeps it off; R$ 1.500 buys level 2 (money set with
+## Profile.add_money, never a poke at the level).
+func _step_knife_shop() -> void:
+	if _scene_path() != ScenePaths.MAIN_MENU:
+		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
+		return
+	_t.call("eq", Profile.get_upgrade_level(Ids.KNIFE), 1, "pre-condicao: faca nivel 1")
+	var slots_before: int = Profile.get_item_slots()
+	var items_before: Array[StringName] = Profile.get_loadout_items()
+	if not (_press("ShopButton") and await _wait_scene(ScenePaths.SHOP)):
+		return
+	var buy: Button = _button("Buy_knife")
+	if buy == null:
+		return
+	var card: Node = buy
+	while card != null and not (card is UpgradeCard):
+		card = card.get_parent()
+	_t.call("ok", card != null, "Buy_knife pertence a um UpgradeCard")
+	if card == null:
+		return
+	var upgrade_card: UpgradeCard = card as UpgradeCard
+	_t.call("eq", upgrade_card.get_index(), 0, "o cartao da faca e o 1o da aba Armas")
+	var page: Node = upgrade_card.get_parent()
+	var gun_btn: Button = _button("Buy_shotgun_12")
+	if gun_btn != null:
+		_t.call("ok", page.is_ancestor_of(gun_btn), "a faca esta na mesma aba das armas")
+		var sibling: Node = gun_btn
+		while sibling != null and sibling.get_parent() != page:
+			sibling = sibling.get_parent()
+		_t.call("ok", sibling != null and sibling.get_index() > 0, "as armas vem depois da faca")
+	var backpack_btn: Button = _button("Buy_backpack")
+	if backpack_btn != null:
+		_t.call("ok", not page.is_ancestor_of(backpack_btn), "a mochila nao esta na aba da faca")
+	_t.call("eq", upgrade_card.get_level_text(), "Nível 1 de 4 · Dano 30\nAlcance 2,2 m  |  1,67 golpes/s", "texto do nivel 1 (dano, alcance e cadencia)")
+	_t.call("eq", upgrade_card.get_next_text(), "Próximo nível: dano 45", "texto do proximo nivel")
+	_t.call("ok", _find_label("Arma branca, sempre com você") != null, "etiqueta do cartao da faca")
+	# 1) one real short: the button is off and pressing it does nothing
+	var price: int = int(Data.get_upgrade_level_def(Ids.KNIFE, 2)["price"])
+	_t.call("eq", price, 1500, "faca nivel 2 custa R$ 1.500")
+	Profile._wallet.money = price - 1
+	Profile.add_money(0)
+	await get_tree().process_frame
+	_t.call("eq", buy.disabled, true, "Buy_knife desabilitado sem saldo")
+	buy.pressed.emit()
+	_t.call("eq", Profile.get_upgrade_level(Ids.KNIFE), 1, "clique sem saldo nao sobe o nivel")
+	_t.call("eq", Profile.get_money(), price - 1, "clique sem saldo nao cobra")
+	# 2) the missing real arrives through Profile.add_money: the button enables and buys
+	Profile.add_money(1)
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_money(), price, "saldo R$ 1.500")
+	_t.call("eq", buy.disabled, false, "Buy_knife habilitado com saldo")
+	buy.pressed.emit()
+	await get_tree().process_frame
+	_t.call("eq", Profile.get_upgrade_level(Ids.KNIFE), 2, "faca nivel 2")
+	_t.call("eq", Profile.get_money(), 0, "cobrou R$ 1.500")
+	var message: Label = _node("MessageLabel") as Label
+	if message != null:
+		_t.call("eq", message.text, "Comprado: Faca de caça nível 2.", "mensagem da loja")
+	_t.call("eq", upgrade_card.get_level_text(), "Nível 2 de 4 · Dano 45\nAlcance 2,2 m  |  1,67 golpes/s", "texto do nivel 2")
+	_t.call("eq", upgrade_card.get_next_text(), "Próximo nível: dano 65", "texto do proximo nivel (2)")
+	# the knife takes no backpack space and no loadout slot
+	_t.call("eq", Profile.get_item_slots(), slots_before, "a faca nao abre espaco de mochila")
+	_t.call("eq", Profile.get_loadout_items(), items_before, "a compra nao mexe nos equipamentos escolhidos")
+	_t.call("ok", not Profile.get_loadout_weapons().has(Ids.KNIFE), "a faca nao entra nas armas do loadout")
+	if _press("NextHuntButton"):
+		await _wait_scene(ScenePaths.PREPARATION)
+
+
+## Preparation -> start: the request carries knife_level 2 -> hunt: the Player has a level 2 knife (45 damage) -> result.
+func _step_knife_hunt() -> void:
+	if _scene_path() != ScenePaths.PREPARATION:
+		_t.call("fail", "pre-condicao: nao esta na preparacao (%s)" % _scene_path())
+		return
+	_t.call("ok", _node("Item_knife") == null, "a Preparacao nao oferece a faca como equipamento")
+	var c0: Button = _button("Contract_0")
+	if c0 != null:
+		c0.pressed.emit()
+	_started_signals = 0
+	_ended.clear()
+	if not _press("StartHuntButton"):
+		return
+	var request: HuntRequest = Router.get_pending_request()
+	_t.call("ok", request != null, "Router tem o pedido pendente")
+	if request != null:
+		_t.call("eq", request.knife_level, 2, "request.knife_level == 2")
+		_t.call("ok", not request.weapon_ids.has(Ids.KNIFE), "a faca nao esta em request.weapon_ids")
+		_t.call("ok", not request.item_ids.has(Ids.KNIFE), "a faca nao esta em request.item_ids")
+	if not await _wait_scene(ScenePaths.HUNT, 30.0):
+		return
+	var hunt: HuntController = _scene() as HuntController
+	if hunt == null:
+		_t.call("fail", "cena HUNT nao e HuntController")
+		return
+	var t0: int = Time.get_ticks_msec()
+	while not hunt.is_world_ready() and Time.get_ticks_msec() - t0 < 60000:
+		await get_tree().process_frame
+	_t.call("ok", hunt.is_world_ready(), "mundo pronto")
+	for i: int in 5:
+		await get_tree().process_frame
+	var player: Player = hunt.get_player() as Player
+	_t.call("ok", player != null, "jogador existe")
+	if player != null:
+		_t.call("eq", player.get_knife_level(), 2, "o jogador chega com a faca nivel 2")
+		_t.call("near", player.get_knife_damage(), 45.0, 0.0001, "dano do golpe = 45")
+		_t.call("eq", player.get_weapon_count(), request.weapon_ids.size() if request != null else -1, "a faca nao e uma arma do cinto")
+	_ended.clear()
+	hunt.debug_force_end(HuntResult.Outcome.ABANDONED)
+	if await _wait_scene(ScenePaths.RESULT, 30.0):
+		_t.call("eq", _ended.size(), 1, "hunt_ended 1x")
+		_t.call("eq", Profile.get_upgrade_level(Ids.KNIFE), 2, "a faca continua no nivel 2 depois da caçada")
 		if _press("MenuButton"):
 			await _wait_scene(ScenePaths.MAIN_MENU)
 

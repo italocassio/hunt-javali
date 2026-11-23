@@ -11,6 +11,8 @@ extends HuntWorld
 ## Weapon panel and health bar (docs §8.4): --hp=<1-100> (health in percent), --slot=<1-5> (weapon in hand),
 ## --mag=<n> (rounds in the magazine of the weapon in hand, to see the low-ammo colour)
 ## Stamina (F2): --stamina=<0..100> (stamina of the hunter; 0 = exhausted, below the recover threshold = recovering)
+## Knife (F4): --knife=<1..4> (knife level of the request, clamped by the Knife to the levels in the data),
+## --knife_swing (keeps swinging the knife every swing_interval_s, so a windowed screenshot catches a swing)
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 ## Horde level (docs/plano_horda_nivel2.md): --horde_level=N (or horde_level = N before add_child; default 1) picks the
@@ -36,6 +38,7 @@ const TEST_MAP_GRID_STEP_PX: int = 10
 const TEST_MAP_CROP: Color = Color("#5E9A3A")
 const TEST_MAP_CORNER: Color = Color("#D9452B")
 const TEST_MAP_CORNER_PX: int = 6
+const KNIFE_DEMO_DELAY_S: float = 0.5               # --knife_swing: lets the hunt start before the first swing
 const TEST_BAIT_POSITION: Vector3 = Vector3(-30.0, 0.0, -40.0)
 const TEST_BAIT_DURATION_S: float = 600.0
 const TEST_CONTEXT_TEXT: String = "Ceva colocada: os javalis vão para longe da lavoura"   # --crop_alert: context line shown with the alert
@@ -180,6 +183,8 @@ func _request() -> HuntRequest:
 		r.weapon_ids.clear()
 		for id: String in String(_args["weapons"]).split(",", false):
 			r.weapon_ids.append(StringName(id))
+	if _args.has("knife"):
+		r.knife_level = int(_args["knife"])
 	if _args.has("items"):
 		r.item_ids.clear()
 		r.item_counts = {}
@@ -295,6 +300,8 @@ func _spawn_player() -> void:
 		GameEvents.item_used.emit(Ids.I_SCOUT_DRONE, Vector3.ZERO)
 	if _args.has("demo"):
 		_run_demo.call_deferred()
+	if _args.has("knife_swing"):
+		_run_knife_demo.call_deferred()
 	if _args.has("stick"):
 		_run_stick_demo.call_deferred()
 	if _args.has("help_key"):
@@ -325,6 +332,15 @@ func _run_help_key() -> void:
 	press.physical_keycode = KEY_H
 	press.pressed = true
 	Input.parse_input_event(press)
+
+
+## Screenshot helper (--knife_swing): swings the knife over and over, so a windowed capture lands inside a swing.
+func _run_knife_demo() -> void:
+	await get_tree().create_timer(KNIFE_DEMO_DELAY_S).timeout
+	while is_inside_tree() and player != null and player.is_alive():
+		if player.get_knife_cooldown_frac() <= 0.0:
+			player.bot_knife()
+		await get_tree().process_frame
 
 
 ## Screenshot helper (--stick or --stick=lock): holds the fixed stick pushed, optionally past the lock ring.

@@ -890,3 +890,161 @@ func test_inventory_upgrades_roundtrip_and_defaults() -> void:
 	eq(junk.get_upgrade_level(Ids.BACKPACK), 1, "valor de tipo errado nao entra")
 	var not_dict: Inventory = Inventory.from_dict({"upgrades": [1, 2]})
 	eq(not_dict.get_upgrade_level(Ids.BACKPACK), 1, "bloco de tipo errado = nivel 1")
+
+
+# --- Knife upgrade (docs/plano_faca_mochila_folego.md 1.4, 2.3 and 2.4; F4) ---
+
+func _knife_price(level: int) -> int:
+	return int(Data.get_upgrade_level_def(Ids.KNIFE, level)["price"])
+
+
+func test_knife_new_profile_is_level_1() -> void:
+	fresh_profile()
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 1, "faca nivel 1")
+	eq(Profile.get_upgrade_max_level(Ids.KNIFE), 4, "nivel maximo 4")
+	eq(Profile.get_item_slots(), 3, "a faca nao mexe nos espacos da mochila")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "mochila intacta")
+
+
+func test_buy_knife_level_2() -> void:
+	fresh_profile()
+	_set_money(_knife_price(2))
+	eq(_knife_price(2), 1500, "preco do nivel 2 = R$ 1.500")
+	eq(Profile.can_buy_upgrade(Ids.KNIFE), &"ok", "can_buy_upgrade com saldo exato")
+	eq(Profile.get_money(), 1500, "can_buy_upgrade nao cobra")
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var inv: Dictionary = record_signal(GameEvents.inventory_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"ok", "compra ok")
+	eq(Profile.get_money(), 0, "dinheiro -1500")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 2, "nivel 2")
+	eq(Profile.get_item_slots(), 3, "espacos da mochila iguais")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "mochila nao sobe")
+	eq(wallet["count"], 1, "wallet_changed emitido uma vez")
+	eq(inv["count"], 1, "inventory_changed emitido uma vez")
+	eq(load_rec["count"], 1, "loadout_changed emitido uma vez")
+	var raw: Dictionary = SaveService.read("user://test_save.json")
+	eq(int(raw.get("upgrades", {}).get("knife", -1)), 2, "nivel gravado em disco")
+	eq(int(raw.get("version", -1)), 2, "versao do save continua 2")
+
+
+func test_knife_all_levels_and_max_reached() -> void:
+	fresh_profile()
+	Profile.add_money(_knife_price(2) + _knife_price(3) + _knife_price(4))
+	var money0: int = Profile.get_money()
+	var spent: int = 0
+	for level: int in range(2, 5):
+		eq(Profile.buy_upgrade(Ids.KNIFE), &"ok", "compra do nivel %d" % level)
+		spent += _knife_price(level)
+		eq(Profile.get_upgrade_level(Ids.KNIFE), level, "nivel %d" % level)
+		eq(Profile.get_money(), money0 - spent, "dinheiro apos o nivel %d" % level)
+	eq(_knife_price(3), 4000, "preco do nivel 3 = R$ 4.000")
+	eq(_knife_price(4), 8000, "preco do nivel 4 = R$ 8.000")
+	# max level: refused, no charge, no event
+	Profile.add_money(50000)
+	var money: int = Profile.get_money()
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.can_buy_upgrade(Ids.KNIFE), &"max_reached", "can_buy_upgrade no maximo")
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"max_reached", "buy_upgrade no maximo")
+	eq(Profile.get_money(), money, "nao cobra alem do maximo")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 4, "continua no nivel 4")
+	eq(wallet["count"], 0, "sem wallet_changed na recusa")
+	eq(load_rec["count"], 0, "sem loadout_changed na recusa")
+
+
+func test_buy_knife_without_funds_has_no_effect() -> void:
+	fresh_profile()
+	_set_money(_knife_price(2) - 1)
+	var wallet: Dictionary = record_signal(GameEvents.wallet_changed)
+	var inv: Dictionary = record_signal(GameEvents.inventory_changed)
+	var load_rec: Dictionary = record_signal(GameEvents.loadout_changed)
+	eq(Profile.can_buy_upgrade(Ids.KNIFE), &"insufficient_funds", "can_buy_upgrade sem saldo")
+	eq(Profile.get_money(), _knife_price(2) - 1, "can_buy_upgrade nao cobra")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 1, "can_buy_upgrade nao sobe o nivel")
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"insufficient_funds", "buy_upgrade sem saldo (R$ 1.499)")
+	eq(Profile.get_money(), _knife_price(2) - 1, "saldo intacto")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 1, "nivel intacto")
+	eq(int(wallet["count"]) + int(inv["count"]) + int(load_rec["count"]), 0, "nenhum sinal na recusa")
+	# gold does not pay for the knife
+	Profile.add_gold(99999)
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"insufficient_funds", "ouro nao compra a faca")
+	eq(Profile.get_gold(), 99999, "ouro intacto")
+
+
+func test_buy_knife_one_level_per_purchase() -> void:
+	fresh_profile()
+	Profile.add_money(_knife_price(2) + _knife_price(3) + _knife_price(4) + 777)
+	var money0: int = Profile.get_money()
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"ok", "compra")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 2, "so um nivel")
+	eq(Profile.get_money(), money0 - _knife_price(2), "cobra so o preco do proximo nivel")
+
+
+func test_knife_is_not_sold_as_an_item() -> void:
+	fresh_profile()
+	Profile.add_money(99999)
+	var money: int = Profile.get_money()
+	eq(Profile.can_buy(Ids.KNIFE), &"unknown_item", "can_buy(knife) = unknown_item")
+	eq(Profile.buy(Ids.KNIFE), &"unknown_item", "buy(knife) = unknown_item")
+	eq(Profile.buy_upgrade(&"carbine_22"), &"unknown_item", "uma arma nao e melhoria")
+	eq(Profile.can_buy_upgrade(&"foo"), &"unknown_item", "can_buy_upgrade(foo)")
+	eq(Profile.get_money(), money, "saldo intacto")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 1, "faca intacta")
+	ok(not Profile.owns(Ids.KNIFE), "a faca nao esta no inventario de armas/itens")
+	ok(not Profile.get_loadout_weapons().has(Ids.KNIFE), "a faca nao esta no loadout de armas")
+	ok(not Profile.get_loadout_items().has(Ids.KNIFE), "a faca nao esta no loadout de itens")
+
+
+func test_reset_progress_resets_knife() -> void:
+	fresh_profile()
+	Profile.add_money(_knife_price(2) + _knife_price(3))
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"ok", "compra nivel 2")
+	eq(Profile.buy_upgrade(Ids.KNIFE), &"ok", "compra nivel 3")
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 3, "nivel 3")
+	Profile.reset_progress()
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 1, "reset volta ao nivel 1")
+	eq(Profile.get_upgrade_level(Ids.BACKPACK), 1, "reset volta a mochila ao nivel 1")
+
+
+func test_knife_level_survives_reload() -> void:
+	fresh_profile()
+	Profile.add_money(_knife_price(2) + _knife_price(3))
+	Profile.buy_upgrade(Ids.KNIFE)
+	Profile.buy_upgrade(Ids.KNIFE)
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 3, "nivel 3")
+	Profile.load_or_create()
+	eq(Profile.get_upgrade_level(Ids.KNIFE), 3, "nivel 3 apos recarregar")
+
+
+func test_build_hunt_request_carries_the_knife_level() -> void:
+	fresh_profile()
+	eq(Profile.build_hunt_request(&"mato_grosso", 0).knife_level, 1, "perfil novo: knife_level 1")
+	Profile.add_money(_knife_price(2) + _knife_price(3) + _knife_price(4))
+	for level: int in range(2, 5):
+		Profile.buy_upgrade(Ids.KNIFE)
+		eq(Profile.build_hunt_request(&"mato_grosso", 0).knife_level, level, "knife_level = %d depois da compra" % level)
+	eq(Profile.build_hunt_request(&"mato_grosso", 0).knife_level, Profile.get_upgrade_level(Ids.KNIFE), "knife_level = nivel do perfil")
+
+
+func test_shop_knife_rules_on_loose_objects() -> void:
+	var wi: Array = _shop_world(_knife_price(2) - 1)
+	var w: Wallet = wi[0]
+	var inv: Inventory = wi[1]
+	eq(inv.get_upgrade_level(Ids.KNIFE), 1, "Inventory novo: faca nivel 1")
+	eq(Shop.check_upgrade(Ids.KNIFE, w, inv), &"insufficient_funds", "check sem saldo")
+	eq(Shop.buy_upgrade(Ids.KNIFE, w, inv), &"insufficient_funds", "buy sem saldo")
+	eq(w.money, _knife_price(2) - 1, "saldo intacto")
+	w.money = _knife_price(2)
+	eq(Shop.check_upgrade(Ids.KNIFE, w, inv), &"ok", "check com saldo exato")
+	eq(Shop.buy_upgrade(Ids.KNIFE, w, inv), &"ok", "buy com saldo exato")
+	eq(w.money, 0, "saldo zerado")
+	eq(inv.get_upgrade_level(Ids.KNIFE), 2, "nivel 2")
+	eq(inv.get_upgrade_level(Ids.BACKPACK), 1, "a mochila nao sobe")
+	w.money = 99999
+	eq(Shop.buy_upgrade(Ids.KNIFE, w, inv), &"ok", "nivel 3")
+	eq(Shop.buy_upgrade(Ids.KNIFE, w, inv), &"ok", "nivel 4")
+	var money: int = w.money
+	eq(Shop.buy_upgrade(Ids.KNIFE, w, inv), &"max_reached", "buy no maximo")
+	eq(w.money, money, "nao cobra no maximo")
+	eq(inv.get_upgrade_level(Ids.KNIFE), 4, "continua no 4")

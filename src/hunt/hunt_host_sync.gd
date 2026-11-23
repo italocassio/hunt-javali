@@ -49,6 +49,7 @@ var _rect: Rect2 = Rect2()
 var _events: StreamPeerBuffer = StreamPeerBuffer.new()
 var _type_ids: Array[StringName] = []
 var _weapon_ids: Array[StringName] = []
+var _knife_def: Dictionary = {}   # claim limits of a knife swing (setup); {} = no knife in the data -> swings rejected
 var _tolerance_m: float = DEFAULT_CLAIM_TOLERANCE_M
 var _eaten: PackedInt32Array = PackedInt32Array()   # patches eaten since the last tick (EV_CROP_EATEN)
 ## Rejoin (section 4.7.6): the original bytes of every EV_BOAR_SPAWN and EV_BOAR_DEATH since the hunt began,
@@ -78,10 +79,23 @@ func setup(world: HuntController, spawner: BoarSpawner) -> void:
 	_rect = world.get_map_rect()
 	_type_ids = Data.get_boar_type_ids()
 	_weapon_ids = Data.get_weapon_ids()
+	_knife_def = _build_knife_def()
 	_tolerance_m = float(Data.get_net().get("hit_claim_tolerance_m", DEFAULT_CLAIM_TOLERANCE_M))
 	spawner.boar_added.connect(_on_boar_added)
 	if world.crop != null:
 		world.crop.patch_eaten.connect(_on_patch_eaten)
+
+
+## Limits a knife swing is judged by (docs/plano_faca_mochila_folego.md 2.8), built once: the damage of the top
+## level (the host does not know the claimant's level), the reach and the noise of the knife. {} without a knife.
+func _build_knife_def() -> Dictionary:
+	var knife: Dictionary = Data.get_upgrade(Ids.KNIFE) if Data.get_upgrade_ids().has(Ids.KNIFE) else {}
+	var top: Dictionary = Data.get_upgrade_level_def(Ids.KNIFE, Data.get_upgrade_level_count(Ids.KNIFE))
+	if knife.is_empty() or top.is_empty():
+		return {}
+	var stats: Dictionary = knife.get("stats", {})
+	return {"damage": float(top.get("damage", 0.0)), "pellets": 1, "max_range_m": float(stats.get("reach_m", 0.0)),
+		"noise_radius_m": float(stats.get("noise_radius_m", 0.0))}
 
 
 # --- Snapshot ------------------------------------------------------------------------------------
@@ -454,8 +468,9 @@ func _apply_shot(from_slot: int, inp: StreamPeerBuffer, length: int) -> void:
 	var n: int = inp.get_u8()
 	if length < CLAIM_HEADER_BYTES + n * CLAIM_HIT_BYTES:
 		return
-	var weapon_id: StringName = _weapon_ids[weapon_index] if weapon_index < _weapon_ids.size() else &""
-	var def: Dictionary = Data.get_weapon(weapon_id) if weapon_id != &"" else {}
+	var is_knife: bool = weapon_index == NetCodec.KNIFE_WEAPON_INDEX
+	var weapon_id: StringName = Ids.KNIFE if is_knife else (_weapon_ids[weapon_index] if weapon_index < _weapon_ids.size() else &"")
+	var def: Dictionary = _knife_def if is_knife else (Data.get_weapon(weapon_id) if weapon_id != &"" else {})
 	var shooter: PlayerBase = _world.get_hunter(from_slot)
 	var valid_shooter: bool = shooter != null and not shooter.is_local() and not def.is_empty() \
 		and (n == 0 or NetCodec.shot_slot(shot_id) == from_slot) and n <= int(def.get("pellets", 1))

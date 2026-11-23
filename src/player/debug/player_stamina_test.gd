@@ -452,8 +452,11 @@ func _test_energy_rules() -> void:
 	_check("energy_key_T", InputSetup.get_key_label(&"use_energy_drink") == "T", InputSetup.get_key_label(&"use_energy_drink"))
 	var keys: Array = InputSetup.ITEM_ACTIONS.keys()
 	_check("energy_last_slot", keys.size() >= 5 and keys[keys.size() - 1] == DRINK and keys[keys.size() - 2] == &"binoculars", str(keys))
-	_check("energy_action_registered", InputMap.has_action(&"use_energy_drink") and "use_energy_drink" in InputSetup.ACTIONS
-		and InputSetup.ACTIONS[InputSetup.ACTIONS.size() - 1] == "use_energy_drink")
+	# F4 appended "knife" after it (docs/plano_faca_mochila_folego.md 2.5), so the drink is the last ITEM action,
+	# not the last action of all.
+	var actions: Array = Array(InputSetup.ACTIONS)
+	_check("energy_action_registered", InputMap.has_action(&"use_energy_drink")
+		and actions.find("use_energy_drink") == actions.size() - 2, str(actions))
 
 	# Not in the loadout.
 	var world0: SandboxWorld = await _make_world()

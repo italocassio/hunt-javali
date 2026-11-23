@@ -7,6 +7,10 @@ const WEAPON_IDS: Array[StringName] = [&"carbine_22", &"shotgun_12", &"rifle_308
 const WEAPON_MAX_TRIS: int = 12000
 const WEAPON_MAX_MESHES: int = 4
 const WEAPON_MAX_MATERIALS: int = 4
+## The first-person knife with the arm (docs/plano_faca_mochila_folego.md 1.7): tighter than the guns.
+const KNIFE_MAX_TRIS: int = 4000
+const KNIFE_MAX_MESHES: int = 3
+const KNIFE_MAX_MATERIALS: int = 3
 const BOAR_TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha"]
 ## Boar LOD contract (docs/arquitetura.md section 7.1): bands by visibility_range at rest (base FOV, no zoom).
 const BOAR_NEAR_END_M: float = 25.0
@@ -88,7 +92,7 @@ const THEME_VARIATIONS: Dictionary = {
 
 const EXTRA_ICONS: Array[String] = ["money", "gold", "boar", "crop", "health", "ammo", "lock", "dog_paw", "app_icon",
 	"barn", "map_mato_grosso", "map_pantanal", "map_campanha_gaucha", "map_triangulo_mineiro",
-	"btn_fire", "btn_aim", "btn_reload", "btn_swap", "btn_dog", "btn_item", "btn_crouch", "btn_pause",
+	"btn_fire", "btn_aim", "btn_reload", "btn_swap", "btn_dog", "btn_item", "btn_crouch", "btn_pause", "btn_knife",
 	"joystick_base", "joystick_knob"]
 
 
@@ -431,6 +435,157 @@ func _unique_materials(meshes: Array[MeshInstance3D]) -> Dictionary:
 			if m != null:
 				found[m.get_instance_id()] = true
 	return found
+
+
+## docs/plano_faca_mochila_folego.md 1.7 and 2.10 (ART4, F4): the first-person knife view. Tighter than the guns:
+## 4000 triangles with the arm, 3 MeshInstance3D, 3 materials, no shadows, Muzzle + AdsAnchor.
+func test_knife_view_contract() -> void:
+	var path: String = ScenePaths.weapon_view(Ids.KNIFE)
+	eq(path, "res://assets/models/weapons/knife_view.tscn", "caminho da view da faca")
+	var root: Node3D = _spawn(path)
+	if root == null:
+		return
+	if not root is WeaponViewBase:
+		fail("%s: raiz nao estende WeaponViewBase" % path)
+		return
+	var view: WeaponViewBase = root as WeaponViewBase
+	view.setup(Ids.KNIFE)
+	ok(view.get_node_or_null("Muzzle") is Marker3D, "knife: Muzzle (Marker3D)")
+	ok(view.get_node_or_null("AdsAnchor") is Marker3D, "knife: AdsAnchor (Marker3D)")
+	ok(view.get_muzzle() != null and view.get_ads_anchor() != null, "knife: get_muzzle() e get_ads_anchor()")
+	_forbidden(view, "weapon_view/knife")
+	var meshes: Array[MeshInstance3D] = _meshes(view)
+	ok(meshes.size() >= 1, "knife: tem malha (%d)" % meshes.size())
+	ok(meshes.size() <= KNIFE_MAX_MESHES, "knife: %d MeshInstance3D (<= %d)" % [meshes.size(), KNIFE_MAX_MESHES])
+	var tris: int = _tree_tris(view)
+	ok(tris > 0, "knife: triangulos > 0")
+	ok(tris <= KNIFE_MAX_TRIS, "knife: %d triangulos (<= %d)" % [tris, KNIFE_MAX_TRIS])
+	var materials: int = _unique_materials(meshes).size()
+	print("INFO knife view: %d MeshInstance3D, %d triangulos, %d materiais" % [meshes.size(), tris, materials])
+	ok(materials >= 1 and materials <= KNIFE_MAX_MATERIALS, "knife: %d materiais unicos (<= %d)" % [materials, KNIFE_MAX_MATERIALS])
+	for mi: MeshInstance3D in meshes:
+		eq(mi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "knife: %s sem sombra" % mi.name)
+	# the gun hooks are harmless no-ops on the knife
+	var snap: Array = _root_transform_snapshot(view)
+	var rest_tip: Vector3 = (view.get_muzzle() as Node3D).position
+	view.play_draw(0.4)
+	view.play_fire()
+	view.play_cycle(0.5)
+	view.play_reload(1.5)
+	await frames(3)
+	eq((view.get_muzzle() as Node3D).position, rest_tip, "knife: play_fire/cycle/reload/draw nao mexem a faca")
+	# the swing: the blade tip leaves the rest pose and, after swing_s, comes back to it
+	view.play_melee(0.45)
+	var moved: bool = false
+	for i: int in 12:
+		await frames(1)
+		if (view.get_muzzle() as Node3D).position.distance_to(rest_tip) > 0.01:
+			moved = true
+	ok(moved, "knife: play_melee move a ponta da lamina")
+	await wait_s(0.6)
+	near((view.get_muzzle() as Node3D).position.distance_to(rest_tip), 0.0, 0.001, "knife: a faca volta ao repouso no fim do golpe")
+	view.play_melee(0.0)   # a zero duration must not divide by zero or hang
+	await wait_s(0.2)
+	near((view.get_muzzle() as Node3D).position.distance_to(rest_tip), 0.0, 0.001, "knife: play_melee(0) tambem volta ao repouso")
+	eq(_root_transform_snapshot(view)[2], snap[2], "knife: escala da raiz intacta")
+	ok(rest_tip.z < 0.0, "knife: a ponta em repouso fica a frente da camera (z=%.2f)" % rest_tip.z)
+	if view.has_method(&"get_tip_at"):
+		# the contract (2.10): the tip passes the centre of the screen at ~30% of the swing (x goes from the right
+		# of the screen to its left; it crosses again on the way back, which is not what is checked here)
+		var start_x: float = (view.call(&"get_tip_at", 0.0) as Vector3).x
+		ok(start_x > 0.0, "knife: em repouso a ponta fica a direita do centro (x=%.3f)" % start_x)
+		var cross_u: float = -1.0
+		for step: int in range(0, 101):
+			var u: float = float(step) / 100.0
+			if (view.call(&"get_tip_at", u) as Vector3).x <= 0.0:
+				cross_u = u
+				break
+		print("INFO knife view: a ponta cruza o centro (x = 0) pela 1a vez em u=%.2f" % cross_u)
+		ok(cross_u >= 0.25 and cross_u <= 0.40, "knife: a ponta cruza o centro da tela perto de 30%% do golpe (em %.2f)" % cross_u)
+		var at_strike: Vector3 = view.call(&"get_tip_at", 0.30)
+		ok(absf(at_strike.x) <= 0.05, "knife: a 30%% do golpe a ponta passa a menos de 5 cm do centro (x=%.3f m)" % at_strike.x)
+		ok(at_strike.z < -0.4, "knife: a 30%% do golpe a ponta esta bem a frente da camera (z=%.2f)" % at_strike.z)
+
+
+## The knife swing hook exists on every gun view and is harmless there (guns ignore it).
+func test_gun_views_ignore_play_melee() -> void:
+	for id: StringName in WEAPON_IDS:
+		var root: Node3D = _spawn(ScenePaths.weapon_view(id))
+		if root == null or not root is WeaponViewBase:
+			continue
+		var view: WeaponViewBase = root as WeaponViewBase
+		view.setup(id)
+		var nodes_before: int = _count_type(view, "Node")
+		var mark: int = error_mark()
+		view.play_melee(0.45)
+		view.play_melee(0.0)
+		await frames(3)
+		eq(errors_since(mark).size(), 0, "%s: play_melee nao gera erros: %s" % [id, str(errors_since(mark))])
+		eq(_count_type(view, "Node"), nodes_before, "%s: play_melee nao cria nem remove nos" % id)
+		ok(is_instance_valid(view.get_muzzle()), "%s: Muzzle continua valido depois do play_melee" % id)
+
+
+func test_knife_art_and_icons_exist() -> void:
+	## docs/plano_faca_mochila_folego.md 2.10 (ART4): portrait 1024x512, the two SVGs 128x128.
+	var art_path: String = ScenePaths.weapon_art(Ids.KNIFE)
+	eq(art_path, "res://assets/ui/weapons/knife.png", "caminho do retrato da faca")
+	ok(FileAccess.file_exists(art_path), "retrato %s existe" % art_path)
+	var art: Texture2D = load(art_path) as Texture2D
+	ok(art != null, "o retrato carrega como Texture2D")
+	if art != null:
+		eq(art.get_size(), Vector2(1024.0, 512.0), "knife.png tem 1024x512")
+		var img: Image = art.get_image()
+		if img != null:
+			ok(img.detect_alpha() != Image.ALPHA_NONE, "knife.png tem transparencia (retrato recortado)")
+	ok(UiKit.weapon_art(Ids.KNIFE) != null, "UiKit.weapon_art(knife) nao e nulo")
+	ok(UiKit.weapon_art_rect(Ids.KNIFE, 160.0) != null, "UiKit.weapon_art_rect(knife) nao e nulo")
+	for icon_id: StringName in [&"knife", &"btn_knife"]:
+		var icon_path: String = ScenePaths.icon(icon_id)
+		ok(FileAccess.file_exists(icon_path), "icone %s existe" % icon_path)
+		var tex: Texture2D = load(icon_path) as Texture2D
+		ok(tex != null, "%s carrega como Texture2D" % icon_id)
+		if tex != null:
+			eq(tex.get_size(), Vector2(128.0, 128.0), "%s tem 128x128" % icon_id)
+		ok(UiKit.icon(icon_id) != null, "UiKit.icon(%s) nao e nulo" % icon_id)
+		ok(UiKit.icon_rect(icon_id, 48.0) != null, "UiKit.icon_rect(%s) nao e nulo" % icon_id)
+
+
+func test_knife_swing_sound_exists_and_plays() -> void:
+	## docs/plano_faca_mochila_folego.md 2.10 (ART4): knife_swing (~0.25 s), synthesized on demand (SynthWeapons.LAZY_IDS).
+	ok(Sfx.has_sound(&"knife_swing"), "Sfx.has_sound(knife_swing)")
+	ok(SynthWeapons.LAZY_IDS.has(&"knife_swing"), "knife_swing esta em SynthWeapons.LAZY_IDS")
+	var mark: int = error_mark()
+	Sfx.play(&"knife_swing")
+	Sfx.play_3d(&"knife_swing", Vector3(1.0, 1.0, 1.0))
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar knife_swing nao gera erros: %s" % str(errors_since(mark)))
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	ok(fb.call(&"has_sound", &"knife_swing"), "fallback: has_sound(knife_swing)")
+	var stream: AudioStreamWAV = fb.call(&"_get_stream", &"knife_swing") as AudioStreamWAV
+	ok(stream != null, "fallback: knife_swing sintetizado")
+	if stream != null:
+		var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+		var channels: float = 2.0 if stream.stereo else 1.0
+		var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+		ok(seconds >= 0.1 and seconds <= 0.6, "knife_swing dura %.2f s (esperado ~0,25 s)" % seconds)
+		ok(stream.loop_mode != AudioStreamWAV.LOOP_FORWARD, "knife_swing nao e loop")
+		var peak: int = 0
+		if stream.format == AudioStreamWAV.FORMAT_16_BITS:
+			var i: int = 0
+			while i + 1 < stream.data.size():
+				peak = maxi(peak, absi(stream.data.decode_s16(i)))
+				i += 2 * 16
+		ok(stream.format != AudioStreamWAV.FORMAT_16_BITS or peak > 500, "knife_swing nao e silencio (pico %d)" % peak)
+	var live: Variant = (Sfx.get(&"_streams") as Dictionary).get(&"knife_swing")
+	ok(live is AudioStreamWAV or live is AudioStreamMP3, "knife_swing no Sfx: WAV sintetizado ou MP3 gravado")
+	var prompts_text: String = FileAccess.get_file_as_string("res://assets/audio/sfx_prompts.json")
+	ok(prompts_text.contains("\"id\": \"knife_swing\""), "sfx_prompts.json tem a entrada knife_swing")
+	ok(JSON.parse_string(prompts_text) != null, "sfx_prompts.json continua JSON valido")
+	# the hit reuses the existing sounds (no new ones for the impact)
+	ok(Sfx.has_sound(&"impact_flesh"), "o acerto reutiliza impact_flesh")
+	await frames(2)
 
 
 func test_scoped_weapons_have_scope_data() -> void:

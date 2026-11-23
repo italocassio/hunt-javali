@@ -1,7 +1,9 @@
 class_name ItemBelt
 extends Node
 ## Equipment carried into the hunt (docs §8.11): passives (vest, extra ammo, thermal scope),
-## the active binoculars and the consumables (medkit, corn bait, scout drone).
+## the active binoculars and the consumables (medkit, energy drink, corn bait, scout drone).
+## A consumable with `use_time_s` > 0 plays a timed gesture: the effect and the spend land at the `effect_at` beat
+## (docs/plano_itens_animados.md 2.2).
 
 signal counts_changed()
 signal binoculars_changed(active: bool)
@@ -23,6 +25,9 @@ var _counts: Dictionary = {}          # StringName -> int (consumables only)
 var _binoculars_on: bool = false
 var _busy_item: StringName = &""
 var _busy_left: float = 0.0
+var _busy_total_s: float = 0.0
+var _busy_beat_s: float = 0.0         # seconds into the gesture at which the effect lands
+var _busy_beat_done: bool = false
 var _player: PlayerBase = null
 var _world: HuntWorld = null
 
@@ -83,7 +88,7 @@ func is_busy() -> bool:
 	return _busy_left > 0.0
 
 
-## Item being used right now (the medkit); &"" = none.
+## Item whose gesture is running right now; &"" = none.
 func get_busy_item() -> StringName:
 	return _busy_item if _busy_left > 0.0 else &""
 
@@ -124,7 +129,6 @@ func use_item(item_id: StringName) -> bool:
 		return false
 	if is_busy():
 		return false
-	var effect: Dictionary = Data.get_equipment(item_id).get("effect", {})
 	if item_id == Ids.I_BINOCULARS:
 		set_binoculars(not _binoculars_on)
 		return true
@@ -136,20 +140,6 @@ func use_item(item_id: StringName) -> bool:
 			if _player.get_health() >= _player.get_max_health():
 				_message("Sua vida já está cheia.")
 				return false
-			_busy_item = item_id
-			_busy_left = float(effect.get("use_time_s", 1.0))
-			use_started.emit(item_id, _busy_left)
-			return true
-		Ids.I_CORN_BAIT:
-			_consume(item_id, _bait_position())
-			_message("Ceva colocada.")
-			return true
-		Ids.I_SCOUT_DRONE:
-			drone_reveal_s = float(effect.get("reveal_s", 0.0))
-			Sfx.play(&"drone_buzz")
-			_consume(item_id, _player.global_position)
-			_message("Drone batedor no ar.")
-			return true
 		Ids.I_ENERGY_DRINK:
 			var hunter: Player = _player as Player   # stamina lives on Player, not on PlayerBase
 			if hunter == null:
@@ -157,40 +147,96 @@ func use_item(item_id: StringName) -> bool:
 			if hunter.get_stamina_frac() >= 1.0:
 				_message("Seu fôlego já está cheio.")
 				return false
-			_consume(item_id, hunter.global_position)
-			Sfx.play(&"energy_drink")
-			hunter.restore_stamina(stamina_restore_frac)
-			return true
-	return false
+		Ids.I_CORN_BAIT, Ids.I_SCOUT_DRONE:
+			pass
+		_:
+			return false
+	var use_time_s: float = _use_time_s(item_id)
+	if use_time_s <= 0.0:
+		_apply_effect(item_id)   # no gesture in the data: the effect is immediate
+		return true
+	_busy_item = item_id
+	_busy_total_s = use_time_s
+	_busy_left = use_time_s
+	_busy_beat_s = use_time_s * _effect_at(item_id)
+	_busy_beat_done = false
+	match item_id:
+		Ids.I_MEDKIT:
+			Sfx.play(&"bandage_wrap")
+		Ids.I_ENERGY_DRINK:
+			Sfx.play(&"drink_gulp")
+	use_started.emit(item_id, use_time_s)
+	return true
 
 
+## Cuts the gesture. Before the beat nothing was spent and nothing happened; after it the effect already
+## landed and the item is gone, only the gesture is cut.
 func cancel_use() -> void:
 	if _busy_left > 0.0:
-		_busy_left = 0.0
-		_busy_item = &""
-		use_finished.emit(&"")
+		_end_gesture(&"")
 
 
 func _process(delta: float) -> void:
 	if _busy_left <= 0.0:
 		return
 	_busy_left -= delta
+	var item_id: StringName = _busy_item
+	if not _busy_beat_done and (_busy_total_s - _busy_left >= _busy_beat_s or _busy_left <= 0.0):
+		if _player == null or not _player.is_alive():
+			_end_gesture(&"")   # a dead hunter neither heals nor drinks: nothing is spent
+			return
+		_busy_beat_done = true
+		_apply_effect(item_id)
 	if _busy_left > 0.0:
 		return
-	var item_id: StringName = _busy_item
+	_end_gesture(item_id)
+
+
+## Clears the busy state, then announces the end (`&""` = cut short).
+func _end_gesture(finished_id: StringName) -> void:
 	_busy_item = &""
 	_busy_left = 0.0
-	if item_id == Ids.I_MEDKIT and _player != null and _player.is_alive():
-		var heal_amount: float = float(Data.get_equipment(item_id).get("effect", {}).get("heal", 0.0))
-		_consume(item_id, _player.global_position)
-		_player.heal(heal_amount)
-	use_finished.emit(item_id)
+	_busy_beat_done = false
+	use_finished.emit(finished_id)
 
 
 func _busy_total() -> float:
-	if _busy_item == &"":
-		return 1.0
-	return float(Data.get_equipment(_busy_item).get("effect", {}).get("use_time_s", 1.0))
+	return _busy_total_s if _busy_item != &"" else 1.0
+
+
+## Seconds of the gesture; absent or <= 0 means the use is instant.
+func _use_time_s(item_id: StringName) -> float:
+	return float(Data.get_equipment(item_id).get("effect", {}).get("use_time_s", 0.0))
+
+
+## Fraction of the gesture at which the effect lands; absent = at the end.
+func _effect_at(item_id: StringName) -> float:
+	return clampf(float(Data.get_equipment(item_id).get("effect", {}).get("effect_at", 1.0)), 0.0, 1.0)
+
+
+## The effect of a consumable, then the spend (count down + GameEvents.item_used), in that order.
+func _apply_effect(item_id: StringName) -> void:
+	var effect: Dictionary = Data.get_equipment(item_id).get("effect", {})
+	var at: Vector3 = _player.global_position
+	match item_id:
+		Ids.I_MEDKIT:
+			_player.heal(float(effect.get("heal", 0.0)))
+		Ids.I_ENERGY_DRINK:
+			var hunter: Player = _player as Player
+			if hunter != null:
+				hunter.restore_stamina(stamina_restore_frac)
+			Sfx.play(&"energy_drink")
+		Ids.I_CORN_BAIT:
+			at = _bait_position()   # where the hunter looks at the beat, not at the key press
+			Sfx.play(&"bait_throw")
+			_message("Ceva colocada.")
+		Ids.I_SCOUT_DRONE:
+			drone_reveal_s = float(effect.get("reveal_s", 0.0))
+			Sfx.play(&"drone_buzz")
+			_message("Drone batedor no ar.")
+		_:
+			return
+	_consume(item_id, at)
 
 
 ## Decrements the count, then announces the use (only consumables reach the bus).

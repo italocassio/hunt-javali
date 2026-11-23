@@ -829,6 +829,16 @@ func _on_item_used(item_id: StringName, item_position: Vector3) -> void:
 			_client_bait(item_position)
 		else:
 			_place_bait(item_position)
+	elif item_id == Ids.I_SCOUT_DRONE:
+		_launch_drone(item_position)
+
+
+## The scout drone as a visual world object (docs/plano_itens_animados.md section 2.6). Every machine gets its own
+## item_used, so host, client and offline all see it with no network message. No prop yet: no node at all.
+func _launch_drone(at: Vector3) -> void:
+	var effect: Dictionary = Data.get_equipment(Ids.I_SCOUT_DRONE).get("effect", {})
+	var eye_m: float = float(Data.get_game().get("player", {}).get("standing_eye_height_m", 1.65))
+	ScoutDrone.launch(self, self, at + Vector3(0.0, eye_m, 0.0), float(effect.get("reveal_s", 10.0)))
 
 
 ## Section 8.2 step 5. Order: boar_hit -> boar_state_changed(dead) -> boar_killed -> boar_counts_changed.

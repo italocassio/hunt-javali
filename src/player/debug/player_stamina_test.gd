@@ -32,6 +32,7 @@ const NOT_CARRIED_TEXT: String = "Você não trouxe este item: Energético."
 const FULL_TEXT: String = "Seu fôlego já está cheio."
 const EMPTY_TEXT: String = "Acabou: Energético."
 const DRINK_COUNT: int = 2
+const GESTURE_WAIT_CAP_S: float = 5.0        # the drink gesture lasts use_time_s (1.5 s in the data); never wait more than this
 
 var _passed: int = 0
 var _failed: int = 0
@@ -99,6 +100,16 @@ func _ticks(seconds: float) -> int:
 func _frames(count: int) -> void:
 	for i: int in count:
 		await get_tree().physics_frame
+
+
+## Waits for the running item gesture to end (the drink is no longer instant: docs/plano_itens_animados.md 2.2).
+func _wait_gesture(items: ItemBelt) -> void:
+	var guard: int = _ticks(GESTURE_WAIT_CAP_S)
+	while items.is_busy() and guard > 0:
+		await get_tree().physics_frame
+		guard -= 1
+	await get_tree().process_frame   # the HUD reads the new state on the next frame
+	await get_tree().process_frame
 
 
 func _make_world(horde_level: int = 0, allies: int = 0) -> SandboxWorld:
@@ -487,13 +498,22 @@ func _test_energy_rules() -> void:
 	player.debug_set_stamina(0.0)
 	_check("tired_fixture", player.is_exhausted())
 	_check("tired_use_ok", items.use_item(DRINK))
+	# Timed gesture: at the press nothing is spent and nothing is refilled; it all lands at the effect_at beat.
+	_check("tired_gesture_started", started.size() == 1 and started[0] == DRINK and items.is_busy()
+		and items.get_busy_item() == DRINK, str(started))
+	_check("tired_press_spends_nothing", items.get_count(DRINK) == DRINK_COUNT and used.is_empty()
+		and player.is_exhausted(), "count %d used %s" % [items.get_count(DRINK), str(used)])
+	await _wait_gesture(items)
 	_check("tired_count_minus_1", items.get_count(DRINK) == DRINK_COUNT - 1, str(items.get_count(DRINK)))
 	_check("tired_item_used_once", used.size() == 1 and used[0] == DRINK, str(used))
 	_check("tired_stamina_full", player.get_stamina_frac() == 1.0 and not player.is_exhausted())
-	_check("tired_instant_no_busy", started.is_empty() and not items.is_busy())
+	_check("tired_gesture_ended", not items.is_busy())
 
 	player.debug_set_stamina(10.0)   # tired-ish but not exhausted: still refills
-	_check("partial_use_ok", items.use_item(DRINK) and player.get_stamina_frac() == 1.0 and items.get_count(DRINK) == 0)
+	_check("partial_use_started", items.use_item(DRINK))
+	await _wait_gesture(items)
+	_check("partial_use_ok", player.get_stamina_frac() == 1.0 and items.get_count(DRINK) == 0,
+		"frac %.2f count %d" % [player.get_stamina_frac(), items.get_count(DRINK)])
 	_check("partial_item_used_twice", used.size() == 2, str(used))
 	player.debug_set_stamina(0.0)
 	var before: int = used.size()
@@ -511,8 +531,8 @@ func _test_energy_rules() -> void:
 	Input.action_press(&"use_energy_drink")
 	await _frames(3)
 	Input.action_release(&"use_energy_drink")
-	await _frames(2)
 	var k_items: ItemBelt = world_k.player.get_items()
+	await _wait_gesture(k_items)
 	_check("key_t_drinks", k_items.get_count(DRINK) == DRINK_COUNT - 1 and world_k.player.get_stamina_frac() >= 0.99
 		and not world_k.player.is_exhausted(), "count %d frac %.2f" % [k_items.get_count(DRINK), world_k.player.get_stamina_frac()])
 	await _free_world(world_k)
@@ -580,8 +600,7 @@ func _test_energy_hud_desktop() -> void:
 	_check("qb_flash_when_tired", _flashing_of(quickbar).has(DRINK))
 	_check("qb_only_drink_flashes", _flashing_of(quickbar).size() == 1, str(_flashing_of(quickbar)))
 	items.use_item(DRINK)
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _wait_gesture(items)
 	_check("qb_flash_off_after_drink", not _flashing_of(quickbar).has(DRINK))
 
 	# The drinks run out while tired: the blink stops.
@@ -636,8 +655,7 @@ func _test_energy_hud_touch() -> void:
 	_check("tc_switched_to_drink", touch.get_accessory_current() == DRINK, str(touch.get_accessory_current()))
 	_check("tc_drink_flashes", _flashing_of(touch).has(DRINK))
 	items.use_item(DRINK)
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _wait_gesture(items)
 	_check("tc_back_to_previous", touch.get_accessory_current() == first, str(touch.get_accessory_current()))
 	_check("tc_flash_off", not _flashing_of(touch).has(DRINK))
 

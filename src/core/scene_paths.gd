@@ -49,6 +49,11 @@ static func prop(prop_id: StringName) -> String:
 	return "res://assets/models/props/%s.tscn" % prop_id
 
 
+## First-person item in the hands (ItemViewBase; docs §7.13): medkit, energy_drink, corn_bait, scout_drone.
+static func item_view(item_id: StringName) -> String:
+	return "res://assets/models/items/%s_view.tscn" % item_id
+
+
 ## Weapon portrait for the shop and loadout (rendered from the HD model by tools/render_weapon_art.gd).
 static func weapon_art(weapon_id: StringName) -> String:
 	return "res://assets/ui/weapons/%s.png" % weapon_id

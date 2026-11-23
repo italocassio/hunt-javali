@@ -55,6 +55,8 @@ var _cfg: Dictionary = {}
 var _request: HuntRequest = null
 var _world: HuntWorld = null
 var _items: ItemBelt = null
+var _hands: ItemHands = null                 # item gestures in first person; weapon hides while one plays (docs/plano_itens_animados.md 2.3)
+var _weapon_hidden_by_hands: bool = false     # last _update_aim saw a gesture on screen: the weapon comes back with a draw
 var _knife: Knife = null                      # F4: null when the data has no knife (no swing, no touch button)
 var _hud: Node = null
 var _spectator: SpectatorCamera = null
@@ -174,6 +176,7 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 	_items.name = "ItemBelt"
 	add_child(_items)
 	_items.setup(request, self, world)
+	_items.use_started.connect(_on_item_use_started)
 	_items.use_finished.connect(_on_item_use_finished)
 	_items.binoculars_changed.connect(_on_binoculars_changed)
 
@@ -209,6 +212,7 @@ func setup(request: HuntRequest, world: HuntWorld) -> void:
 		_holder.play_draw(DRAW_TIME_S)
 		_reset_zoom()
 	_setup_knife(request)
+	_setup_hands()
 	_hud = AssetLoader.instantiate(ScenePaths.HUD)
 	if _hud != null:
 		add_child(_hud)
@@ -241,6 +245,16 @@ func _on_hunt_started(_started: HuntRequest) -> void:
 	if _knife != null:
 		_knife.set_equipped(false)
 		_knife.set_rest_visible(false)
+	if _hands != null:
+		_hands.set_rest_visible(false)
+
+
+## The item hands (docs/plano_itens_animados.md 2.3): built after the ItemBelt and the WeaponHolder views.
+func _setup_hands() -> void:
+	_hands = ItemHands.new()
+	_hands.name = "ItemHands"
+	add_child(_hands)
+	_hands.setup(_items, _holder)
 
 
 ## Horde level rules: ammo, revive and confinement blocks of Data.get_horde_level(world.get_horde_level()).
@@ -994,7 +1008,9 @@ func _update_aim(delta: float) -> void:
 	# Scoped weapon disappears once the overlay is (almost) opaque; binoculars hide it entirely.
 	# The knife hides it too: it takes its place for as long as it is in the hand (F4, 0.9.9).
 	var hide_weapon: bool = binoc or (w != null and w.is_scoped() and _ads_t >= SCOPE_HIDE_WEAPON_AT)
-	_holder.set_weapon_hidden(hide_weapon or not _alive or is_knife_equipped())
+	var hands_showing: bool = _hands != null and _hands.is_showing()
+	_weapon_hidden_by_hands = hands_showing
+	_holder.set_weapon_hidden(hide_weapon or not _alive or is_knife_equipped() or hands_showing)
 
 
 func _can_aim() -> bool:
@@ -1282,8 +1298,33 @@ func _on_weapon_reload_cancelled(weapon: Weapon) -> void:
 		_holder.stop_reload()
 
 
+## A timed use began (docs/plano_itens_animados.md 2.3): the hands are busy, so the knife goes back to the belt and
+## the reload in progress is dropped. The callers never start a use in the middle of a knife swing, so this cannot fail.
+func _on_item_use_started(_item_id: StringName, _duration_s: float) -> void:
+	if is_knife_equipped():
+		set_knife_equipped(false)
+	var w: Weapon = _weapon()
+	if w != null:
+		w.cancel_reload()
+	_fire_buffer = 0.0
+
+
+## The gesture ended (or was cut short with &""): the weapon, hidden by _update_aim meanwhile, comes back with a draw.
+## Runs before ItemHands hides its view (connected first), but the flag does not depend on that order.
 func _on_item_use_finished(_item_id: StringName) -> void:
-	pass
+	if _weapon_hidden_by_hands:
+		_weapon_hidden_by_hands = false
+		if _alive:
+			_holder.set_weapon_hidden(false)
+			_holder.play_draw(DRAW_TIME_S)
+
+
+## Cuts a gesture in progress: nothing is applied or spent before its beat (ItemBelt) and the view snaps back.
+func _cancel_item_use() -> void:
+	if _items != null:
+		_items.cancel_use()
+	if _hands != null:
+		_hands.cancel()
 
 
 func _on_binoculars_changed(active: bool) -> void:
@@ -1331,8 +1372,8 @@ func _go_down() -> void:
 	if _aim_active:
 		_aim_active = false
 		aim_changed.emit(false)
+	_cancel_item_use()
 	if _items != null:
-		_items.cancel_use()
 		_items.set_binoculars(false)
 	var w: Weapon = _weapon()
 	if w != null:
@@ -1460,8 +1501,8 @@ func _die() -> void:
 	_reset_revive()
 	_crouching = false
 	_ads_t = 0.0
+	_cancel_item_use()
 	if _items != null:
-		_items.cancel_use()
 		_items.set_binoculars(false)
 	if _knife != null:
 		_knife.abort_swing()
@@ -1507,6 +1548,7 @@ func _update_death(delta: float) -> void:
 
 func _on_hunt_ended(_result: HuntResult) -> void:
 	_hunt_over = true   # a downed hunter stops bleeding out: no death after the result
+	_cancel_item_use()
 	set_input_enabled(false)
 	_aim_active = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

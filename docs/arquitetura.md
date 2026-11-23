@@ -634,6 +634,7 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `NetCodec` | `src/core/net_codec.gd` | RefCounted | constantes e quantização da rede (compartilhadas por A, B e N) |
 | `NetPeerInfo` | `src/core/net_peer_info.gd` | RefCounted | um jogador da sala |
 | `WeaponViewBase` | `src/core/weapon_view_base.gd` | Node3D | API da arma em 1ª pessoa + fallback |
+| `ItemViewBase` | `src/core/item_view_base.gd` | Node3D | 1.8: API do item na mão em 1ª pessoa (§7.13); sem fallback (sem arte, nenhuma view) |
 | `MapEnvironmentBase` | `src/core/map_environment_base.gd` | Node3D | API do ambiente (céu/sol) + fallback |
 | `CornStockVisualBase` | `src/core/corn_stock_visual_base.gd` | Node3D | API do estoque de milho do celeiro (horda, `docs/horda.md` §11.1) + fallback |
 
@@ -646,7 +647,8 @@ jogar na horizontal", visível quando `get_viewport().get_visible_rect().size.y 
 | `Knife` | `src/weapons/knife.gd` | Node | 1.7 (F4, jogo 0.9.8): golpe de faca sem slot (§1.4 e §2.6 do plano). Criada pelo `Player.setup`; dona dos dados (`Data.get_upgrade(Ids.KNIFE)`), dos relógios, do acerto, do som, do efeito e da view da faca. `signal swing_started(duration_s: float)`; `const ASSIST_MAX_RESULTS: int = 8`; `setup(level: int, holder: Node3D) -> bool` (`false` = sem faca nos dados), `get_level() -> int`, `get_damage() -> float`, `get_reach_m() -> float`, `get_swing_s() -> float`, `get_swing_interval_s() -> float`, `get_noise_radius_m() -> float`, `is_swinging() -> bool`, `get_cooldown_frac() -> float`, `is_ready() -> bool`, `set_rest_visible(on: bool) -> void` (a pose de repouso sai no `hunt_started`), `tick(delta: float) -> void` (chamada pelo `Player`, ordem fixa no quadro), `swing(cam: Camera3D, exclude: Array[RID], vfx_parent: Node) -> bool`, `abort_swing() -> void` (morte/queda), `get_view() -> WeaponViewBase` (tests); **0.9.9**: `is_equipped() -> bool` e `set_equipped(on: bool) -> bool` — a faca deixou de ser golpe avulso e virou arma equipável (ver §8.4) |
 | `WeaponHolder` | `src/weapons/weapon_holder.gd` | Node3D | interna |
 | `Hitscan` | `src/weapons/hitscan.gd` | RefCounted (static) | `static func cast(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_range_m: float, exclude: Array[RID]) -> Dictionary` |
-| `ItemBelt` | `src/player/item_belt.gd` | Node | interna ao A; API em §8.11 (usada por `Player`, `Hud`, `Quickbar`, `TouchControls`, `HintDirector` e tests); 1.7 (F3, jogo 0.9.7): `var stamina_restore_frac: float` (lido do `effect` do equipamento, como `damage_reduction`; entre os consumíveis vale o `maxf`), usado por `use_item(&"energy_drink")` |
+| `ItemBelt` | `src/player/item_belt.gd` | Node | interna ao A; API em §8.11 (usada por `Player`, `Hud`, `Quickbar`, `TouchControls`, `HintDirector` e tests); 1.7 (F3, jogo 0.9.7): `var stamina_restore_frac: float` (lido do `effect` do equipamento, como `damage_reduction`; entre os consumíveis vale o `maxf`), usado por `use_item(&"energy_drink")`; **1.8** (jogo 0.9.10, `docs/plano_itens_animados.md` §2.2): o caminho "uso com tempo" vale para **todo** consumível com `use_time_s > 0` e o efeito cai no beat `effect_at` (ver §8.11) |
+| `ItemHands` | `src/player/item_hands.gd` | Node | 1.8 (jogo 0.9.10, §2.3 do plano): mãos de item em 1ª pessoa. Criada pelo `Player.setup`, cria uma `ItemViewBase` por consumível trazido que tenha arte (filha do `WeaponHolder`) e toca o gesto enquanto o `ItemBelt` está ocupado. `setup(belt: ItemBelt, holder: Node3D) -> void`, `is_showing() -> bool` (um gesto na tela agora; o `Player` esconde a arma enquanto isso), `set_rest_visible(on: bool) -> void` (pré-aquecimento até o `hunt_started`, como o `Knife`), `cancel() -> void`, `get_view(item_id: StringName) -> ItemViewBase` (tests; `null` sem arte) |
 | `Hud` | `src/hud/hud.gd` (cena `src/hud/hud.tscn`) | CanvasLayer | `func bind(player: PlayerBase, world: HuntWorld) -> void` |
 | `Quickbar` | `src/hud/quickbar.gd` | HBoxContainer | barra de itens do desktop (§8.4). `const DOG_SLOT: StringName = &"dog_command"`; `bind(items: ItemBelt) -> void` (cria `Slot_<item_id>` para cada `items.get_usable_ids()`, na ordem; conecta `counts_changed`, `binoculars_changed`, `use_started`, `use_finished`); `set_dog_present(present: bool) -> void` (cria/remove `Slot_dog_command`, sempre o último); `set_dog_state(state: StringName) -> void` (espaço do cão apagado em `Ids.DS_RETREAT`); `flash(slot_id: StringName, on: bool) -> void` (pisca a borda até `flash(id, false)`; id inexistente = nada); `get_slot_ids() -> Array[StringName]` (ordem da tela) |
 | `HintDirector` | `src/hud/hint_director.gd` | Node | lógica das dicas, **sem nenhum `Control`** (§8.4). `signal hint_shown(hint_id: StringName, text: String, slot_id: StringName)` (`slot_id` = `&""` na abertura); `signal hint_hidden(hint_id: StringName)`; `const OPENING: StringName = &"opening"`; `setup(player: PlayerBase, items: ItemBelt, world: HuntWorld) -> void` (lê `Profile.is_onboarding_active()` e `game.onboarding` uma vez; inativo = não conecta nada e `set_process(false)`); `is_active() -> bool`; `get_current_hint() -> StringName` (`&""` = nenhuma); `get_queue() -> Array[StringName]` (cópia, tests); `get_shown_this_hunt() -> Array[StringName]` (cópia, tests) |
@@ -1051,7 +1053,7 @@ Ids (quem toca entre parênteses):
 |---|---|
 | Armas (A) | `shot_22`, `shot_12`, `shot_308`, `shot_3006`, `shot_338`, `dry_fire`, `reload_start`, `reload_end`, `bolt_cycle`, `pump_cycle`, `weapon_swap`, `scope_in`, `scope_out` |
 | Impactos (A) | `impact_dirt`, `impact_wood`, `impact_flesh` |
-| Jogador (A) | `step_grass`, `step_dirt`, `player_hurt`, `player_heal`, `player_death`, `heartbeat`, `binocular_in` |
+| Jogador (A) | `step_grass`, `step_dirt`, `player_hurt`, `player_heal`, `player_death`, `heartbeat`, `binocular_in`; 1.8 (jogo 0.9.10): `bandage_wrap`, `drink_gulp`, `bait_throw` (gestos de item, §7.13) |
 | HUD (A) | `hit_marker`, `kill_confirm`, `crop_alarm`, `drone_buzz` |
 | Javali (B) | `boar_grunt`, `boar_squeal`, `boar_snort_alert`, `boar_scrape`, `boar_charge_roar`, `boar_eat`, `boar_death` |
 | Cão (B) | `dog_bark`, `dog_growl`, `dog_yelp`, `dog_whine` |
@@ -1163,6 +1165,30 @@ Raiz `Node3D` estendendo `CornStockVisualBase` (`res://assets/models/props/barn_
 `barn`. API `setup(ring_radius_m)`, `set_stock_pct(pct)`, `set_under_attack(on)`, estágios por
 `CornStockVisualBase.stage_for(pct)`; ≤ 1 800 tris, ≤ 8 `MeshInstance3D`. Fallback:
 `CornStockVisualBase.create_fallback()`. Contrato completo: `docs/horda.md` §11.1.
+
+### 7.13 Itens na mão em primeira pessoa — `res://assets/models/items/<item_id>_view.tscn`
+1.8 (jogo 0.9.10, `docs/plano_itens_animados.md` §2.4). Ids: `medkit`, `energy_drink`, `corn_bait`, `scout_drone`
+(caminho por `ScenePaths.item_view(id)`).
+- Raiz `Node3D` estendendo `ItemViewBase` (script compartilhado `res://assets/models/items/item_view.gd` é permitido;
+  `setup(item_id)` escolhe o modelo). Molde: `assets/models/weapons/knife_view.gd`.
+- É filha do `WeaponHolder` (que é filho do `Camera3D`), logo herda bob, sway e o deslocamento da mira. Espaço da
+  câmera: olho na origem, olhando -Z. **Repouso = fora da tela** (abaixo da borda de baixo): a view só é vista durante
+  o gesto, e quem a mostra e a esconde é o `ItemHands`.
+- Sem `Muzzle` e sem `AdsAnchor`: item não mira e não atira.
+- O gesto que cada id tem de deixar claro na primeira vez: `medkit` enrolar a faixa no antebraço esquerdo;
+  `energy_drink` beber a lata em dois goles; `scout_drone` empurrar o drone para cima com as duas mãos;
+  `corn_bait` jogar a espiga por baixo para a frente.
+- Orçamento por view: ≤ 3 500 triângulos com braços; ≤ 3 `MeshInstance3D`; ≤ 3 materiais; texturas procedurais
+  ≤ 512 px; `cast_shadow = OFF`; **sem shader novo**. Reaproveita `ArmsHD`, `HDMesh` e os materiais de prop.
+- API:
+
+| Método | Contrato |
+|---|---|
+| `setup(item_id: StringName) -> void` | monta o modelo |
+| `play_use(duration_s: float, effect_at: float) -> void` | um uso inteiro em `duration_s` (0,9 a 1,5 s, vem dos dados), com o beat (faixa apertada, último gole, drone solto, milho solto) em `effect_at` (0..1) e as mãos de volta ao repouso no fim |
+| `cancel_use() -> void` | uso cortado (morte, queda, `ItemBelt.cancel_use`): volta ao repouso sem animação |
+
+Sem o `.tscn` do item não há view, não há erro **e a arma não esconde** (a tela nunca fica vazia).
 
 ---
 
@@ -1917,11 +1943,12 @@ de vários cães): se dois cães pegam o mesmo javali, o primeiro a soltar liber
 |---|---|---|---|
 | `binoculars` | ativo | alterna visão 6x sem arma (B, `use_binoculars`); bloqueia tiro | A |
 | `leather_vest` | passivo | reduz dano recebido | A |
-| `medkit` | consumível | cura `heal` em `use_time_s` (sem atirar) | A; emite `item_used` |
-| `corn_bait` | consumível | coloca ceva no chão à frente (2 m) | A emite `item_used`; B cria `Bait` + `bait_placed` |
+| `medkit` | consumível | cura `heal` no fim do gesto de `use_time_s` (sem atirar) | A; emite `item_used` |
+| `energy_drink` | consumível | enche o fôlego em `stamina_restore_frac` no gesto de beber | A; emite `item_used` |
+| `corn_bait` | consumível | joga a ceva no chão à frente (2 m) no beat do gesto | A emite `item_used`; B cria `Bait` + `bait_placed` |
 | `extra_ammo` | passivo | reserva × `reserve_mult` | A |
 | `thermal_scope` | passivo | ao mirar, javalis a ≤ `highlight_range_m` destacados | A emite `thermal_vision_changed`; B chama `set_highlight` |
-| `scout_drone` | consumível | revela todos os javalis no minimapa por `reveal_s` | A (HUD), emite `item_used` |
+| `scout_drone` | consumível | revela todos os javalis no minimapa por `reveal_s`; o drone sai da mão, sobe e voa pelo mapa | A (HUD), emite `item_used`; B cria `ScoutDrone` |
 
 Uso direto por id (1.3): o `Player`, em `_update_input`, para cada `(item_id, ação)` de
 `InputSetup.ITEM_ACTIONS`, chama `_items.use_item(item_id)` em `Input.is_action_just_pressed(ação)` (vivo, input
@@ -1931,7 +1958,7 @@ API do `ItemBelt` (`src/player/item_belt.gd`, A):
 ```gdscript
 signal counts_changed()
 signal binoculars_changed(active: bool)
-signal use_started(item_id: StringName, duration_s: float)   # só o kit (uso com tempo)
+signal use_started(item_id: StringName, duration_s: float)   # 1.8: todo consumível com use_time_s > 0
 signal use_finished(item_id: StringName)                     # &"" = uso cancelado (cancel_use)
 const MESSAGE_S: float = 2.0
 const BAIT_DISTANCE_M: float = 2.0
@@ -1955,6 +1982,17 @@ func set_binoculars(active: bool) -> void
 `data/equipment.json`); passivo, id vazio ou desconhecido: `false` sem mensagem. Demais regras de hoje mantidas (kit com vida cheia, "Acabou: …",
 ocupado = `false`). `PlayerBase.bot_use_item(item_id)` continua chamando `use_item(item_id)` sem mudança, e o
 `FallbackPlayer` não muda.
+
+**1.8 — uso com gesto (jogo 0.9.10, `docs/plano_itens_animados.md` §2.2 e §2.3).** Todo consumível com `use_time_s > 0`
+no `effect` passa pelo mesmo caminho do kit: `use_item` devolve `true` quando o gesto **começou**, `use_started` sai para
+os quatro (kit, energético, drone, ceva) e `is_busy()` trava tiro, mira, recarga e troca de arma enquanto ele roda
+(mover e olhar seguem livres). O efeito **e** o `_consume` (desconto + `GameEvents.item_used`) caem no beat `effect_at`
+(fração de `use_time_s`, uma vez por uso), não no aperto: a posição da ceva é calculada **no beat**, o drone só revela ao
+sair da mão e o energético só enche o fôlego no último gole. Cancelar antes do beat não gasta o item e não tem efeito
+(`use_finished` com `&""`); as recusas e as mensagens em PT-BR de hoje continuam iguais, antes de o gesto começar.
+Quem mostra as mãos é o `ItemHands` (§6.8), que esconde a view da arma enquanto o gesto roda; com a faca na mão, o
+`Player` a guarda no cinto antes de começar. `Quickbar`, `TouchControls` e `HintDirector` não mudam: já leem
+`get_busy_item()` e `get_busy_progress()`.
 
 ### 8.12 Caçada em rede (B, com A e N)
 Formatos de registro: `docs/multiplayer.md` §4. Offline (`Net.get_role() == Role.OFFLINE`) tudo acima vale
@@ -2292,6 +2330,8 @@ de densidade variável é checado pelo `minimap_selftest` (B), não pelo `Data`.
 | `price`, `currency` | int, string | preço unitário |
 | `max_per_hunt` | int | consumíveis levados por caçada |
 | `effect` | objeto | parâmetros específicos (unidades no nome do campo) |
+| `effect.use_time_s` | float | 1.8: segundos do gesto na mão (§7.13). Ausente ou ≤ 0 = uso instantâneo (binóculo) |
+| `effect.effect_at` | float | 1.8: fração 0..1 de `use_time_s` em que o efeito cai (§8.11). Ausente = 1,0 |
 ```json
 {
   "version": 1,
@@ -2301,16 +2341,21 @@ de densidade variável é checado pelo `minimap_selftest` (B), não pelo `Data`.
     {"id": "leather_vest", "name": "Colete de couro", "short_name": "Colete", "description": "Reduz o dano das presas em 35%.",
      "kind": "passive", "price": 2500, "currency": "money", "max_per_hunt": 1, "effect": {"damage_reduction": 0.35}},
     {"id": "medkit", "name": "Kit de primeiros socorros", "short_name": "Kit", "description": "Recupera 50 de vida. Consumível.",
-     "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5}},
+     "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3,
+     "effect": {"heal": 50.0, "use_time_s": 1.5, "effect_at": 1.0}},
+    {"id": "energy_drink", "name": "Energético", "short_name": "Energia", "description": "Recupera todo o fôlego. Consumível.",
+     "kind": "consumable", "price": 150, "currency": "money", "max_per_hunt": 3,
+     "effect": {"stamina_restore_frac": 1.0, "use_time_s": 1.5, "effect_at": 0.8}},
     {"id": "corn_bait", "name": "Ceva de milho", "short_name": "Ceva", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
      "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 2,
-     "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4}},
+     "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4, "use_time_s": 0.9, "effect_at": 0.45}},
     {"id": "extra_ammo", "name": "Munição extra", "short_name": "Munição", "description": "Dobra a munição de reserva de todas as armas.",
      "kind": "passive", "price": 800, "currency": "money", "max_per_hunt": 1, "effect": {"reserve_mult": 2.0}},
     {"id": "thermal_scope", "name": "Mira térmica", "short_name": "Térmica", "description": "Ao mirar, destaca javalis até 150 m.",
      "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
     {"id": "scout_drone", "name": "Drone batedor", "short_name": "Drone", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
-     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0}}
+     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3,
+     "effect": {"reveal_s": 10.0, "use_time_s": 1.2, "effect_at": 0.7}}
   ]
 }
 ```
@@ -3332,6 +3377,19 @@ com a faca na mão não há mira, recarga nem binóculo; morte, queda e espectad
 `WeaponPanel` mostra "Faca" sem munição enquanto ela está na mão. **Nada disso muda a rede, os dados ou o acerto**: o
 golpe continua sendo o mesmo `C_SHOT` com o índice 254, com o mesmo alcance, ajuda de mira e dano por nível.
 
+### Frente itens com gesto na mão (contrato 1.8, jogo 0.9.10)
+Plano, contrato, pacotes (arquivos, donos, fora de escopo, aceite) e riscos em `docs/plano_itens_animados.md`. Pedido do
+dono: curar, energético, drone e ceva precisam de **movimento visível** — curativo sendo enrolado, caçador bebendo, drone
+saindo voando, milho sendo jogado.
+
+Decisões: todo consumível passa a ter `use_time_s` em `data/equipment.json` (kit 1,5 s, energético 1,5 s, drone 1,2 s,
+ceva 0,9 s) e o efeito cai no beat `effect_at`, não no aperto (§8.11); durante o gesto a view da arma esconde e o
+`ItemHands` mostra uma `ItemViewBase` (§7.13), com a faca indo para o cinto antes; o drone virou objeto de mundo
+(`ScoutDrone`, em `src/world/`, criado pelo `HuntController` em `item_used`), o que o torna visível para os aliados
+**sem nenhuma mensagem nova de rede**. Acréscimos a `src/core/`: `ItemViewBase` e `ScenePaths.item_view`.
+Fora de escopo: gesto em terceira pessoa do caçador aliado, rede, binóculo, faca, balanceamento (cura, fôlego,
+`reveal_s`, preços) e arte raster. `project.godot` muda só em `config/version`; `GameEvents` não muda.
+
 ---
 
 ## Apêndice A — `src/core/` (verbatim; coordenador copia, ninguém edita)
@@ -3506,6 +3564,17 @@ const KNIFE_WEAPON_INDEX: int = 254    ## C_SHOT weapon byte of a knife swing (d
 # player_base.gd (depois de bot_fire) — F4, jogo 0.9.8
 func bot_knife() -> bool:   ## one knife swing (tests); true if the swing happened
 	return false
+```
+
+### Acréscimos 1.8 (itens com gesto na mão) — já aplicados em `src/core/`
+
+Fonte: `docs/plano_itens_animados.md`. Aditivos: o arquivo novo `src/core/item_view_base.gd` (verbatim no fim deste
+apêndice) e, em `scene_paths.gd`, logo depois de `prop`:
+
+```gdscript
+## First-person item in the hands (ItemViewBase; docs §7.13): medkit, energy_drink, corn_bait, scout_drone.
+static func item_view(item_id: StringName) -> String:
+	return "res://assets/models/items/%s_view.tscn" % item_id
 ```
 
 ### `src/core/game_events.gd`
@@ -4626,6 +4695,38 @@ static func create_fallback() -> WeaponViewBase:
 	ads.position = Vector3(0.2, -0.14, -0.4)
 	v.add_child(ads)
 	return v
+```
+
+### `src/core/item_view_base.gd`
+```gdscript
+class_name ItemViewBase
+extends Node3D
+## First-person item in the hunter's hands: bandage, energy drink, scout drone, corn bait
+## (docs/arquitetura.md §7.13, docs/plano_itens_animados.md).
+##
+## Child of the camera, under the WeaponHolder (so it inherits bob, sway and the aim offset).
+## Camera space: eye at the origin, looking -Z. At rest the item sits off screen (below the bottom
+## edge): the view is only seen while ItemHands plays a use, and the weapon view is hidden meanwhile.
+##
+## No Muzzle, no AdsAnchor: an item is never aimed and never fires.
+
+
+func setup(_item_id: StringName) -> void:
+	pass
+
+
+## One whole use over `duration_s` seconds. The gesture must read in three beats: the item comes up
+## into view, the effect beat lands at `effect_at` (0..1 of `duration_s`) — the bandage pulled tight,
+## the last gulp, the drone leaving the hands, the corn leaving the hand — and the hands are back at
+## rest (off screen) when the duration ends.
+func play_use(_duration_s: float, _effect_at: float) -> void:
+	pass
+
+
+## The use was cut short (the hunter went down, died, or ItemBelt.cancel_use): back to the rest pose
+## at once, no animation. Called right before the view is hidden.
+func cancel_use() -> void:
+	pass
 ```
 
 ### `src/core/map_environment_base.gd`

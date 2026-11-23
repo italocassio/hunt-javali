@@ -1,7 +1,7 @@
 extends Node
 ## Package B self-test: runs hunt.tscn headless and checks the rules of the hunt.
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/hunt/debug/hunt_selftest.tscn -- \
-##            --fallback-player [--only=flow,ends,charge,bait,dog,perf,knife]
+##            --fallback-player [--only=flow,ends,charge,bait,dog,perf,knife,drone]
 ## The "knife" case needs the real Player (PlayerBase.bot_knife); with --fallback-player it is skipped.
 ## Not part of the game; the qa-tester owns the real tests in tests/.
 
@@ -53,7 +53,7 @@ func _ready() -> void:
 	var all: Dictionary = {
 		"flow": _test_flow, "ends": _test_ends, "charge": _test_charge, "bait": _test_bait,
 		"shoot": _test_shoot, "dog": _test_dog, "perf": _test_perf, "closeup": _test_closeup,
-		"obstacle": _test_obstacle, "misc": _test_misc, "knife": _test_knife,
+		"obstacle": _test_obstacle, "misc": _test_misc, "knife": _test_knife, "drone": _test_drone,
 	}
 	for key: String in all.keys():
 		if only.is_empty() or only.has(key):
@@ -407,6 +407,50 @@ func _test_bait() -> void:
 	_check("boars_return_to_crop", _boars_in_state(Ids.BS_TO_CROP) >= going, "to_crop=%d" % _boars_in_state(Ids.BS_TO_CROP))
 	var used: int = int(_hunt._result.consumables_used.get(Ids.I_CORN_BAIT, 0))
 	_check("consumable_counted", used == 1, "used=%d" % used)
+
+
+func _test_drone() -> void:
+	await _open(0)
+	_park_player()
+	var has_prop: bool = AssetLoader.exists(ScenePaths.prop(&"scout_drone"))
+	var launch_at: Vector3 = Vector3(10.0, _hunt.get_height(10.0, 10.0), 10.0)
+	GameEvents.item_used.emit(Ids.I_SCOUT_DRONE, launch_at)
+	var drones: Array[Node] = []
+	for c: Node in _hunt.get_children():
+		if c is ScoutDrone:
+			drones.append(c)
+	_check("drone_spawns_only_with_prop", drones.size() == (1 if has_prop else 0), "prop=%s drones=%d" % [has_prop, drones.size()])
+	if not has_prop:
+		return
+	var drone: ScoutDrone = drones[0] as ScoutDrone
+	var eye_m: float = float(Data.get_game().get("player", {}).get("standing_eye_height_m", 1.65))
+	_check("drone_starts_ahead_of_eyes", absf(drone.global_position.y - (launch_at.y + eye_m)) < 0.5
+		and absf(Vector2(drone.global_position.x - 10.0, drone.global_position.z - 10.0).length() - ScoutDrone.HAND_FORWARD_M) < 0.3, str(drone.global_position))
+	await _sleep(1.6)
+	var climbed: float = drone.global_position.y - (launch_at.y + eye_m)
+	_check("drone_climbs_about_10m", climbed > 8.0 and climbed < 12.0, "climbed=%.2f" % climbed)
+	var min_clear: float = 1000.0
+	var travelled: float = 0.0
+	var last: Vector3 = drone.global_position
+	var life: float = float(Data.get_equipment(Ids.I_SCOUT_DRONE).get("effect", {}).get("reveal_s", 10.0))
+	while is_instance_valid(drone) and drone.get_age_s() < life - 0.5:
+		await _sleep(0.25)
+		if not is_instance_valid(drone):
+			break
+		var p: Vector3 = drone.global_position
+		min_clear = minf(min_clear, p.y - _hunt.get_height(p.x, p.z))
+		travelled += p.distance_to(last)
+		last = p
+	_check("drone_stays_above_terrain", min_clear > 4.0, "min_clear=%.2f" % min_clear)
+	_check("drone_flies_around", travelled > 15.0, "travelled=%.1f" % travelled)
+	var ref: WeakRef = weakref(drone)
+	var gone: bool = await _wait(func() -> bool: return ref.get_ref() == null, 3.0)
+	_check("drone_frees_itself", gone)
+	# A hunt that ends with the drone still in the air leaves nothing behind.
+	GameEvents.item_used.emit(Ids.I_SCOUT_DRONE, launch_at)
+	_check("second_drone_spawns", _hunt.get_children().any(func(c: Node) -> bool: return c is ScoutDrone))
+	var used: int = int(_hunt._result.consumables_used.get(Ids.I_SCOUT_DRONE, 0))
+	_check("drone_consumable_counted", used == 2, "used=%d" % used)
 
 
 func _test_dog() -> void:

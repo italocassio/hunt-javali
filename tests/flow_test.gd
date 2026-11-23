@@ -591,7 +591,7 @@ func _step_backpack_preparation() -> void:
 # Energy drink route (docs/plano_faca_mochila_folego.md, F3)
 # --------------------------------------------------------------------------------------------
 
-## Menu -> shop: the card says "Fôlego cheio na hora"; without money the button is off; two purchases charge R$ 150 each.
+## Menu -> shop: the card says "Fôlego cheio"; without money the button is off; two purchases charge R$ 150 each.
 func _step_energy_shop() -> void:
 	if _scene_path() != ScenePaths.MAIN_MENU:
 		_t.call("fail", "pre-condicao: nao esta no menu (%s)" % _scene_path())
@@ -602,7 +602,7 @@ func _step_energy_shop() -> void:
 	var buy: Button = _button("Buy_energy_drink")
 	if buy == null:
 		return
-	_t.call("ok", _find_label("Fôlego cheio na hora") != null, "o cartao do energetico mostra 'Fôlego cheio na hora'")
+	_t.call("ok", _find_label("Fôlego cheio") != null, "o cartao do energetico mostra 'Fôlego cheio'")
 	var price: int = int(Data.get_equipment(Ids.I_ENERGY_DRINK).get("price", 0))
 	_t.call("eq", price, 150, "energetico custa R$ 150")
 	# 1) one real short: the button is off and pressing it does nothing

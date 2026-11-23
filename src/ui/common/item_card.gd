@@ -164,8 +164,8 @@ static func stats_text(id: StringName) -> String:
 				&"energy_drink":
 					var frac: float = float(effect.get("stamina_restore_frac", 0.0))
 					if frac >= 1.0:
-						return "Fôlego cheio na hora"
-					return "Recupera %d%% do fôlego na hora" % int(roundf(frac * 100.0))
+						return "Fôlego cheio"
+					return "Recupera %d%% do fôlego" % int(roundf(frac * 100.0))
 				&"corn_bait":
 					return "Dura %d s  |  Atrai até %d javalis a %d m" % [int(effect.get("duration_s", 0)), int(effect.get("max_boars", 0)), int(effect.get("attract_radius_m", 0))]
 				&"extra_ammo":

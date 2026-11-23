@@ -13,7 +13,8 @@ const IDS: Array[StringName] = [&"dry_fire", &"reload_start", &"reload_end", &"b
 
 
 ## Ids synthesized on first use only (no recorded file expected), see build_lazy().
-const LAZY_IDS: Array[StringName] = [&"breath_tired", &"energy_drink", &"knife_swing"]
+const LAZY_IDS: Array[StringName] = [&"breath_tired", &"energy_drink", &"knife_swing", &"bandage_wrap", &"drink_gulp",
+	&"bait_throw"]
 
 
 static func build_lazy(id: StringName) -> AudioStreamWAV:
@@ -21,6 +22,9 @@ static func build_lazy(id: StringName) -> AudioStreamWAV:
 		&"breath_tired": return _breath_tired()
 		&"energy_drink": return _energy_drink()
 		&"knife_swing": return _knife_swing()
+		&"bandage_wrap": return _bandage_wrap()
+		&"drink_gulp": return _drink_gulp()
+		&"bait_throw": return _bait_throw()
 	return null
 
 
@@ -305,3 +309,51 @@ static func _drone() -> AudioStreamWAV:
 	SynthDsp.tone(b, 0.0, 0.5, 150.0, 150.0, 0.6, 5.0, SynthDsp.SHAPE_SAW, 0.02, 90.0, 0.4)
 	SynthDsp.noise(b, 0.0, 0.5, 0.15, 5.0, 0.5, 0.2, 0.02)
 	return SynthDsp.to_stream(b, 0.4)
+
+
+## Bandage wrap, ~0.75 s: cloth rasping as the strip is wound twice around the forearm (two rough scrapes with a
+## rising band), a short tug, then the final tightening squeak and a soft pat.
+static func _bandage_wrap() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.75)
+	# two winding passes: cloth friction, amplitude-modulated like fibres catching
+	SynthDsp.noise(b, 0.0, 0.26, 0.45, 0.22, 0.35, 0.25, 0.04, 23.0, 0.55)
+	SynthDsp.noise(b, 0.27, 0.24, 0.5, 0.2, 0.45, 0.3, 0.03, 29.0, 0.55)
+	# tug: the strip goes taut
+	SynthDsp.noise(b, 0.54, 0.07, 0.4, 0.03, 0.6, 0.4, 0.004)
+	SynthDsp.tone(b, 0.54, 0.08, 520.0, 380.0, 0.12, 0.03, SynthDsp.SHAPE_TRI, 0.004)
+	# final tightening pat on the arm
+	SynthDsp.tone(b, 0.63, 0.1, 170.0, 90.0, 0.55, 0.04, SynthDsp.SHAPE_SINE, 0.001)
+	SynthDsp.noise(b, 0.63, 0.05, 0.25, 0.015, 0.25, 0.0, 0.001)
+	return SynthDsp.to_stream(b, 0.7)
+
+
+## Two gulps, ~0.5 s: each a falling thump with a throat click and a little liquid noise, the second lower and longer.
+static func _drink_gulp() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.5)
+	var starts: Array[float] = [0.02, 0.27]
+	for i: int in starts.size():
+		var t: float = starts[i]
+		var low: float = 1.0 - 0.15 * float(i)
+		SynthDsp.tone(b, t, 0.16, 240.0 * low, 90.0 * low, 0.65, 0.06, SynthDsp.SHAPE_SINE, 0.015)
+		SynthDsp.tone(b, t + 0.03, 0.08, 520.0 * low, 280.0 * low, 0.2, 0.03, SynthDsp.SHAPE_SINE, 0.008)
+		SynthDsp.noise(b, t, 0.12, 0.2, 0.04, 0.15, 0.0, 0.01, 18.0, 0.4)
+		SynthDsp.noise(b, t + 0.1, 0.03, 0.18, 0.01, 0.7, 0.4, 0.001)
+	SynthDsp.noise(b, 0.44, 0.06, 0.07, 0.025, 0.3, 0.2, 0.01)
+	return SynthDsp.to_stream(b, 0.75)
+
+
+## Bait throw, ~0.6 s: a short underarm whoosh, then kernels hitting dry ground in a loose scatter.
+static func _bait_throw() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(0.6)
+	# whoosh: bell-shaped noise, a little tonal air sweep
+	SynthDsp.noise(b, 0.0, 0.2, 0.35, 0.12, 0.3, 0.1, 0.07)
+	SynthDsp.tone(b, 0.02, 0.17, 300.0, 520.0, 0.07, 0.1, SynthDsp.SHAPE_SINE, 0.06)
+	# kernels landing: tiny dry ticks, uneven spacing, falling pitch
+	var times: Array[float] = [0.24, 0.27, 0.3, 0.325, 0.36, 0.38, 0.425, 0.46, 0.51]
+	for i: int in times.size():
+		var f: float = 1900.0 - float(i) * 110.0 + float(i % 3) * 260.0
+		SynthDsp.tone(b, times[i], 0.04, f, f * 0.8, 0.22 - float(i) * 0.012, 0.01, SynthDsp.SHAPE_TRI, 0.0007)
+		SynthDsp.noise(b, times[i], 0.02, 0.16, 0.006, 0.8, 0.5, 0.0005)
+	# a soft thud of the heap
+	SynthDsp.tone(b, 0.24, 0.12, 130.0, 70.0, 0.3, 0.04, SynthDsp.SHAPE_SINE, 0.002)
+	return SynthDsp.to_stream(b, 0.7)

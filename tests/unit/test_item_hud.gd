@@ -53,6 +53,14 @@ func _free_belts() -> void:
 	_belts.clear()
 
 
+## Plays the running gesture of `belt` to its end (the belt is not in the tree, so the test drives its clock).
+func _run_gesture(belt: ItemBelt) -> void:
+	var guard: int = 0
+	while belt.is_busy() and guard < 1000:
+		belt._process(0.05)
+		guard += 1
+
+
 func _item_name(id: StringName) -> String:
 	return String(Data.get_equipment(id).get("name", ""))
 
@@ -271,20 +279,29 @@ func test_use_item_ok_consumes_and_announces() -> void:
 	var used: Dictionary = record_signal(GameEvents.item_used)
 	var changed: Dictionary = record_signal(belt.counts_changed)
 	var msg: Dictionary = record_signal(GameEvents.hud_message_requested)
-	eq(belt.use_item(&"scout_drone"), true, "drone usado")
+	eq(belt.use_item(&"scout_drone"), true, "drone comeca")
+	# timed gesture (docs/plano_itens_animados.md 2.2): nothing is spent or announced at the key press
+	eq(belt.get_count(&"scout_drone"), 3, "no aperto nada e gasto")
+	eq(used["count"], 0, "item_used so no beat")
+	_run_gesture(belt)
 	eq(belt.get_count(&"scout_drone"), 2, "3 -> 2")
 	eq(used["count"], 1, "item_used uma vez")
 	if int(used["count"]) >= 1:
 		eq(used["calls"][0][0], &"scout_drone", "item_used com o id")
 	eq(changed["count"], 1, "counts_changed uma vez")
 	near(belt.drone_reveal_s, float(Data.get_equipment(&"scout_drone")["effect"]["reveal_s"]), 0.001, "revelacao vem do dado")
-	eq(msg["calls"][0][0], "Drone batedor no ar.", "mensagem do drone")
-	eq(belt.use_item(&"corn_bait"), true, "ceva usada")
+	ok(int(msg["count"]) >= 1, "mensagem do drone emitida")
+	if int(msg["count"]) >= 1:
+		eq(msg["calls"][0][0], "Drone batedor no ar.", "mensagem do drone")
+	eq(belt.use_item(&"corn_bait"), true, "ceva comeca")
+	_run_gesture(belt)
 	eq(belt.get_count(&"corn_bait"), 1, "2 -> 1")
 	eq(used["count"], 2, "item_used da ceva")
 	# the drone runs dry after its 3 units, then says so
 	eq(belt.use_item(&"scout_drone"), true, "segundo drone")
+	_run_gesture(belt)
 	eq(belt.use_item(&"scout_drone"), true, "terceiro drone")
+	_run_gesture(belt)
 	eq(belt.get_count(&"scout_drone"), 0, "esgotou")
 	eq(belt.use_item(&"scout_drone"), false, "quarto drone: acabou")
 	eq(belt.get_count(&"scout_drone"), 0, "continua 0")
@@ -459,7 +476,7 @@ func test_quickbar_with_the_energy_drink_has_six_slots_with_the_drink_before_the
 
 
 func test_item_card_stats_text_of_the_energy_drink() -> void:
-	eq(ItemCard.stats_text(&"energy_drink"), "Fôlego cheio na hora", "cartao da loja (frac 1,0)")
+	eq(ItemCard.stats_text(&"energy_drink"), "Fôlego cheio", "cartao da loja (frac 1,0)")
 	eq(Data.get_item_category(&"energy_drink"), &"equipment", "categoria do energetico")
 
 
@@ -498,6 +515,8 @@ func test_quickbar_exhausted_slot_dims_and_shows_zero() -> void:
 	var drone: Quickbar.Slot = _slot(qb, &"scout_drone")
 	near(drone.self_modulate.a, 1.0, 0.001, "com 1 drone: normal")
 	belt.use_item(&"scout_drone")
+	eq(drone.count_label.text, "x1", "no aperto a contagem ainda nao mudou (o desconto cai no beat)")
+	_run_gesture(belt)
 	eq(drone.count_label.text, "x0", "contagem atualizada pelo sinal")
 	near(drone.self_modulate.a, Quickbar.DIM_ALPHA, 0.001, "painel apagado")
 	near(drone.icon.modulate.a, Quickbar.DIM_ALPHA, 0.001, "icone apagado")

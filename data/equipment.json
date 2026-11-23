@@ -6,17 +6,17 @@
     {"id": "leather_vest", "name": "Colete de couro", "short_name": "Colete", "description": "Reduz o dano das presas em 35%.",
      "kind": "passive", "price": 2500, "currency": "money", "max_per_hunt": 1, "effect": {"damage_reduction": 0.35}},
     {"id": "medkit", "name": "Kit de primeiros socorros", "short_name": "Kit", "description": "Recupera 50 de vida. Consumível.",
-     "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5}},
-    {"id": "energy_drink", "name": "Energético", "short_name": "Energia", "description": "Recupera todo o fôlego na hora. Consumível.",
-     "kind": "consumable", "price": 150, "currency": "money", "max_per_hunt": 3, "effect": {"stamina_restore_frac": 1.0}},
+     "kind": "consumable", "price": 300, "currency": "money", "max_per_hunt": 3, "effect": {"heal": 50.0, "use_time_s": 1.5, "effect_at": 1.0}},
+    {"id": "energy_drink", "name": "Energético", "short_name": "Energia", "description": "Recupera todo o fôlego. Consumível.",
+     "kind": "consumable", "price": 150, "currency": "money", "max_per_hunt": 3, "effect": {"stamina_restore_frac": 1.0, "use_time_s": 1.5, "effect_at": 0.8}},
     {"id": "corn_bait", "name": "Ceva de milho", "short_name": "Ceva", "description": "Atrai javalis próximos por 45 s, longe da lavoura. Consumível.",
      "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 2,
-     "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4}},
+     "effect": {"duration_s": 45.0, "attract_radius_m": 80.0, "max_boars": 4, "use_time_s": 0.9, "effect_at": 0.45}},
     {"id": "extra_ammo", "name": "Munição extra", "short_name": "Munição", "description": "Dobra a munição de reserva de todas as armas.",
      "kind": "passive", "price": 800, "currency": "money", "max_per_hunt": 1, "effect": {"reserve_mult": 2.0}},
     {"id": "thermal_scope", "name": "Mira térmica", "short_name": "Térmica", "description": "Ao mirar, destaca javalis até 150 m.",
      "kind": "passive", "price": 150, "currency": "gold", "max_per_hunt": 1, "effect": {"highlight_range_m": 150.0}},
     {"id": "scout_drone", "name": "Drone batedor", "short_name": "Drone", "description": "Revela todos os javalis no minimapa por 10 s. Consumível.",
-     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0}}
+     "kind": "consumable", "price": 400, "currency": "money", "max_per_hunt": 3, "effect": {"reveal_s": 10.0, "use_time_s": 1.2, "effect_at": 0.7}}
   ]
 }

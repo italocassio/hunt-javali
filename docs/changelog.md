@@ -3,6 +3,24 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.10 — 23/11/2026
+
+**Agora dá para ver o que a sua mão está fazendo.** Curar, beber, soltar o drone e jogar a ceva deixaram de ser
+instantâneos e viraram gestos na tela, como já acontecia com a arma e a faca.
+- **Kit de primeiros socorros:** o caçador abaixa a arma, atravessa o braço na frente do rosto e **enrola o
+  curativo** antes de a vida subir.
+- **Energético:** a lata sobe até a boca e o caçador **bebe em dois goles**; o fôlego só enche no último gole.
+- **Drone batedor:** sai **das duas mãos** e vai embora voando — sobe, dá uma volta larga pela área e some no fim
+  dos 10 segundos. Os seus companheiros de caçada também o veem no céu.
+- **Ceva de milho:** a mão recua e **joga a espiga**; o monte cai onde você estava olhando na hora do arremesso.
+- Enquanto o gesto acontece você **não atira, não mira, não recarrega e não troca de arma** — mas continua andando
+  e olhando à vontade. São gestos curtos: a ceva leva menos de um segundo, o drone pouco mais, o kit e o
+  energético um segundo e meio.
+- Se você morrer, cair ou cancelar antes da hora, **o item não é gasto**.
+- Se a faca estiver na mão, ela volta sozinha para a cintura antes do gesto, e no fim quem volta é a arma.
+- Nada mudou no que cada item faz: cura, fôlego, tempo de revelação do drone, duração da ceva e preços são os
+  mesmos.
+
 ## 0.9.9 — 23/11/2026
 
 **A faca agora fica na mão.** A pedido do dono do jogo, a faca deixou de ser um golpe avulso e virou uma arma de verdade.

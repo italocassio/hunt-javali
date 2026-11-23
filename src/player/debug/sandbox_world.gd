@@ -14,6 +14,9 @@ extends HuntWorld
 ## Knife (F4): --knife=<1..4> (knife level of the request, clamped by the Knife to the levels in the data),
 ## --knife_equip (puts the knife in the hand and leaves it there, as a tap on Faca does),
 ## --knife_swing (keeps swinging the knife every swing_interval_s, so a windowed screenshot catches a swing)
+## Item gestures (docs/plano_itens_animados.md): --item_use=<id> (medkit, energy_drink, scout_drone, corn_bait) uses that
+## item over and over after the hunt starts, so a windowed screenshot lands inside the gesture. It also carries the item
+## (two units); pair it with --hp=50 for the medkit and --stamina=40 for the energy drink, which refuse a full bar.
 ## --horde (or horde_mode = true before add_child): horde request, fake barn objective and a simple wave loop over the
 ## three targets (intermission, wave, intermission...). horde_auto = false leaves the wave state to the caller.
 ## Horde level (docs/plano_horda_nivel2.md): --horde_level=N (or horde_level = N before add_child; default 1) picks the
@@ -39,6 +42,8 @@ const TEST_MAP_GRID_STEP_PX: int = 10
 const TEST_MAP_CROP: Color = Color("#5E9A3A")
 const TEST_MAP_CORNER: Color = Color("#D9452B")
 const TEST_MAP_CORNER_PX: int = 6
+const ITEM_DEMO_DELAY_S: float = 0.8                # --item_use: lets the hunt start before the first use
+const ITEM_DEMO_PAUSE_S: float = 0.6                # --item_use: rest between two uses
 const KNIFE_DEMO_DELAY_S: float = 0.5               # --knife_swing: lets the hunt start before the first swing
 const TEST_BAIT_POSITION: Vector3 = Vector3(-30.0, 0.0, -40.0)
 const TEST_BAIT_DURATION_S: float = 600.0
@@ -192,6 +197,9 @@ func _request() -> HuntRequest:
 		for id: String in String(_args["items"]).split(",", false):
 			r.item_ids.append(StringName(id))
 			r.item_counts[StringName(id)] = 2
+	if _args.has("item_use") and not r.item_ids.has(StringName(String(_args["item_use"]))):
+		r.item_ids.append(StringName(String(_args["item_use"])))
+		r.item_counts[StringName(String(_args["item_use"]))] = 2
 	return r
 
 
@@ -305,6 +313,8 @@ func _spawn_player() -> void:
 		_run_knife_demo.call_deferred()
 	if _args.has("knife_equip"):
 		_run_knife_equip.call_deferred()
+	if _args.has("item_use"):
+		_run_item_demo.call_deferred()
 	if _args.has("stick"):
 		_run_stick_demo.call_deferred()
 	if _args.has("help_key"):
@@ -351,6 +361,18 @@ func _run_knife_demo() -> void:
 	while is_inside_tree() and player != null and player.is_alive():
 		if player.get_knife_cooldown_frac() <= 0.0:
 			player.bot_knife()
+		await get_tree().process_frame
+
+
+## Screenshot helper (--item_use=<id>): uses the item whenever the hands are free, so a windowed capture lands inside a gesture.
+func _run_item_demo() -> void:
+	await get_tree().create_timer(ITEM_DEMO_DELAY_S).timeout
+	var item_id: StringName = StringName(String(_args["item_use"]))
+	while is_inside_tree() and player != null and player.is_alive():
+		var items: ItemBelt = player.get_items()
+		if items != null and not items.is_busy() and items.get_count(item_id) > 0:
+			player.bot_use_item(item_id)
+			await get_tree().create_timer(ITEM_DEMO_PAUSE_S).timeout
 		await get_tree().process_frame
 
 

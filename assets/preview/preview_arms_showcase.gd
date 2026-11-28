@@ -17,6 +17,11 @@ const HARD_TIMEOUT_S: float = 110.0
 var _out_dir: String = "user://arms_showcase"
 var _frames: int = 30
 var _world: Node3D
+## Debug (--hide-gun): render only the arms, so where a hand really sits is visible.
+## Debug (--hide-arms): the opposite. With both you get the bare scene, which is what lets a script
+## separate hand pixels from gun pixels and actually count how much of the hand the gun eats.
+var _hide_gun: bool = false
+var _hide_arms: bool = false
 
 
 func _ready() -> void:
@@ -31,6 +36,10 @@ func _ready() -> void:
 			_frames = maxi(int(a.trim_prefix("--frames=")), 4)
 		elif a.begins_with("--phase="):
 			phase = float(a.trim_prefix("--phase="))
+		elif a == "--hide-gun":
+			_hide_gun = true
+		elif a == "--hide-arms":
+			_hide_arms = true
 	get_tree().create_timer(HARD_TIMEOUT_S).timeout.connect(_on_timeout)
 	_print_stats()
 	if DisplayServer.get_name() == "headless":
@@ -56,6 +65,10 @@ func _new_view(parent: Node) -> WeaponViewBase:
 	(view.get_node(^"Gun/RightArm") as MeshInstance3D).mesh = arms["right"]
 	(view.get_node(^"Gun/LeftArm") as MeshInstance3D).mesh = arms["left"]
 	view.set_process(false)
+	for mi: MeshInstance3D in view.find_children("*", "MeshInstance3D", true, false):
+		var is_arm: bool = mi.name == &"RightArm" or mi.name == &"LeftArm"
+		if (_hide_gun and not is_arm) or (_hide_arms and is_arm):
+			mi.visible = false
 	return view
 
 

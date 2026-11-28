@@ -33,7 +33,7 @@ const RELOAD_DROP: Vector3 = Vector3(0.01, -0.028, 0.0)
 ## Draw: comes up from below the screen, muzzle low, canted.
 const DRAW_DROP: Vector3 = Vector3(0.12, -0.34, 0.0)
 const DRAW_PITCH: float = -0.5
-const DRAW_ROLL: float = -0.35
+const DRAW_ROLL: float = -0.20
 const SWAY_FREQ: float = 1.7
 const SWAY_AMP: float = 0.0015
 
@@ -159,6 +159,7 @@ func setup(id: StringName) -> void:
 	_view_depth = model.get("k", DEFAULT_VIEW_DEPTH)
 	_pivot = model["pivot"]
 	_hip_yaw = model["yaw"]
+	_hip_roll = model.get("roll", 0.0)
 	_muzzle_rest = model["muzzle"]
 	_muzzle.position = _depth_xf() * _muzzle_rest
 	var ads: Vector3 = model["ads"]
@@ -179,6 +180,7 @@ var _rot_sign: float = 1.0
 var _view_depth: float = DEFAULT_VIEW_DEPTH
 var _pivot: Vector3 = RifleHD.HIP_PIVOT
 var _hip_yaw: float = RifleHD.HIP_YAW
+var _hip_roll: float = RifleHD.HIP_ROLL
 ## ArmsHD.get_arms() of the current gun: meshes plus the hand / elbow / knob / magazine points used by the poses.
 var _arms: Dictionary = {}
 
@@ -220,7 +222,7 @@ func _build_rifle_308_hd() -> Dictionary:
 		"muzzle": o + Vector3(0.0, 0.0, -RifleHD.MUZZLE_S), "ads": o + Vector3(0.0, RifleHD.SCOPE_Y, -0.285),
 		"kind": &"bolt", "kick": 0.07, "flash_size": 0.0045,
 		"origin": o, "rot_sign": -1.0,
-		"pivot": RifleHD.HIP_PIVOT, "yaw": RifleHD.HIP_YAW, "k": RifleHD.VIEW_DEPTH,
+		"pivot": RifleHD.HIP_PIVOT, "yaw": RifleHD.HIP_YAW, "roll": RifleHD.HIP_ROLL, "k": RifleHD.VIEW_DEPTH,
 	})
 
 
@@ -233,7 +235,7 @@ func _build_carbine_22_hd() -> Dictionary:
 		"muzzle": o + Vector3(0.0, 0.0, -CarbineHD.MUZZLE_S), "ads": o + Vector3(0.0, CarbineHD.SIGHT_Y, -CarbineHD.SIGHT_S),
 		"kind": &"bolt", "kick": 0.04, "flash_size": 0.003,
 		"origin": o, "rot_sign": -1.0,
-		"pivot": CarbineHD.HIP_PIVOT, "yaw": CarbineHD.HIP_YAW, "k": CarbineHD.VIEW_DEPTH,
+		"pivot": CarbineHD.HIP_PIVOT, "yaw": CarbineHD.HIP_YAW, "roll": CarbineHD.HIP_ROLL, "k": CarbineHD.VIEW_DEPTH,
 	})
 
 
@@ -246,7 +248,7 @@ func _build_shotgun_12_hd() -> Dictionary:
 		"muzzle": o + Vector3(0.0, 0.0, -ShotgunHD.MUZZLE_S), "ads": o + Vector3(0.0, ShotgunHD.SIGHT_Y, -ShotgunHD.SIGHT_S),
 		"kind": &"pump", "kick": 0.09, "flash_size": 0.0065,
 		"origin": o, "rot_sign": 1.0,
-		"pivot": ShotgunHD.HIP_PIVOT, "yaw": ShotgunHD.HIP_YAW, "k": ShotgunHD.VIEW_DEPTH,
+		"pivot": ShotgunHD.HIP_PIVOT, "yaw": ShotgunHD.HIP_YAW, "roll": ShotgunHD.HIP_ROLL, "k": ShotgunHD.VIEW_DEPTH,
 	})
 
 
@@ -259,7 +261,7 @@ func _build_rifle_3006_hd() -> Dictionary:
 		"muzzle": o + Vector3(0.0, 0.0, -Rifle3006HD.MUZZLE_S), "ads": o + Vector3(0.0, Rifle3006HD.SCOPE_Y, -Rifle3006HD.ADS_S),
 		"kind": &"semi", "kick": 0.065, "flash_size": 0.005,
 		"origin": o, "rot_sign": 1.0,
-		"pivot": Rifle3006HD.HIP_PIVOT, "yaw": Rifle3006HD.HIP_YAW, "k": Rifle3006HD.VIEW_DEPTH,
+		"pivot": Rifle3006HD.HIP_PIVOT, "yaw": Rifle3006HD.HIP_YAW, "roll": Rifle3006HD.HIP_ROLL, "k": Rifle3006HD.VIEW_DEPTH,
 	})
 
 
@@ -272,7 +274,7 @@ func _build_rifle_338_hd() -> Dictionary:
 		"muzzle": o + Vector3(0.0, 0.0, -Rifle338HD.MUZZLE_S), "ads": o + Vector3(0.0, Rifle338HD.SCOPE_Y, -Rifle338HD.ADS_S),
 		"kind": &"bolt", "kick": 0.11, "flash_size": 0.0085,
 		"origin": o, "rot_sign": -1.0,
-		"pivot": Rifle338HD.HIP_PIVOT, "yaw": Rifle338HD.HIP_YAW, "k": Rifle338HD.VIEW_DEPTH,
+		"pivot": Rifle338HD.HIP_PIVOT, "yaw": Rifle338HD.HIP_YAW, "roll": Rifle338HD.HIP_ROLL, "k": Rifle338HD.VIEW_DEPTH,
 	})
 
 
@@ -336,6 +338,7 @@ func _apply_pose(_delta: float) -> void:
 	var m_rot: float = 0.0
 	var cycle_n: float = -1.0
 	var reload_n: float = -1.0
+	var reload_bell: float = 0.0
 
 	if _cycle_t >= 0.0:
 		var t: float = _cycle_t / _cycle_d
@@ -359,6 +362,7 @@ func _apply_pose(_delta: float) -> void:
 		var t: float = _reload_t / _reload_d
 		reload_n = t
 		var bell: float = smoothstep(0.0, 0.18, t) * (1.0 - smoothstep(0.82, 1.0, t))
+		reload_bell = bell
 		rot.z += RELOAD_ROLL * bell
 		rot.x += RELOAD_PITCH * bell * k
 		rot.y += RELOAD_YAW * bell * k
@@ -381,6 +385,14 @@ func _apply_pose(_delta: float) -> void:
 	# (the aim logic moves the root to -AdsAnchor.x, so |position.x| reaches |AdsAnchor.x| in full ADS)
 	var hip: float = clampf(1.0 - absf(position.x) / maxf(absf(_ads.position.x), 0.01), 0.0, 1.0)
 	rot.y += _hip_yaw * hip
+	# ...and cants about the bore, which swings the support hand out from behind the fore-end. Both fade to
+	# zero as the player aims. The pivot sits below the bore, so the cant alone would also slide the gun
+	# sideways: that slide is subtracted, leaving a pure roll about the barrel.
+	# the reload has its own roll, toward the other side: the carry cant gets out of its way
+	var cant: float = _hip_roll * hip * (1.0 - reload_bell)
+	rot.z += cant
+	var lever: Vector3 = _origin - _pivot
+	pos -= Vector3(-lever.y * sin(cant), lever.y * (cos(cant) - 1.0), 0.0)
 	var basis: Basis = Basis.from_euler(Vector3(rot.x, rot.y, rot.z))
 	var xf: Transform3D = Transform3D(Basis.IDENTITY, _pivot + pos) * Transform3D(basis, Vector3.ZERO) * Transform3D(Basis.IDENTITY, -_pivot)
 	var depth: Transform3D = _depth_xf()

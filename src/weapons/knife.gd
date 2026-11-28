@@ -295,6 +295,10 @@ func _create_view() -> void:
 		return
 	_view.name = VIEW_NAME
 	_holder.add_child(_view)
+	# The knife view shows a different blade per tier (assets/models/weapons/knife_view.gd); a fallback view has no
+	# set_level and simply keeps its own mesh.
+	if _view.has_method(&"set_level"):
+		_view.call(&"set_level", _level)
 	_view.setup(Ids.KNIFE)
 	_view.visible = _rest_visible
 

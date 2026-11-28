@@ -12,6 +12,7 @@ const HARD_TIMEOUT_S: float = 110.0
 
 var _out_dir: String = "user://knife_preview"
 var _frames: int = 24
+var _level: int = 1
 var _world: Node3D
 
 
@@ -22,6 +23,8 @@ func _ready() -> void:
 			_out_dir = a.trim_prefix("--out=")
 		elif a.begins_with("--shots="):
 			shots = a.trim_prefix("--shots=")
+		elif a.begins_with("--level="):
+			_level = clampi(int(a.trim_prefix("--level=")), 1, 4)
 		elif a.begins_with("--frames="):
 			_frames = maxi(int(a.trim_prefix("--frames=")), 4)
 	get_tree().create_timer(HARD_TIMEOUT_S).timeout.connect(func() -> void: get_tree().quit(1))
@@ -38,6 +41,7 @@ func _ready() -> void:
 func _new_view(parent: Node) -> WeaponViewBase:
 	var view: WeaponViewBase = (load("res://assets/models/weapons/knife_view.tscn") as PackedScene).instantiate()
 	parent.add_child(view)
+	view.call(&"set_level", _level)
 	return view
 
 
@@ -83,7 +87,7 @@ func _run(shots: PackedStringArray) -> void:
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		var image: Image = get_viewport().get_texture().get_image()
-		var path: String = _out_dir.path_join("knife_%s.png" % shot)
+		var path: String = _out_dir.path_join("knife_L%d_%s.png" % [_level, shot])
 		print("knife_preview: %s %s" % ["saved" if image.save_png(path) == OK else "FAILED", path])
 		images.append(image)
 	if images.size() == 4:
@@ -92,7 +96,7 @@ func _run(shots: PackedStringArray) -> void:
 		var sheet: Image = Image.create(w * 2, h * 2, false, Image.FORMAT_RGBA8)
 		for i in 4:
 			sheet.blit_rect(images[i], Rect2i(0, 0, w, h), Vector2i((i % 2) * w, (i >> 1) * h))
-		sheet.save_png(_out_dir.path_join("knife_sheet.png"))
+		sheet.save_png(_out_dir.path_join("knife_L%d_sheet.png" % _level))
 	get_tree().quit(0)
 
 

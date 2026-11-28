@@ -15,6 +15,9 @@ const SURF_LENS: int = 2
 
 const HIP_ORIGIN: Vector3 = Vector3(0.21, -0.080, -0.24)
 const HIP_YAW: float = 0.10
+## Cant of the hip pose about the bore (radians), faded to zero as the player aims so the sight line stays
+## dead centre. 0 = upright, which is where the reference puts it; the mechanism stays for future use.
+const HIP_ROLL: float = 0.0
 const HIP_PIVOT: Vector3 = HIP_ORIGIN + Vector3(0.0, -0.09, -0.03)
 ## Viewmodel depth scale k (weapon_view.gd scales Gun by (1, 1, k) about the eye): the gun renders as if with
 ## its own narrower FOV, tan(fov'/2) = k * tan(75/2) -> k 0.55 ~ 46 degrees, bigger and closer than the world.

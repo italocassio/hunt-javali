@@ -20,6 +20,10 @@ const T_WINDUP: float = 0.12
 const T_STRIKE: float = 0.30
 const T_FOLLOW: float = 0.46
 
+## Joint relief of the fist on the handle (ArmsHD._finger): the same treatment the gun hands got, free in triangles.
+const KNUCKLES: float = 0.8
+const KNUCKLES_THUMB: float = 0.7
+
 const RING_AO_RAYS: int = 6
 const RING_AO_RADIUS: float = 0.05
 
@@ -35,6 +39,7 @@ var _ads: Marker3D
 var _t: float = -1.0
 var _duration: float = 0.0
 var _tip: Vector3 = Vector3.ZERO
+var _level: int = 1
 
 
 func _init() -> void:
@@ -67,7 +72,14 @@ func _mi(node_name: String) -> MeshInstance3D:
 
 
 func setup(_weapon_id: StringName) -> void:
-	var model: Dictionary = KnifeHD.get_model()
+	set_level(_level)
+
+
+## Knife tier 1..4 (clamped): swaps the Body mesh and the tip. The handle and the grip point are identical on all
+## tiers, so the arm (built once from the first model) fits every one of them.
+func set_level(level: int) -> void:
+	_level = clampi(level, 1, 4)
+	var model: Dictionary = KnifeHD.get_model(_level)
 	_body.mesh = model["body"]
 	_tip = model["tip"]
 	if _arm_mesh == null:
@@ -166,11 +178,11 @@ func _build_arm(model: Dictionary) -> void:
 		var pts: Array = []
 		for key: Vector2 in [Vector2(14.0, r + 0.007), Vector2(60.0, r + 0.001), Vector2(110.0, r), Vector2(155.0, r * 0.96), Vector2(f[2], r * 0.9)]:
 			pts.append(ArmsHD._wrap(fr, half, key.x, h, key.y))
-		ArmsHD._finger(k, pts, r, a)
+		ArmsHD._finger(k, pts, r, a, KNUCKLES)
 	ArmsHD._filler(k, Basis(e0, e1, a), g + a * 0.004, Vector3(0.014, 0.016, 0.030), Vector3.ZERO)
 	# thumb along the left of the top, pointing at the guard
 	ArmsHD._finger(k, [ArmsHD._wrap(fr, half, 20.0, 0.030, 0.012), ArmsHD._wrap(fr, half, 55.0, 0.012, 0.0125),
-		ArmsHD._wrap(fr, half, 85.0, -0.012, 0.0125), ArmsHD._wrap(fr, half, 92.0, -0.034, 0.0115)], 0.0105, e0)
+		ArmsHD._wrap(fr, half, 85.0, -0.012, 0.0125), ArmsHD._wrap(fr, half, 92.0, -0.034, 0.0115)], 0.0105, e0, KNUCKLES_THUMB)
 	var built: Dictionary = k.build()
 	var faces: PackedVector3Array = k.get_faces().duplicate()
 	faces.append_array((model["body"] as Mesh).get_faces())

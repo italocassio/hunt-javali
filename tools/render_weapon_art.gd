@@ -20,6 +20,7 @@ extends SceneTree
 ## right, bore horizontal; every gun fills FILL_WIDTH of the width (same convention for the five).
 ## Rendered SUPERSAMPLE times larger without MSAA and downsampled premultiplied, so edges have no dark fringe.
 
+const KNIFE_PORTRAIT_LEVEL: int = 4
 const WEAPON_IDS: PackedStringArray = ["carbine_22", "shotgun_12", "rifle_308", "rifle_3006", "rifle_338", "knife"]
 const MODEL_PATH: String = "res://assets/models/weapons/showcase/%s_hd.gd"
 const DEFAULT_OUT: String = "res://assets/ui/weapons"
@@ -189,6 +190,8 @@ func _render(id: String) -> Image:
 		printerr("render_weapon_art: model not found for %s" % id)
 		return null
 	var gun: Node3D = script.new()
+	if gun.has_method(&"set_level"):
+		gun.call(&"set_level", KNIFE_PORTRAIT_LEVEL)   # the knife has four tiers: the portrait shows the premium one
 	vp.add_child(gun)   # _ready builds the model
 	gun.call(&"set_hip_pose", false)
 	gun.call(&"set_cast_shadows", true)

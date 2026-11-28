@@ -23,11 +23,21 @@ const RING_POINTS: int = 12
 const FINGER_SIDES: int = 6
 const AO_RAYS: int = 6
 const AO_RADIUS: float = 0.05
+## Where the left knuckle row sits around the fore-end (degrees: 0 = straight under it, 90 = far flank,
+## -90 = near flank). The wrist comes in from the lower left, so the knuckles land about 90 degrees
+## round from it, on the lower far side; the fingers climb from there and break the top edge.
+const KNUCKLE_DEG: float = -68.0
+## Where the base joints of the four fingers sit. They ride on the outer face of the paddle, a good deal
+## nearer than its far edge, because that face is the part of the hand the eye actually has in view.
+const FINGER_DEG: float = -14.0
 
 # brushes: [albedo sRGB, roughness, feature]   feature: 0 shirt twill, 1 glove, 2 glove cuff, 3 skin, 4 button
 const SHIRT: Array = [Color(0.50, 0.49, 0.36), 0.92, 0]
 const SHIRT_CUFF: Array = [Color(0.45, 0.44, 0.32), 0.90, 0]
 const GLOVE: Array = [Color(0.34, 0.33, 0.24), 0.72, 1]
+## Fingers and thumb: the same glove rubbed pale by use. Reads against the dark stock, where a hand in the
+## flat GLOVE tone disappears.
+const GLOVE_WORN: Array = [Color(0.60, 0.57, 0.45), 0.62, 1]
 const GLOVE_CUFF: Array = [Color(0.105, 0.105, 0.100), 0.88, 2]
 const SKIN: Array = [Color(0.56, 0.45, 0.38), 0.55, 3]
 const BUTTON: Array = [Color(0.30, 0.25, 0.18), 0.40, 4]
@@ -54,8 +64,8 @@ const SPECS: Dictionary = {
 		# bottom of the screen to the fore-end instead of crossing it; the right one leaves by the lower right corner
 		"r_elbow": RifleHD.HIP_ORIGIN + Vector3(0.24, -0.23, -0.03),
 		"r_shoulder": RifleHD.HIP_ORIGIN + Vector3(0.20, -0.42, 0.37),
-		"l_elbow": RifleHD.HIP_ORIGIN + Vector3(-0.25, -0.22, -0.42),
-		"l_shoulder": RifleHD.HIP_ORIGIN + Vector3(-0.36, -0.40, -0.10),
+		"l_elbow": RifleHD.HIP_ORIGIN + Vector3(-0.0260, -0.4395, -0.4600),
+		"l_shoulder": RifleHD.HIP_ORIGIN + Vector3(-0.0660, -0.7995, -0.2300),
 		"knob": Vector3(0.0535, -0.0375, -0.3335),
 		"mag": Vector3(0.0, -0.090, -0.470),
 	},
@@ -75,8 +85,8 @@ const SPECS: Dictionary = {
 		"fore_half": Vector2(0.0148, 0.0172),
 		"r_elbow": CarbineHD.HIP_ORIGIN + Vector3(0.24, -0.23, -0.03),
 		"r_shoulder": CarbineHD.HIP_ORIGIN + Vector3(0.20, -0.42, 0.37),
-		"l_elbow": CarbineHD.HIP_ORIGIN + Vector3(-0.25, -0.216, -0.28),
-		"l_shoulder": CarbineHD.HIP_ORIGIN + Vector3(-0.36, -0.396, 0.04),
+		"l_elbow": CarbineHD.HIP_ORIGIN + Vector3(-0.0260, -0.4355, -0.3200),
+		"l_shoulder": CarbineHD.HIP_ORIGIN + Vector3(-0.0660, -0.7955, -0.0900),
 		"knob": Vector3(0.0418, -0.0298, -0.313),
 		"mag": Vector3(0.0, -0.060, -0.448),
 	},
@@ -94,8 +104,8 @@ const SPECS: Dictionary = {
 		"fore_half": Vector2(0.0237, 0.0227),
 		"r_elbow": ShotgunHD.HIP_ORIGIN + Vector3(0.24, -0.23, -0.03),
 		"r_shoulder": ShotgunHD.HIP_ORIGIN + Vector3(0.20, -0.42, 0.37),
-		"l_elbow": ShotgunHD.HIP_ORIGIN + Vector3(-0.25, -0.224, -0.463),
-		"l_shoulder": ShotgunHD.HIP_ORIGIN + Vector3(-0.36, -0.404, -0.143),
+		"l_elbow": ShotgunHD.HIP_ORIGIN + Vector3(-0.0260, -0.4435, -0.5030),
+		"l_shoulder": ShotgunHD.HIP_ORIGIN + Vector3(-0.0660, -0.8035, -0.2730),
 		# no bolt: `knob` unused; `mag` = under the loading port (shells are pushed in from below)
 		"knob": Vector3(0.0, -0.0305, -0.512),
 		"mag": Vector3(0.0, -0.062, -0.512),
@@ -114,8 +124,8 @@ const SPECS: Dictionary = {
 		"fore_half": Vector2(0.0257, 0.025),
 		"r_elbow": Rifle3006HD.HIP_ORIGIN + Vector3(0.24, -0.23, -0.03),
 		"r_shoulder": Rifle3006HD.HIP_ORIGIN + Vector3(0.20, -0.42, 0.37),
-		"l_elbow": Rifle3006HD.HIP_ORIGIN + Vector3(-0.25, -0.2235, -0.38),
-		"l_shoulder": Rifle3006HD.HIP_ORIGIN + Vector3(-0.36, -0.4035, -0.06),
+		"l_elbow": Rifle3006HD.HIP_ORIGIN + Vector3(-0.0260, -0.4430, -0.4200),
+		"l_shoulder": Rifle3006HD.HIP_ORIGIN + Vector3(-0.0660, -0.8030, -0.1900),
 		"knob": Vector3(0.0345, 0.0016, -0.434),   # operating handle (semi-auto: not worked by the hands)
 		"mag": Vector3(0.0, -0.088, -0.503),      # lower half of the detachable box
 	},
@@ -133,8 +143,8 @@ const SPECS: Dictionary = {
 		"fore_half": Vector2(0.0187, 0.028),
 		"r_elbow": Rifle338HD.HIP_ORIGIN + Vector3(0.24, -0.23, -0.03),
 		"r_shoulder": Rifle338HD.HIP_ORIGIN + Vector3(0.20, -0.42, 0.37),
-		"l_elbow": Rifle338HD.HIP_ORIGIN + Vector3(-0.256, -0.2305, -0.40),
-		"l_shoulder": Rifle338HD.HIP_ORIGIN + Vector3(-0.366, -0.4105, -0.08),
+		"l_elbow": Rifle338HD.HIP_ORIGIN + Vector3(-0.0260, -0.4500, -0.4400),
+		"l_shoulder": Rifle338HD.HIP_ORIGIN + Vector3(-0.0660, -0.8100, -0.2100),
 		# the .308 bolt scaled 1.1 across and moved back by BOLT_SHIFT
 		"knob": Vector3(0.0535 * 1.1, -0.0375 * 1.1, -0.3335 - Rifle338HD.BOLT_SHIFT),
 		"mag": Vector3(0.0, -0.094, -0.500),
@@ -244,27 +254,28 @@ static func _right_arm(k: HDMesh, spec: Dictionary) -> void:
 	var elbow: Vector3 = (spec["r_elbow"] as Vector3) - o
 	var shoulder: Vector3 = (spec["r_shoulder"] as Vector3) - o
 	var palm: Array = [
-		[_wrap(fr, half, 32.0, 0.010, 0.012), 0.039, 0.010],
-		[_wrap(fr, half, -5.0, 0.008, 0.015), 0.042, 0.013],
-		[_wrap(fr, half, -42.0, 0.002, 0.018), 0.039, 0.016],
-		[(_wrap(fr, half, -42.0, 0.002, 0.018) + wrist) * 0.5 + e0 * 0.005, 0.034, 0.019],
+		[_wrap(fr, half, 32.0, 0.010, 0.012), 0.050, 0.020],
+		[_wrap(fr, half, -5.0, 0.008, 0.015), 0.051, 0.023],
+		[_wrap(fr, half, -42.0, 0.002, 0.018), 0.044, 0.022],
+		[(_wrap(fr, half, -42.0, 0.002, 0.018) + wrist) * 0.5 + e0 * 0.005, 0.033, 0.019],
 	]
-	_arm_tube(k, palm, wrist, elbow, shoulder, a, 1.0)
-	# fingers wrap the front strap and end on the left flank
+	_arm_tube(k, palm, wrist, elbow, shoulder, a, 1.0, GLOVE_WORN, 0.032, Vector2(0.023, 0.018))
+	# fingers wrap the front strap and end on the left flank; thick, with clear gaps, as on the reference
 	k.surface(0)
-	_paint(k, GLOVE)
-	for f: Array in [[-0.006, 0.0098, 200.0], [0.0135, 0.0094, 196.0], [0.030, 0.0085, 186.0]]:
+	_paint(k, GLOVE_WORN)
+	for f: Array in [[-0.009, 0.0118, 200.0], [0.0145, 0.0115, 196.0], [0.0345, 0.0104, 186.0]]:
 		var h: float = f[0]
 		var r: float = f[1]
 		var pts: Array = []
-		for key: Vector2 in [Vector2(26.0, r + 0.008), Vector2(72.0, r + 0.001), Vector2(122.0, r), Vector2(166.0, r * 0.96), Vector2(f[2], r * 0.9)]:
+		for key: Vector2 in [Vector2(26.0, r + 0.009), Vector2(72.0, r + 0.001), Vector2(122.0, r), Vector2(166.0, r * 0.96), Vector2(f[2], r * 0.9)]:
 			pts.append(_wrap(fr, half, key.x, h + (key.x - 26.0) * 0.00002, key.y))
-		_finger(k, pts, r, a)
+		_finger(k, pts, r, a, 0.7)
 	# inside of the fist (hidden in the grip): fills the hole when the hand lets go to work the bolt
 	_filler(k, Basis(e0, e1, a), g + a * 0.012, Vector3(0.016, 0.020, 0.028), o)
 	# index along the right side of the guard to the trigger blade, thumb over the wrist of the stock
-	_finger(k, spec["trigger"], 0.0092, Vector3.UP)
-	_finger(k, spec["thumb_r"], 0.0105, Vector3.FORWARD)
+	_paint(k, GLOVE_WORN)
+	_finger(k, spec["trigger"], 0.0112, Vector3.UP, 0.7)
+	_finger(k, spec["thumb_r"], 0.0135, Vector3.FORWARD, 0.7)
 
 
 static func _left_arm(k: HDMesh, spec: Dictionary) -> void:
@@ -275,31 +286,43 @@ static func _left_arm(k: HDMesh, spec: Dictionary) -> void:
 	var half: Vector2 = spec["fore_half"]
 	var fr: Transform3D = Transform3D(Basis(e0, e1, a), c)
 	var o: Vector3 = spec["origin"]
-	var wrist: Vector3 = c + e0 * 0.022 - e1 * 0.060 - a * 0.012
+	# The eye looks almost straight down the barrel, so whichever part of the hand is on the near flank hides
+	# everything behind it. With the wrist coming up from straight below, the knuckle row lands on that near
+	# flank (theta 0 = under, 90 = far, -90 = near): the back of the hand faces the eye, and the fingers climb
+	# the near face and over the top, where they are the nearest thing to the camera instead of the furthest.
+	var wrist: Vector3 = c + e0 * 0.076 + e1 * 0.004 - a * 0.010
 	var elbow: Vector3 = (spec["l_elbow"] as Vector3) - o
 	var shoulder: Vector3 = (spec["l_shoulder"] as Vector3) - o
+	var knuck: Vector3 = _wrap(fr, half, KNUCKLE_DEG, 0.008, 0.010)
 	var palm: Array = [
-		[_wrap(fr, half, 35.0, 0.003, 0.012), 0.039, 0.010],
-		[_wrap(fr, half, -5.0, 0.003, 0.015), 0.042, 0.013],
-		[_wrap(fr, half, -42.0, 0.000, 0.018), 0.039, 0.016],
-		[(_wrap(fr, half, -42.0, 0.0, 0.018) + wrist) * 0.5 + e0 * 0.004, 0.034, 0.019],
+		[knuck, 0.055, 0.021],
+		[knuck.lerp(wrist, 0.28), 0.054, 0.023],
+		[knuck.lerp(wrist, 0.58), 0.045, 0.023],
+		[knuck.lerp(wrist, 0.84), 0.033, 0.020],
 	]
-	_arm_tube(k, palm, wrist, elbow, shoulder, a, -1.0)
+	_arm_tube(k, palm, wrist, elbow, shoulder, a, 1.0, GLOVE_WORN, 0.032, Vector2(0.023, 0.018))
 	k.surface(0)
-	_paint(k, GLOVE)
-	# fingers curl up the right flank; the index is the most forward
-	# tips curl over the top edge, beside the barrel, where the eye sees them
-	for f: Array in [[0.029, 0.0096, 172.0], [0.010, 0.0102, 178.0], [-0.009, 0.0098, 174.0], [-0.026, 0.0089, 162.0]]:
+	_paint(k, GLOVE_WORN)
+	# [h along the fore-end (index the most forward), radius, angle of the tip, rake of the base joint].
+	# Short and thick, base joint the widest, rounded tip; they wrap toward -180, i.e. up the near face and
+	# over the top edge, so the whole second half of each one is in open view.
+	for f: Array in [[0.0500, 0.0150, -198.0, -7.0], [0.0170, 0.0156, -192.0, -2.0],
+			[-0.0160, 0.0150, -186.0, 4.0], [-0.0490, 0.0136, -178.0, 9.0]]:
 		var h: float = f[0]
 		var r: float = f[1]
+		var base: float = KNUCKLE_DEG + float(f[3])
+		var span: float = (float(f[2]) - base) / 112.0
 		var pts: Array = []
-		for key: Vector2 in [Vector2(28.0, r + 0.008), Vector2(68.0, r + 0.001), Vector2(108.0, r), Vector2(145.0, r * 0.97), Vector2(f[2], r * 0.92)]:
-			pts.append(_wrap(fr, half, key.x, h, key.y))
-		_finger(k, pts, r, a)
-	_filler(k, Basis(e0, e1, a), c + a * 0.002, Vector3(0.016, 0.019, 0.034), o)
-	# thumb along the left flank, pointing at the muzzle
-	_finger(k, [_wrap(fr, half, -62.0, -0.014, 0.022), _wrap(fr, half, -90.0, 0.002, 0.012), _wrap(fr, half, -100.0, 0.022, 0.0105),
-		_wrap(fr, half, -104.0, 0.040, 0.0095)], 0.0105, Vector3.UP)
+		for key: Vector2 in [Vector2(0.0, r + 0.005), Vector2(28.0, r + 0.001), Vector2(56.0, r * 0.98),
+				Vector2(84.0, r * 0.96), Vector2(112.0, r * 0.94)]:
+			pts.append(_wrap(fr, half, base + key.x * span, h, key.y))
+		_finger(k, pts, r, a, 0.9)
+	_filler(k, Basis(e0, e1, a), c + a * 0.002, Vector3(0.016, 0.019, 0.044), o)
+	# thumb: wrapped across the underside toward the far flank, where a real support thumb goes on a slim
+	# fore-end; it keeps the near face clear for the fingers
+	_paint(k, GLOVE_WORN)
+	_finger(k, [_wrap(fr, half, -46.0, 0.062, 0.028), _wrap(fr, half, -18.0, 0.050, 0.024), _wrap(fr, half, 14.0, 0.032, 0.0195),
+		_wrap(fr, half, 40.0, 0.010, 0.0170), _wrap(fr, half, 56.0, -0.014, 0.0160)], 0.0170, Vector3.UP, 0.9)
 
 
 ## Glove-coloured ellipsoid in the hole of a closed hand (frame basis = the hand's wrap frame).
@@ -317,28 +340,33 @@ static func _paint(k: HDMesh, brush: Array, wear: float = 0.0) -> void:
 
 ## Palm + wrist + glove cuff + skin + shirt cuff + sleeve, one smooth tube from the knuckles to the
 ## shoulder. `palm` = [[point, half width, half thickness], ...] from the knuckles to the wrist.
-static func _arm_tube(k: HDMesh, palm: Array, wrist: Vector3, elbow: Vector3, shoulder: Vector3, width_axis: Vector3, side: float) -> void:
+static func _arm_tube(k: HDMesh, palm: Array, wrist: Vector3, elbow: Vector3, shoulder: Vector3, width_axis: Vector3, side: float, hand_brush: Array = GLOVE, cuff_at: float = 0.032,
+		wrist_half: Vector2 = Vector2(0.028, 0.020)) -> void:
 	var fdir: Vector3 = (elbow - wrist).normalized()
 	# [point, half width, half thickness, brush, folds]
 	var keys: Array = []
 	for p: Array in palm:
-		keys.append([p[0], p[1], p[2], GLOVE, 0.0])
-	keys.append([wrist, 0.028, 0.020, GLOVE, 0.0])
-	keys.append([wrist + fdir * 0.020, 0.029, 0.021, GLOVE, 0.0])
-	keys.append([wrist + fdir * 0.032, 0.031, 0.0235, GLOVE_CUFF, 0.0])
-	keys.append([wrist + fdir * 0.034, 0.027, 0.020, SKIN, 0.0])
-	keys.append([wrist + fdir * 0.040, 0.0275, 0.0205, SKIN, 0.0])
+		keys.append([p[0], p[1], p[2], hand_brush, 0.0])
+	# `hand_brush` stops at the wrist: the tone break between a pale hand and a dark sleeve is what cuts the
+	# hand out of the stock behind it. A segment takes the brush of the key it ENDS on.
+	keys.append([wrist, wrist_half.x, wrist_half.y, hand_brush, 0.0])
+	keys.append([wrist + fdir * 0.018, 0.029, 0.021, GLOVE, 0.0])
+	var cu: float = cuff_at
+	keys.append([wrist + fdir * (cu - 0.004), 0.0300, 0.0220, GLOVE, 0.0])
+	keys.append([wrist + fdir * cu, 0.031, 0.0235, GLOVE_CUFF, 0.0])
+	keys.append([wrist + fdir * (cu + 0.002), 0.027, 0.020, SKIN, 0.0])
+	keys.append([wrist + fdir * (cu + 0.008), 0.0275, 0.0205, SKIN, 0.0])
 	# buttoned shirt cuff with a rolled rim at both ends
-	keys.append([wrist + fdir * 0.040, 0.0275, 0.0205, SHIRT_CUFF, 0.0])
-	keys.append([wrist + fdir * 0.043, 0.0355, 0.0285, SHIRT_CUFF, 0.0])
-	keys.append([wrist + fdir * 0.052, 0.0340, 0.0270, SHIRT_CUFF, 0.0])
-	keys.append([wrist + fdir * 0.086, 0.0350, 0.0280, SHIRT_CUFF, 0.02])
-	keys.append([wrist + fdir * 0.091, 0.0365, 0.0295, SHIRT_CUFF, 0.0])
+	keys.append([wrist + fdir * (cu + 0.008), 0.0275, 0.0205, SHIRT_CUFF, 0.0])
+	keys.append([wrist + fdir * (cu + 0.011), 0.0355, 0.0285, SHIRT_CUFF, 0.0])
+	keys.append([wrist + fdir * (cu + 0.020), 0.0340, 0.0270, SHIRT_CUFF, 0.0])
+	keys.append([wrist + fdir * (cu + 0.054), 0.0350, 0.0280, SHIRT_CUFF, 0.02])
+	keys.append([wrist + fdir * (cu + 0.059), 0.0365, 0.0295, SHIRT_CUFF, 0.0])
 	# sleeve: pinched at the cuff seam, two bunched volume folds, widening to the elbow
-	keys.append([wrist + fdir * 0.094, 0.031, 0.025, SHIRT, 0.0])
-	keys.append([wrist + fdir * 0.118, 0.043, 0.033, SHIRT, 0.10])
-	keys.append([wrist + fdir * 0.150, 0.038, 0.030, SHIRT, 0.04])
-	keys.append([wrist + fdir * 0.190, 0.046, 0.035, SHIRT, 0.12])
+	keys.append([wrist + fdir * (cu + 0.062), 0.031, 0.025, SHIRT, 0.0])
+	keys.append([wrist + fdir * (cu + 0.086), 0.043, 0.033, SHIRT, 0.10])
+	keys.append([wrist + fdir * (cu + 0.118), 0.038, 0.030, SHIRT, 0.04])
+	keys.append([wrist + fdir * (cu + 0.158), 0.046, 0.035, SHIRT, 0.12])
 	var fore_len: float = wrist.distance_to(elbow)
 	keys.append([wrist + fdir * maxf(fore_len * 0.70, 0.24), 0.046, 0.036, SHIRT, 0.06])
 	keys.append([elbow, 0.050, 0.040, SHIRT, 0.09])
@@ -370,7 +398,7 @@ static func _arm_tube(k: HDMesh, palm: Array, wrist: Vector3, elbow: Vector3, sh
 		var w: float = keys[i][1]
 		var d: float = keys[i][2]
 		var fold: float = keys[i][4]
-		var exp_n: float = 2.6 if i < palm.size() else 2.0
+		var exp_n: float = 2.25 if i < palm.size() else 2.0
 		var ring: PackedVector3Array = PackedVector3Array()
 		for j in RING_POINTS:
 			var ang: float = TAU * float(j) / float(RING_POINTS)
@@ -387,15 +415,30 @@ static func _arm_tube(k: HDMesh, palm: Array, wrist: Vector3, elbow: Vector3, sh
 		perim.push_back(PI * (w + d))
 	k.surface(0)
 	k.begin_part()
-	# knuckle end: rounded cap
-	_paint(k, GLOVE)
-	var cap: PackedVector3Array = PackedVector3Array()
-	var tip: Vector3 = centers[0] - tans[0] * 0.008
-	for q: Vector3 in rings[0]:
-		cap.push_back(centers[0] + (q - centers[0]) * 0.72 - tans[0] * 0.006)
-	_skin(k, [cap, rings[0]], [centers[0] - tans[0] * 0.006, centers[0]], PackedFloat32Array([0.0, 0.006]), PackedFloat32Array([perim[0], perim[0]]))
+	# knuckle end: domed cap (two rings on a quarter ellipse, then a fan) instead of a flat wedge
+	_paint(k, hand_brush)
+	var dome: float = keys[0][2] * 1.2
+	var caps: Array = []
+	var cap_c: Array[Vector3] = []
+	var cap_a: PackedFloat32Array = PackedFloat32Array()
+	var cap_p: PackedFloat32Array = PackedFloat32Array()
+	for step: Vector2 in [Vector2(0.60, 0.80), Vector2(0.88, 0.47)]:
+		var ring: PackedVector3Array = PackedVector3Array()
+		var off: Vector3 = tans[0] * (dome * step.y)
+		for q: Vector3 in rings[0]:
+			ring.push_back(centers[0] + (q - centers[0]) * step.x - off)
+		caps.append(ring)
+		cap_c.append(centers[0] - off)
+		cap_a.push_back(dome * (1.0 - step.y))
+		cap_p.push_back(perim[0] * step.x)
+	caps.append(rings[0])
+	cap_c.append(centers[0])
+	cap_a.push_back(dome)
+	cap_p.push_back(perim[0])
+	_skin(k, caps, cap_c, cap_a, cap_p)
+	var tip: Vector3 = centers[0] - tans[0] * dome
 	for q in RING_POINTS:
-		k.tri(tip, cap[q], cap[(q + 1) % RING_POINTS], -tans[0])
+		k.tri(tip, caps[0][q], caps[0][(q + 1) % RING_POINTS], -tans[0])
 	for i in n - 1:
 		_paint(k, keys[i + 1][3])
 		_skin(k, [rings[i], rings[i + 1]], [centers[i], centers[i + 1]], along.slice(i, i + 2), perim.slice(i, i + 2))
@@ -430,8 +473,15 @@ static func _skin(k: HDMesh, rings: Array, centers: Array, along: PackedFloat32A
 				Vector2(fb * perim[i + 1], along[i + 1]), Vector2(fa * perim[i + 1], along[i + 1]))
 
 
-## Gloved finger: tube through `pts` (smoothed), tapering, rounded tip.
-static func _finger(k: HDMesh, pts: Array, radius: float, right_ref: Vector3) -> void:
+## Gaussian bump of width `w` centred on `c`, for the joint profile of a finger.
+static func _bump(t: float, c: float, w: float) -> float:
+	var x: float = (t - c) / w
+	return exp(-x * x)
+
+
+## Gloved finger: tube through `pts` (smoothed), tapering, rounded tip. `knuckles` (0..1) swells the three
+## joints and pinches the shafts between them, so a curled finger reads as a finger instead of a smooth rod.
+static func _finger(k: HDMesh, pts: Array, radius: float, right_ref: Vector3, knuckles: float = 0.0) -> void:
 	var path: Array = HDMesh.smooth_path(pts, 2)
 	var n: int = path.size()
 	var last: Vector3 = path[n - 1]
@@ -439,7 +489,13 @@ static func _finger(k: HDMesh, pts: Array, radius: float, right_ref: Vector3) ->
 	path.append(last + dir * radius * 0.55)
 	var scales: PackedFloat32Array = PackedFloat32Array()
 	for i in n:
-		scales.push_back(lerpf(1.0, 0.86, float(i) / float(n - 1)))
+		var t: float = float(i) / float(n - 1)
+		var s: float = lerpf(1.0, 0.86, t)
+		if knuckles > 0.0:
+			# base joint, middle joint, last joint; the two shafts between them are slightly waisted
+			s *= 1.0 + knuckles * (0.24 * _bump(t, 0.05, 0.14) + 0.19 * _bump(t, 0.47, 0.13)
+				+ 0.12 * _bump(t, 0.79, 0.10) - 0.11 * _bump(t, 0.26, 0.11) - 0.08 * _bump(t, 0.64, 0.10))
+		scales.push_back(s)
 	scales.push_back(0.5)
 	k.crease_deg = 70.0
 	k.sweep(path, HDMesh.circle_section(radius, FINGER_SIDES), right_ref, scales)

@@ -59,9 +59,13 @@ const DRONE_POST: Array = [
 	[1.00, Vector3(0.0, -0.66, -0.52), Vector3(10, 0, 0)],
 ]
 
-# medkit: left fist (design = mirror image of a right fist), forearm dir in the right-hand design space
-const LEFT_HOLD: Vector3 = Vector3(0.10, -0.03, -0.55)
+# medkit: left fist (design = mirror image of a right fist), forearm dir in the right-hand design space.
+# LEFT_BACK is where the back of the left hand faces in CAMERA space: up and toward the eye, so the gesture
+# shows the knuckles and the curl of a closed fist instead of the edge of the hand.
+const LEFT_HOLD: Vector3 = Vector3(0.11, -0.05, -0.54)
 const LEFT_FORE: Vector3 = Vector3(0.85, -0.40, 0.35)
+const LEFT_BACK: Vector3 = Vector3(0.34, 0.52, 0.78)
+const LEFT_GRIP: Vector2 = Vector2(0.010, 0.013)
 const RIGHT_FORE: Vector3 = Vector3(0.40, -0.55, 0.75)
 const WRAP_AT: Vector2 = Vector2(0.095, 0.190)      # forearm distance from the wrist where the ribbon starts / ends
 const WRAP_R: float = 0.050
@@ -342,10 +346,12 @@ static func _commit(k: HDMesh) -> ArrayMesh:
 	return mesh
 
 
-## Gloved right fist around a bar of half section `half` whose axis is frame.z (fingers over frame.y, palm on the
-## frame.x side), forearm leaving along `fore` (camera space). Surface 0 = glove/sleeve. Returns the wrist point.
-static func _hand(k: HDMesh, half: Vector2, frame: Basis, fore: Vector3, origin: Vector3 = Vector3.ZERO) -> Vector3:
-	var thumb_dir: float = 1.0
+## Gloved right hand closed around a bar of half section `half` whose axis is frame.z: frame.x is the back of
+## the hand, frame.y points from the wrist to the knuckles, frame.z runs from the little finger to the thumb.
+## The forearm leaves along `fore` (same space). `curl` (0..1) closes the hand further: at 1 the fingertips
+## come back onto the palm and the thumb folds across them, i.e. a fist holding nothing. Surface 0 = glove /
+## sleeve. Returns the wrist point.
+static func _hand(k: HDMesh, half: Vector2, frame: Basis, fore: Vector3, origin: Vector3 = Vector3.ZERO, curl: float = 0.0) -> Vector3:
 	var e0: Vector3 = frame.x
 	var e1: Vector3 = frame.y
 	var a: Vector3 = frame.z
@@ -356,24 +362,34 @@ static func _hand(k: HDMesh, half: Vector2, frame: Basis, fore: Vector3, origin:
 	var shoulder: Vector3 = wrist + fd * SHOULDER_LEN
 	k.crease_deg = 50.0
 	var palm: Array = [
-		[ArmsHD._wrap(fr, half, 20.0, 0.004, 0.012), 0.036, 0.010],
-		[ArmsHD._wrap(fr, half, -20.0, 0.004, 0.015), 0.040, 0.013],
-		[ArmsHD._wrap(fr, half, -55.0, 0.006, 0.018), 0.038, 0.016],
+		[ArmsHD._wrap(fr, half, 20.0, 0.004, 0.012), 0.039, 0.011],
+		[ArmsHD._wrap(fr, half, -20.0, 0.004, 0.015), 0.040, 0.014],
+		[ArmsHD._wrap(fr, half, -55.0, 0.006, 0.018), 0.038, 0.017],
 		[(ArmsHD._wrap(fr, half, -55.0, 0.006, 0.018) + wrist) * 0.5, 0.034, 0.019],
 	]
 	ArmsHD._arm_tube(k, palm, wrist, elbow, shoulder, a, 1.0)
 	k.surface(0)
 	ArmsHD._paint(k, ArmsHD.GLOVE)
-	for f: Array in [[-0.021, 0.0092, 192.0], [-0.003, 0.0096, 196.0], [0.015, 0.0092, 194.0], [0.032, 0.0084, 184.0]]:
+	# little finger first, index last (the thumb side): the index is the longest and thickest, and the base
+	# joints ride on an arc (the middle one highest) so the knuckle row is not a straight bar
+	for f: Array in [[-0.0290, 0.0083, 186.0, 0.0060], [-0.0080, 0.0091, 196.0, 0.0092],
+			[0.0130, 0.0097, 198.0, 0.0102], [0.0340, 0.0095, 194.0, 0.0080]]:
 		var h: float = f[0]
 		var r: float = f[1]
+		var last: float = lerpf(float(f[2]), float(f[2]) + 48.0, curl)
+		var span: float = (last - 14.0) / 182.0
 		var pts: Array = []
-		for key: Vector2 in [Vector2(14.0, r + 0.007), Vector2(60.0, r + 0.001), Vector2(110.0, r), Vector2(155.0, r * 0.96), Vector2(f[2], r * 0.9)]:
-			pts.append(ArmsHD._wrap(fr, half, key.x, h, key.y))
-		ArmsHD._finger(k, pts, r, a)
-	ArmsHD._filler(k, frame, a * 0.004, Vector3(0.014, 0.016, 0.030), origin)
-	ArmsHD._finger(k, [ArmsHD._wrap(fr, half, 20.0, 0.030 * thumb_dir, 0.012), ArmsHD._wrap(fr, half, 55.0, 0.012 * thumb_dir, 0.0125),
-		ArmsHD._wrap(fr, half, 85.0, -0.012 * thumb_dir, 0.0125), ArmsHD._wrap(fr, half, 92.0, -0.034 * thumb_dir, 0.0115)], 0.0105, e0)
+		for key: Vector2 in [Vector2(0.0, r + float(f[3])), Vector2(46.0, r + 0.001), Vector2(96.0, r), Vector2(141.0, r * 0.96), Vector2(182.0, r * 0.9)]:
+			pts.append(ArmsHD._wrap(fr, half, 14.0 + key.x * span, h, key.y))
+		ArmsHD._finger(k, pts, r, a, 0.85)
+	ArmsHD._filler(k, frame, a * 0.004, Vector3(0.014 + half.x, 0.016 + half.y, 0.030), origin)
+	# thumb: out of the ball of the hand, then across the front of the fingers (a closed fist) or around
+	# whatever is held (an open grip)
+	var thumb: Array = [ArmsHD._wrap(fr, half, lerpf(20.0, -26.0, curl), 0.030, lerpf(0.012, 0.017, curl)),
+		ArmsHD._wrap(fr, half, lerpf(55.0, 22.0, curl), 0.012, lerpf(0.0125, 0.020, curl)),
+		ArmsHD._wrap(fr, half, lerpf(85.0, 90.0, curl), -0.012, lerpf(0.0125, 0.016, curl)),
+		ArmsHD._wrap(fr, half, lerpf(92.0, 134.0, curl), -0.034, lerpf(0.0115, 0.013, curl))]
+	ArmsHD._finger(k, thumb, 0.0107, e0, 0.7)
 	return wrist
 
 
@@ -505,10 +521,14 @@ static func _fallback_drone() -> Node3D:
 
 static func _build_medkit() -> Dictionary:
 	var mirror_fore: Vector3 = _mirror_vec(LEFT_FORE.normalized())
-	# left fist (built as a right one, then mirrored): fist around a vertical bar, forearm to the lower left
+	# Left fist, built as a right hand and then mirrored. The hand carries on from the forearm (knuckles away
+	# from the elbow) with the back of the hand turned to the eye, and it holds nothing: a real closed fist.
 	var lk: HDMesh = HDMesh.new()
-	var lframe: Basis = _frame(Vector3.UP, Vector3(0.0, 0.0, -1.0))
-	var wrist_design: Vector3 = _hand(lk, Vector2(0.020, 0.020), lframe, LEFT_FORE)
+	var e1d: Vector3 = -LEFT_FORE.normalized()
+	var backd: Vector3 = _mirror_vec(LEFT_BACK.normalized())
+	var e0d: Vector3 = (backd - e1d * backd.dot(e1d)).normalized()
+	var lframe: Basis = Basis(e0d, e1d, e0d.cross(e1d))
+	var wrist_design: Vector3 = _hand(lk, LEFT_GRIP, lframe, LEFT_FORE, Vector3.ZERO, 1.0)
 	var lbuilt: Dictionary = lk.build()
 	_mirrored(lbuilt, 0, 0)
 	var left: ArrayMesh = ArrayMesh.new()

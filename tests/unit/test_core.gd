@@ -151,7 +151,8 @@ func test_net_codec_level2_constants() -> void:
 	# event types stay unique and in their lanes (host events 0x21..0x3F, client claims > 0x40)
 	var events: Array[int] = [NetCodec.EV_BOAR_SPAWN, NetCodec.EV_BOAR_HIT, NetCodec.EV_BOAR_ATTACK, NetCodec.EV_BOAR_DEATH,
 		NetCodec.EV_CROP_EATEN, NetCodec.EV_BAIT, NetCodec.EV_DOG_MARK, NetCodec.EV_DOG_CMD, NetCodec.EV_MESSAGE,
-		NetCodec.EV_HUNT_END, NetCodec.EV_FULL_SYNC, NetCodec.EV_HORDE_WAVE, NetCodec.EV_HUNTER_REVIVED, NetCodec.EV_AMMO_CRATE]
+		NetCodec.EV_HUNT_END, NetCodec.EV_FULL_SYNC, NetCodec.EV_HORDE_WAVE, NetCodec.EV_HUNTER_REVIVED, NetCodec.EV_AMMO_CRATE,
+		NetCodec.EV_BOSS_HP]
 	var seen: Dictionary = {}
 	for e: int in events:
 		ok(e >= 0x21 and e <= 0x3F, "evento 0x%02X na faixa do anfitriao" % e)

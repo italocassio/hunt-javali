@@ -39,6 +39,7 @@ const HUNTER_REVIVED_BYTES: int = 2      # EV_HUNTER_REVIVED body: target_slot u
 const AMMO_CRATE_BYTES: int = 3          # EV_AMMO_CRATE body: crate u8, available u8, taker_slot u8
 const REVIVE_CLAIM_BYTES: int = 1        # C_REVIVE body: target_slot u8
 const AMMO_CRATE_CLAIM_BYTES: int = 1    # C_AMMO_CRATE body: crate u8
+const BOSS_HP_BYTES: int = 1             # EV_BOSS_HP body: pct u8 (0..100)
 ## Rounding slack of the u16 fields when comparing a claim with the weapon limits.
 const DAMAGE_SLACK: float = 1.0 / DAMAGE_WIRE_SCALE
 const DIST_SLACK_M: float = 1.0 / DIST_WIRE_SCALE
@@ -326,6 +327,14 @@ func queue_ammo_crate(crate: int, available: bool, taker_slot: int) -> void:
 	_events.put_u8(crate & MAX_U8)
 	_events.put_u8(1 if available else 0)
 	_events.put_u8(taker_slot & MAX_U8)
+	_end(at)
+
+
+## Horde boss, EV_BOSS_HP: pct u8 (0..100). Sent at 4 Hz while the boss lives and once at 0 when it dies
+## (docs/plano_horda_boss.md section 4.2 item 5); the repetition is also what a rejoining client reads.
+func queue_boss_health(pct: float) -> void:
+	var at: int = _begin(NetCodec.EV_BOSS_HP)
+	_events.put_u8(clampi(roundi(pct), 0, 100))
 	_end(at)
 
 

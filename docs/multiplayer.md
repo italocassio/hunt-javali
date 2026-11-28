@@ -622,6 +622,7 @@ Direção: H = anfitrião, C = cliente. Pista: E = eventos (confiável, ordenado
 | `EV_HUNT_END` | H→C | E | 1× | `outcome u8, crop u16 (×0,01 %), duration_s u16, killed u8, total u8, n u8, n×{slot u8, kills u8, money u32}` | 8+6n |
 | `EV_FULL_SYNC` (F8) | H→C | E | 1× por reentrada | `t_ms u32, crop u16 (×0,01 %), killed u8, total u8, n_records u16`, seguido de `n_records` registros repetidos (§4.7.6) | 10 |
 | `EV_HORDE_WAVE` (0.5.0, `0x2C`) | H→C | E | 2 por onda, só em horda | `wave u8 (1..N), wave_count u8, phase u8 (0 intervalo, 1 onda), countdown u16 (×0,1 s, para cima; 0 na onda), wave_total u8, killed_before u8` (`docs/horda.md` §9.2) | 7 |
+| `EV_BOSS_HP` (0.9.11, `0x2F`) | H→C | E | 4 Hz enquanto o chefão da horda vive | `pct u8 (0..100)` | 1 |
 | `C_SHOT` | C→H | E | por disparo | `shot_id u32, weapon u8, origin xz 2×u16, origin_y i16 (cm), n u8, n×{boar u8, zone u8, damage u16 (×0,1), dist u16 (×0,1 m)}` | 12+6n |
 | `C_CHARGE_HIT` | C→H | E | por investida sofrida | `boar u8` | 1 |
 | `C_BAIT` | C→H | E | por ceva | `xz 2×u16` | 4 |
@@ -645,7 +646,9 @@ sem PvP).
 
 `msg` de `EV_MESSAGE`: 0 vara entrou, 1 solitário, 2 cachaço (`hunt_controller.gd:13–15`); 3 cão não
 farejou, 4 cão recuou, 5 cão pronto (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`, `NET_MSG_RECOVERED`; texto em
-`Dog.MESSAGES`). O texto continua no pacote B.
+`Dog.MESSAGES`); **6 chefão** (0.9.11, `HuntController.NET_MSG_BOSS`/`MSG_BOSS`). O chefão ficou no 6, e não no 3,
+porque 3–5 já são do cão: os índices 3–5 de `NET_MESSAGES` são buracos vazios que caem no `Dog.MESSAGES`. O texto
+continua no pacote B.
 
 O cão de cada peer trafega no resumo de loadout: campo `dog` de `L_READY` (índice em `Data.get_dog_ids()`, 255 =
 sem cão), de `L_LOBBY` e `dog[4]` de `L_START` (por slot). O `Net` preenche `NetPeerInfo.dog_id` com eles; é

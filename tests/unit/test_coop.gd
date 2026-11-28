@@ -32,6 +32,10 @@ func _has_alpha(members: Array) -> bool:
 	return members.has("alpha") or members.has(&"alpha")
 
 
+func _has_boss(members: Array) -> bool:
+	return members.has("boss") or members.has(&"boss")
+
+
 # --- the numbers of the contract ---
 
 func test_contract_0_totals_by_player_count() -> void:
@@ -134,6 +138,38 @@ func test_alpha_group_is_never_cloned() -> void:
 		eq(alphas, 1, "so um alfa com %d jogadores" % n)
 
 
+func test_boss_group_is_never_cloned() -> void:
+	## The boss (horde level 2, last wave) is a unique type like the alpha: BoarSpawner.UNIQUE_TYPES.
+	var wave: Array = Data.get_horde_level(2)["waves"].back()["groups"]
+	var boss_before: int = 0
+	var alpha_before: int = 0
+	for grp: Variant in wave:
+		var members: Array = (grp as Dictionary)["members"]
+		boss_before += members.count("boss")
+		alpha_before += members.count("alpha")
+	eq(boss_before, 1, "pre-condicao: a onda 10 tem um chefao")
+	eq(alpha_before, 1, "pre-condicao: a onda 10 tem um alfa")
+	var coop: Dictionary = _coop()
+	for n: int in range(1, 5):
+		var bosses: int = 0
+		var alphas: int = 0
+		var total: int = 0
+		var out: Array = BoarSpawner.scale_groups(wave, n, coop)
+		for grp: Variant in out:
+			var members: Array = (grp as Dictionary)["members"]
+			bosses += members.count("boss")
+			alphas += members.count("alpha")
+			total += members.size()
+		eq(bosses, 1, "so um chefao com %d jogadores" % n)
+		eq(alphas, 1, "so um alfa na onda 10 com %d jogadores" % n)
+		if n > 1:
+			ok(total > _total(wave), "a onda 10 cresce com %d jogadores (%d > %d)" % [n, total, _total(wave)])
+			# clones never carry a unique type
+			for i: int in range(wave.size(), out.size()):
+				var cm: Array = (out[i] as Dictionary)["members"]
+				ok(not _has_boss(cm) and not _has_alpha(cm), "clone %d sem chefao nem alfa" % i)
+
+
 # --- edge cases ---
 
 func test_player_count_out_of_range() -> void:
@@ -155,6 +191,8 @@ func test_degenerate_inputs_terminate() -> void:
 	eq(_total(BoarSpawner.scale_groups(_groups(0), 4, shrink)), 9, "multiplicador < 1 nunca remove javalis")
 	var only_alpha: Array = [{"members": ["alpha"], "spawn_zone": 0, "delay_s": 0.0}]
 	eq(_total(BoarSpawner.scale_groups(only_alpha, 4, coop)), 1, "so alfa: nada para clonar e sem laco infinito")
+	var only_boss: Array = [{"members": ["boss"], "spawn_zone": 0, "delay_s": 0.0}]
+	eq(_total(BoarSpawner.scale_groups(only_boss, 4, coop)), 1, "so chefao: nada para clonar e sem laco infinito")
 	var only_empty: Array = [{"members": [], "spawn_zone": 0, "delay_s": 0.0}]
 	eq(_total(BoarSpawner.scale_groups(only_empty, 4, coop)), 0, "grupo vazio: sem laco infinito")
 	var big: Dictionary = {"boar_count_mult_by_players": [1.0, 1.0, 1.0, 40.0], "extra_group_delay_s": 1.0}

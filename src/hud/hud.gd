@@ -58,6 +58,10 @@ const HORDE_BANNER_S: float = 3.0
 ## 720 px reference height. It must end above the context message text (band starts at CONTEXT_TOP_FRAC).
 const HORDE_BANNER_GAP_PX: float = 8.0
 const HORDE_BANNER_HEIGHT_PX: float = 40.0
+## The boss bar (horde level 2, last wave) hangs under the space of the wave banner: its top is the real bottom edge of
+## the crop panel plus the banner gap and height. It is emptied on pct 0 and hidden BOSS_HIDE_DELAY_S later.
+const BOSS_HIDE_DELAY_S: float = 1.0
+const BOSS_CONTEXT_GAP_PX: float = 6.0   # the context message band slides down to start this far under the bar
 const SOUND_WAVE_START: StringName = &"horde_wave_start"
 const SOUND_WAVE_CLEAR: StringName = &"horde_wave_clear"
 const ALLY_MSG_S: float = 3.0
@@ -184,6 +188,8 @@ var _count_label: Label = null
 var _wave_label: Label = null
 var _wave_banner: Label = null
 var _crop_panel: PanelContainer = null
+var _boss_bar: BossBar = BossBar.new()
+var _boss_hide_left_s: float = 0.0    # > 0 while the emptied boss bar waits to hide
 var _downed_overlay: ColorRect = null
 var _downed_label: Label = null
 var _downed_hint: Label = null
@@ -321,6 +327,7 @@ func open_pause() -> void:
 
 func on_hunt_ended() -> void:
 	_ended = true
+	_hide_boss_bar()
 	_refresh_onboarding_ui()
 	_touch.end_hunt()
 	_pause.set_enabled(false)
@@ -526,6 +533,10 @@ func _build_messages() -> void:
 	_spectate_hint.add_theme_font_size_override("font_size", SPECTATE_HINT_FONT_PX)
 	_wave_banner = _make_banner("WaveBanner", "", 0.0, COLOR_TEXT)
 	_wave_banner.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_boss_bar.anchor_left = 0.5
+	_boss_bar.anchor_right = 0.5
+	_boss_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_root.add_child(_boss_bar)
 	_build_revive_ui()
 
 
@@ -655,6 +666,7 @@ func _connect_events() -> void:
 	GameEvents.spectate_changed.connect(_on_spectate_changed)
 	GameEvents.horde_wave_changed.connect(_on_horde_wave_changed)
 	GameEvents.horde_wave_progress.connect(_on_horde_wave_progress)
+	GameEvents.horde_boss_health_changed.connect(_on_horde_boss_health)
 	GameEvents.player_downed.connect(_on_player_downed)
 	GameEvents.player_revived.connect(_on_player_revived)
 	GameEvents.hunter_downed.connect(_on_hunter_downed)
@@ -825,6 +837,7 @@ func _process(delta: float) -> void:
 		_place_wave_banner()   # the panel may still be laid out when the banner first shows
 		if _banner_left_s <= 0.0:
 			_wave_banner.visible = false
+	_update_boss_bar(delta)
 	_poll_t -= delta
 	if _poll_t <= 0.0:
 		_poll_t = POLL_INTERVAL_S
@@ -1327,6 +1340,70 @@ func _place_wave_banner() -> void:
 	_wave_banner.offset_bottom = _wave_banner.offset_top + HORDE_BANNER_HEIGHT_PX
 
 
+## Boss health 0..100 (horde level 2, last wave). Above 0 shows and feeds the bar; 0 empties it and hides it after
+## BOSS_HIDE_DELAY_S. Outside the horde, or once the hunt ended, nothing is ever shown.
+func _on_horde_boss_health(pct: float) -> void:
+	if _ended:
+		return
+	if pct > 0.0:
+		if not _horde:
+			return
+		_boss_hide_left_s = 0.0
+		_boss_bar.set_health_pct(pct)
+		_place_boss_bar()
+	elif _boss_bar.visible:
+		_boss_bar.set_health_pct(0.0)
+		_boss_hide_left_s = BOSS_HIDE_DELAY_S
+
+
+func _hide_boss_bar() -> void:
+	_boss_hide_left_s = 0.0
+	_boss_bar.hide_bar()
+	_shift_central_blocks(0.0)
+
+
+## The centred text blocks of the top (all placed by fractional anchors with zero offsets) that sit where the boss bar
+## goes: the context message band and the down / spectate / downed / hint texts.
+func _central_blocks() -> Array[Control]:
+	return [_ctx_msg, _down_banner, _spectate_banner, _spectate_hint, _downed_label, _downed_hint, _hint_banner]
+
+
+## The context message band starts at CONTEXT_TOP_FRAC, which at 720 px is inside the boss bar: while the bar shows,
+## every central block slides down by the same amount, so the first one starts BOSS_CONTEXT_GAP_PX under the bar (both
+## offsets, so heights and the spacing between the blocks stay). 0 puts them back.
+func _shift_central_blocks(shift_px: float) -> void:
+	for block: Control in _central_blocks():
+		block.offset_top = shift_px
+		block.offset_bottom = shift_px
+
+
+## Keeps the bar under the wave banner space while it shows (the panel above may still be laid out the first frames,
+## and the screen may be resized), and runs the hide delay after the boss died.
+func _update_boss_bar(delta: float) -> void:
+	if not _boss_bar.visible:
+		return
+	_place_boss_bar()
+	if _boss_hide_left_s > 0.0:
+		_boss_hide_left_s -= delta
+		if _boss_hide_left_s <= 0.0:
+			_hide_boss_bar()
+
+
+## Top centre, its top at the real bottom edge of the crop panel plus the wave banner's gap and height.
+func _place_boss_bar() -> void:
+	var panel_bottom: float = _crop_panel.global_position.y + _crop_panel.size.y - _root.global_position.y
+	var width: float = BossBar.width_for(_root.size.x)
+	var top: float = panel_bottom + HORDE_BANNER_GAP_PX + HORDE_BANNER_HEIGHT_PX
+	_boss_bar.anchor_top = 0.0
+	_boss_bar.anchor_bottom = 0.0
+	_boss_bar.offset_left = -width * 0.5
+	_boss_bar.offset_right = width * 0.5
+	_boss_bar.offset_top = top
+	_boss_bar.offset_bottom = top + _boss_bar.get_total_height()
+	var context_top: float = _root.size.y * CONTEXT_TOP_FRAC
+	_shift_central_blocks(maxf(_boss_bar.offset_bottom + BOSS_CONTEXT_GAP_PX - context_top, 0.0))
+
+
 func _play_wave_sound(id: StringName) -> void:
 	if Sfx.has_sound(id):
 		Sfx.play(id)
@@ -1550,6 +1627,7 @@ func _on_hunt_ended(result: HuntResult) -> void:
 	_crop_attack = false
 	_wave_banner.visible = false
 	_banner_left_s = 0.0
+	_hide_boss_bar()
 	_set_downed(false)
 	_revive_prompt.visible = false
 	_ammo_prompt.visible = false

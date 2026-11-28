@@ -110,7 +110,10 @@ func _ready() -> void:
 		InputMap.add_action(&"interact")   # package A1 registers it for real; the test must not depend on the order
 		_added_interact_action = true
 	if _shot_path != "":
-		await _screenshot()
+		if OS.get_cmdline_user_args().has("--boss"):
+			await _screenshot_boss(OS.get_cmdline_user_args().has("--touch"))
+		else:
+			await _screenshot()
 		return
 	await _test_ammo()
 	await _test_map_markers()
@@ -121,6 +124,8 @@ func _ready() -> void:
 	await _test_ammo_crate_prompt()
 	await _test_level_1()
 	await _test_contract()
+	await _test_boss_bar()
+	await _test_boss_bar_central_blocks()
 	if _added_interact_action:
 		InputMap.erase_action(&"interact")
 	print("RESULT: %d passed, %d failed, 0 skipped" % [_passed, _failed])
@@ -567,6 +572,177 @@ func _test_contract() -> void:
 	await _free_world(world)
 
 
+## Rectangles (viewport coordinates) of every block of the top of the HUD that the boss bar must keep clear of: compass,
+## crop panel, the space of the wave banner (reserved even while the banner is hidden), the context message band and the
+## top-right column (minimap, wave label).
+func _top_blocks(hud: Hud) -> Dictionary:
+	var blocks: Dictionary = {}
+	var crop: PanelContainer = hud.get("_crop_panel") as PanelContainer
+	blocks["compass"] = (hud.get("_compass") as Control).get_global_rect()
+	blocks["crop_panel"] = crop.get_global_rect()
+	blocks["wave_banner"] = Rect2(crop.global_position.x, crop.get_global_rect().end.y + Hud.HORDE_BANNER_GAP_PX,
+		crop.size.x, Hud.HORDE_BANNER_HEIGHT_PX)
+	blocks["context_message"] = _ctx(hud).get_global_rect()
+	blocks["minimap"] = (hud.get("_minimap") as Control).get_global_rect()
+	blocks["wave_label"] = (hud.get("_wave_label") as Control).get_global_rect()
+	return blocks
+
+
+## Names of the centred text blocks that slide down under the boss bar, and the Hud member of each.
+const CENTRAL_BLOCKS: Dictionary = {
+	"ContextMessage": "_ctx_msg", "DownBanner": "_down_banner", "SpectateBanner": "_spectate_banner",
+	"SpectateHint": "_spectate_hint", "DownedLabel": "_downed_label", "DownedHint": "_downed_hint", "HintBanner": "_hint_banner",
+}
+
+
+## Fallen and spectating states with the boss bar up: no centred block of the top may intersect the bar, and the blocks
+## go back to their own place (offsets 0) when the bar hides.
+func _test_boss_bar_central_blocks() -> void:
+	var window: Window = get_window()
+	var original_size: Vector2i = window.size
+	window.size = Vector2i(1280, 720)   # the reference height: the context band starts inside the bar there
+	var world: FakeWorld = await _make_world(true)
+	var hud: Hud = _hud_of(world)
+	if hud == null:
+		_check("boss_central_hud_found", false)
+		return
+	var fake: FakePlayer = world.player as FakePlayer
+	var bar: BossBar = hud.get("_boss_bar") as BossBar
+	var spectate_slot: int = ALLY_A
+	GameEvents.horde_boss_health_changed.emit(100.0)
+	await _frames(3)
+	# Fallen (horde level 2): "Você caiu!" and the hint.
+	fake.downed = true
+	fake.bleed_left_s = 42.0
+	GameEvents.player_downed.emit(60.0)
+	await _frames(2)
+	_check("boss_central_downed_shown", _shown(hud, "DownedLabel") and _shown(hud, "DownedHint"))
+	_check_central_clear("downed", hud, bar, ["DownedLabel", "DownedHint"])
+	# Bled out and watching an ally: the fall banner, then the spectator banner and its hint.
+	fake.downed = false
+	GameEvents.player_died.emit()
+	await _frames(2)
+	_check("boss_central_down_banner_shown", _shown(hud, "DownBanner"))
+	_check_central_clear("down_banner", hud, bar, ["DownBanner"])
+	GameEvents.spectate_changed.emit(spectate_slot)
+	await _wait(POLL_WAIT_S)
+	_check("boss_central_spectate_shown", _shown(hud, "SpectateBanner") and _shown(hud, "SpectateHint"))
+	_check_central_clear("spectate", hud, bar, ["SpectateBanner", "SpectateHint"])
+	# A context message and a hint on screen too.
+	GameEvents.hud_message_requested.emit("Teste", 2.0)
+	(hud.get("_hint_banner") as HintBanner).show_hint("Dica de teste")
+	await _frames(3)
+	var all_names: Array = CENTRAL_BLOCKS.keys()
+	_check_central_clear("all", hud, bar, all_names)
+	# One shift for every block, equal to what the context band needs, and every block shows no overlap among them.
+	var screen_h: float = (hud.get("_root") as Control).size.y
+	var expected_shift: float = maxf(bar.get_global_rect().end.y + Hud.BOSS_CONTEXT_GAP_PX - screen_h * Hud.CONTEXT_TOP_FRAC, 0.0)
+	var shift: float = (hud.get("_ctx_msg") as Control).offset_top
+	var same: bool = is_equal_approx(shift, expected_shift) and (shift > 0.0 or screen_h > 720.0)
+	for block_name: String in CENTRAL_BLOCKS:
+		var block: Control = hud.get(CENTRAL_BLOCKS[block_name]) as Control
+		same = same and is_equal_approx(block.offset_top, shift) and is_equal_approx(block.offset_bottom, shift)
+	_check("boss_central_same_shift", same, "shift=%.1f expected=%.1f screen_h=%.0f" % [shift, expected_shift, screen_h])
+	# The bar hides (boss dead): everything is back where it was.
+	GameEvents.horde_boss_health_changed.emit(0.0)
+	await _wait(1.3)
+	var back: bool = not bar.visible
+	for block_name: String in CENTRAL_BLOCKS:
+		var block: Control = hud.get(CENTRAL_BLOCKS[block_name]) as Control
+		back = back and is_zero_approx(block.offset_top) and is_zero_approx(block.offset_bottom)
+	_check("boss_central_back_to_zero", back)
+	(hud.get("_hint_banner") as HintBanner).hide_hint()
+	await _free_world(world)
+	window.size = original_size
+	await _frames(2)
+
+
+## Each named block (laid out, visible or not: the rectangle is what the screen reserves for it) must not intersect the
+## bar, and must start at or below the bar's bottom edge.
+func _check_central_clear(state: String, hud: Hud, bar: BossBar, block_names: Array) -> void:
+	var bar_rect: Rect2 = bar.get_global_rect()
+	for block_name: String in block_names:
+		var block: Control = hud.get(CENTRAL_BLOCKS[block_name]) as Control
+		var rect: Rect2 = block.get_global_rect()
+		_check("boss_central_%s_%s_clear_of_bar" % [state, block_name], not rect.intersects(bar_rect) and rect.position.y >= bar_rect.end.y - 0.5,
+			"bar=%s block=%s" % [str(bar_rect), str(rect)])
+
+
+func _test_boss_bar() -> void:
+	var window: Window = get_window()
+	var original_size: Vector2i = window.size
+	var sizes: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(390, 844)]
+	for screen_size: Vector2i in sizes:
+		var touch: bool = screen_size.x < screen_size.y
+		var tag: String = "%dx%d" % [screen_size.x, screen_size.y]
+		window.size = screen_size
+		InputSetup.set_touch_override("on" if touch else "off")
+		var world: FakeWorld = await _make_world(true)
+		var hud: Hud = _hud_of(world)
+		if hud == null:
+			_check("boss_hud_found_" + tag, false)
+			continue
+		await _frames(3)
+		var bar: BossBar = hud.get("_boss_bar") as BossBar
+		_check("boss_bar_hidden_at_start_" + tag, bar != null and not bar.visible and not bar.is_visible_in_tree())
+		_check("boss_bar_ignores_mouse_" + tag, bar.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+		_check("boss_bar_name_" + tag, bar.get_text() == "CACHAÇO REI", bar.get_text())
+		# The boss shows up at 100.
+		GameEvents.horde_boss_health_changed.emit(100.0)
+		await _frames(3)
+		_check("boss_bar_shown_" + tag, bar.is_visible_in_tree())
+		_check("boss_bar_full_" + tag, is_equal_approx(bar.get_fill_pct(), 100.0), str(bar.get_fill_pct()))
+		var screen: Vector2 = hud.get("_root").size
+		var rect: Rect2 = bar.get_global_rect()
+		var expected_w: float = clampf(screen.x * 0.44, 320.0, 720.0)
+		_check("boss_bar_width_" + tag, rect.size.x >= 320.0 and rect.size.x <= 720.0 and is_equal_approx(rect.size.x, expected_w),
+			"%.1f expected %.1f" % [rect.size.x, expected_w])
+		_check("boss_bar_height_" + tag, is_equal_approx(bar.get_bar_rect().size.y, 22.0), str(bar.get_bar_rect().size.y))
+		_check("boss_bar_centred_" + tag, absf(rect.get_center().x - screen.x * 0.5) < 1.0 and rect.position.x >= 0.0
+			and rect.end.x <= screen.x, str(rect))
+		var blocks: Dictionary = _top_blocks(hud)
+		for block_name: String in blocks:
+			var other: Rect2 = blocks[block_name]
+			_check("boss_bar_clear_of_%s_%s" % [block_name, tag], not rect.intersects(other),
+				"bar=%s %s=%s" % [str(rect), block_name, str(other)])
+		_check("boss_bar_below_wave_banner_space_" + tag, rect.position.y >= (blocks["wave_banner"] as Rect2).end.y - 0.5,
+			"bar top %.1f banner end %.1f" % [rect.position.y, (blocks["wave_banner"] as Rect2).end.y])
+		# Damage: 40. The fill chases it (not at once, then there).
+		GameEvents.horde_boss_health_changed.emit(40.0)
+		await get_tree().process_frame
+		_check("boss_bar_chases_not_a_jump_" + tag, bar.get_fill_pct() > 40.0 and bar.get_fill_pct() < 100.0, str(bar.get_fill_pct()))
+		await _wait(0.5)
+		_check("boss_bar_follows_" + tag, is_equal_approx(bar.get_fill_pct(), 40.0) and is_equal_approx(bar.get_target_pct(), 40.0),
+			str(bar.get_fill_pct()))
+		# Dead: it empties and hides about a second later.
+		GameEvents.horde_boss_health_changed.emit(0.0)
+		await _wait(0.5)
+		_check("boss_bar_empty_still_there_" + tag, bar.visible and is_equal_approx(bar.get_fill_pct(), 0.0), str(bar.get_fill_pct()))
+		await _wait(0.8)
+		_check("boss_bar_hidden_after_death_" + tag, not bar.visible)
+		_check("boss_bar_context_band_back_" + tag, is_zero_approx(_ctx(hud).offset_top) and is_zero_approx(_ctx(hud).offset_bottom))
+		# The hunt ends while it shows: gone at once, and it never comes back.
+		GameEvents.horde_boss_health_changed.emit(70.0)
+		await _frames(2)
+		_check("boss_bar_back_" + tag, bar.is_visible_in_tree())
+		hud.on_hunt_ended()
+		_check("boss_bar_hidden_on_hunt_end_" + tag, not bar.visible)
+		GameEvents.horde_boss_health_changed.emit(50.0)
+		await _frames(2)
+		_check("boss_bar_stays_hidden_after_end_" + tag, not bar.visible)
+		await _free_world(world)
+	# Outside the horde (contract mode) the bar never appears.
+	var contract_world: FakeWorld = await _make_world(false)
+	var contract_hud: Hud = _hud_of(contract_world)
+	if contract_hud != null:
+		GameEvents.horde_boss_health_changed.emit(100.0)
+		await _frames(3)
+		_check("boss_bar_never_in_contract", not (contract_hud.get("_boss_bar") as BossBar).visible)
+	await _free_world(contract_world)
+	window.size = original_size
+	await _frames(2)
+
+
 ## --shot=<png>: the level 2 HUD in the middle of a revive (window needed; --headless draws nothing).
 func _screenshot() -> void:
 	var world: FakeWorld = await _make_world(true)
@@ -601,6 +777,47 @@ func _screenshot() -> void:
 	_save_shot(_shot_path.replace(".png", "_downed.png"))
 	hud.queue_free()
 	get_tree().quit(0)
+
+
+## --shot=<png> --boss [--touch]: the boss bar full (<png>) and at 40% (<png>_half.png) on the last wave, with a context
+## message on screen. Prints the rectangles of the bar and of the blocks around it.
+func _screenshot_boss(touch: bool) -> void:
+	InputSetup.set_touch_override("on" if touch else "off")
+	var world: FakeWorld = await _make_world(true)
+	var hud: Hud = _hud_of(world)
+	world.horde_wave = 10
+	world.horde_wave_count = 10
+	world.horde_phase = Ids.HP_WAVE
+	world.horde_wave_remaining = 1
+	world.horde_wave_total = 1
+	GameEvents.horde_wave_progress.emit(1, 1)
+	GameEvents.horde_wave_changed.emit(10, 10, Ids.HP_WAVE, 0.0)
+	GameEvents.horde_boss_health_changed.emit(100.0)
+	if OS.get_cmdline_user_args().has("--spectate"):   # the bled-out hunter watching an ally, plus a context message
+		GameEvents.player_died.emit()
+		GameEvents.spectate_changed.emit(ALLY_A)
+		GameEvents.hud_message_requested.emit("Ana te levantou!", 6.0)
+	elif OS.get_cmdline_user_args().has("--downed"):
+		(world.player as FakePlayer).downed = true
+		GameEvents.player_downed.emit(60.0)
+		GameEvents.hud_message_requested.emit("Ana caiu! Vá até lá e segure F.", 6.0)
+	await _wait(0.8)
+	_print_boss_rects(hud)
+	_save_shot(_shot_path)
+	GameEvents.horde_boss_health_changed.emit(40.0)
+	await _wait(0.8)
+	_save_shot(_shot_path.replace(".png", "_half.png"))
+	hud.queue_free()
+	get_tree().quit(0)
+
+
+func _print_boss_rects(hud: Hud) -> void:
+	print("screen: ", hud.get("_root").size)
+	print("boss_bar: ", (hud.get("_boss_bar") as Control).get_global_rect(), " bar_rect(local): ", (hud.get("_boss_bar") as BossBar).get_bar_rect())
+	var blocks: Dictionary = _top_blocks(hud)
+	for block_name: String in blocks:
+		print(block_name, ": ", blocks[block_name])
+	print("hint_banner: ", (hud.get("_hint_banner") as Control).get_global_rect())
 
 
 func _save_shot(path: String) -> void:

@@ -150,7 +150,7 @@ func _apply_ranges(k: float) -> void:
 
 func setup(type_id: StringName, weight_kg: float) -> void:
 	var t0: int = Time.get_ticks_usec()
-	var t: StringName = type_id if type_id in [Ids.PIGLET, Ids.SOW, Ids.BOAR, Ids.ALPHA] else Ids.BOAR
+	var t: StringName = type_id if type_id in [Ids.PIGLET, Ids.SOW, Ids.BOAR, Ids.ALPHA, Ids.BOSS] else Ids.BOAR
 	var bucket: int = Model.tusk_bucket(t, weight_kg)
 	_weight = weight_kg
 	if t == _type and bucket == _bucket:

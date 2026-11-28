@@ -5,7 +5,7 @@ extends RefCounted
 
 ## Synthesized on first use (loops and the horde stings), never at startup.
 const LAZY_IDS: Array[StringName] = [&"amb_cerrado_loop", &"amb_wind_loop", &"horde_wave_start", &"horde_wave_clear",
-	&"ammo_pickup", &"revive_done"]
+	&"ammo_pickup", &"revive_done", &"boar_boss_roar"]
 ## Ids written by build().
 const IDS: Array[StringName] = [&"bait_drop", &"victory_sting", &"defeat_sting", &"ui_click", &"ui_buy",
 	&"ui_error", &"ui_coin"]
@@ -29,6 +29,7 @@ static func build_lazy(id: StringName) -> AudioStreamWAV:
 		&"horde_wave_clear": return _horde_wave_clear()
 		&"ammo_pickup": return _ammo_pickup()
 		&"revive_done": return _revive_done()
+		&"boar_boss_roar": return _boss_roar()
 	return null
 
 
@@ -107,6 +108,19 @@ static func _horde_wave_start() -> AudioStreamWAV:
 
 
 ## Relief vinette, ~1 s: soft rising three-note arpeggio, lighter than the victory sting.
+## Boss entrance roar, ~2.4 s: sub-bass growl with a ragged amplitude, a gravelly saw layer sliding down and a
+## breathy noise tail. Low and long on purpose, it should be felt before it is heard.
+static func _boss_roar() -> AudioStreamWAV:
+	var b: PackedFloat32Array = SynthDsp.buf(2.4)
+	SynthDsp.tone(b, 0.0, 2.3, 62.0, 38.0, 0.7, 1.4, SynthDsp.SHAPE_SAW, 0.12, 23.0, 0.7, 6.0, 0.03)
+	SynthDsp.tone(b, 0.05, 2.1, 95.0, 55.0, 0.5, 1.1, SynthDsp.SHAPE_SAW, 0.1, 31.0, 0.8, 9.0, 0.05)
+	SynthDsp.tone(b, 0.1, 1.6, 190.0, 110.0, 0.22, 0.8, SynthDsp.SHAPE_SAW, 0.08, 47.0, 0.9, 11.0, 0.06)
+	SynthDsp.tone(b, 0.0, 2.3, 31.0, 24.0, 0.55, 1.6, SynthDsp.SHAPE_SINE, 0.2)
+	SynthDsp.noise(b, 0.0, 2.0, 0.28, 0.7, 0.25, 0.0, 0.1, 26.0, 0.8)
+	SynthDsp.drive(b, 2.2)
+	return SynthDsp.to_stream(b, 0.85)
+
+
 static func _horde_wave_clear() -> AudioStreamWAV:
 	var b: PackedFloat32Array = SynthDsp.buf(1.1)
 	var seq: Array = [-5.0, -1.0, 2.0]

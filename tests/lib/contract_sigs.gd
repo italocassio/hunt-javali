@@ -51,6 +51,8 @@ const GAME_EVENTS_SIGNALS: Array[String] = [
 	"hunter_downed(slot: int)",
 	"hunter_revived(slot: int, by_slot: int)",
 	"ammo_picked_up(rounds: int)",
+	# docs/plano_horda_boss.md section 4.1 (horde level 2: the boss of the last wave)
+	"horde_boss_health_changed(pct: float)",
 ]
 
 ## docs/multiplayer.md section 3.4: autoload Net.

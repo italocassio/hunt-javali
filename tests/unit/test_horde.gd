@@ -303,24 +303,32 @@ func test_validation_rejects_each_broken_rule() -> void:
 
 func test_plan_waves_by_level_respects_the_wire_limit() -> void:
 	## plan_waves takes the RESOLVED level (Data.get_horde_level), so every level stays <= 255 ids with 1..4 hunters.
+	## The levels have DIFFERENT wave counts (docs/plano_horda_boss.md 3): level 1 = the top-level 8 waves (base 128),
+	## level 2 = its own 10 waves with the boss in the last one (base 129).
+	var expected_waves: Array[int] = [8, 10]
+	var expected_base: Array[int] = [128, 129]
 	var expected_level_1: Array[int] = [128, 167, 205, 244]
+	eq(Data.get_horde_level_count(), expected_waves.size(), "dois niveis no seed")
 	for lv: int in range(1, Data.get_horde_level_count() + 1):
 		var cfg: Dictionary = Data.get_horde_level(lv)
 		ok(not cfg.is_empty(), "nivel %d resolvido" % lv)
+		eq(_plan_total(HordeDirector.plan_waves(cfg, 1)), expected_base[lv - 1], "nivel %d: total base %d" % [lv, expected_base[lv - 1]])
 		for players: int in [1, 2, 3, 4]:
 			var plan: Array = HordeDirector.plan_waves(cfg, players)
 			var total: int = _plan_total(plan)
-			ok(total >= 1 and total <= WIRE_ID_LIMIT, "nivel %d, %dj: %d javalis (<= 255)" % [lv, players, total])
+			eq(plan.size(), expected_waves[lv - 1], "nivel %d, %dj: %d ondas" % [lv, players, expected_waves[lv - 1]])
+			ok(total >= 1 and total <= WIRE_ID_LIMIT, "nivel %d, %dj: %d javalis (<= %d)" % [lv, players, total, WIRE_ID_LIMIT])
+			ok(total <= NetCodec.MAX_BOARS_PER_HUNT, "nivel %d, %dj: %d cabe em NetCodec.MAX_BOARS_PER_HUNT" % [lv, players, total])
 			eq(_has_alpha(plan[plan.size() - 1]), 1, "nivel %d, %dj: ultima onda com 1 alfa" % [lv, players])
 	for players: int in [1, 2, 3, 4]:
 		eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(1), players)), expected_level_1[players - 1], "nivel 1 igual a horda de hoje (%dj)" % players)
 	# the plan of a level is a fresh copy: editing it must not touch the data
 	var p1: Array = HordeDirector.plan_waves(Data.get_horde_level(1), 1)
 	var p2: Array = HordeDirector.plan_waves(Data.get_horde_level(2), 1)
-	eq(p1.size(), p2.size(), "mesmo numero de ondas nos dois niveis do seed")
+	ok(p1.size() != p2.size(), "os dois niveis do seed tem numeros de ondas diferentes (%d e %d)" % [p1.size(), p2.size()])
 	((p2[0] as Array)[0] as Dictionary)["members"].append("piglet")
 	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(1), 1)), 128, "alterar o plano do nivel 2 nao toca nos dados (nivel 1)")
-	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(2), 1)), _plan_total(p1), "nem no nivel 2 (funcao pura)")
+	eq(_plan_total(HordeDirector.plan_waves(Data.get_horde_level(2), 1)), 129, "nem no nivel 2 (funcao pura)")
 
 
 func test_level_waves_override_keeps_the_budget_per_level() -> void:
@@ -360,7 +368,7 @@ func test_validation_rejects_each_broken_v2_rule() -> void:
 		["ammo.infinite nao bool", "ammo.infinite must be a bool", func(h: Dictionary) -> void: h["levels"][1]["ammo"]["infinite"] = 1],
 		["ammo negativo", "ammo.start_reserve_mags must be an integer >= 0", func(h: Dictionary) -> void: h["levels"][1]["ammo"]["start_reserve_mags"] = -1],
 		["ammo fracionario", "ammo.reserve_cap_mags must be an integer >= 0", func(h: Dictionary) -> void: h["levels"][1]["ammo"]["reserve_cap_mags"] = 2.5],
-		["teto menor que o inicio", "ammo.reserve_cap_mags must be >= max(1, start_reserve_mags)", func(h: Dictionary) -> void: h["levels"][1]["ammo"]["start_reserve_mags"] = 7],
+		["teto menor que o inicio", "ammo.reserve_cap_mags must be >= max(1, start_reserve_mags)", func(h: Dictionary) -> void: h["levels"][1]["ammo"]["start_reserve_mags"] = int(h["levels"][1]["ammo"]["reserve_cap_mags"]) + 1],
 		["teto zero sem infinita", "ammo.reserve_cap_mags must be >= max(1, start_reserve_mags)", func(h: Dictionary) -> void:
 			h["levels"][1]["ammo"]["start_reserve_mags"] = 0
 			h["levels"][1]["ammo"]["reserve_cap_mags"] = 0],

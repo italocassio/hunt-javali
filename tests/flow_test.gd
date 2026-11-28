@@ -999,7 +999,7 @@ func _step_horde2_result() -> void:
 		_t.call("eq", r.outcome, HuntResult.Outcome.VICTORY, "outcome")
 		_t.call("ok", not r.counts_for_progression, "horda nunca conta para progressao")
 		_t.call("eq", r.contract_bonus, Profile.horde_bonus(100.0, 2), "bonus do Nivel 2 com o estoque cheio")
-		_t.call("eq", r.contract_bonus, 5000, "bonus de R$ 5000")
+		_t.call("eq", r.contract_bonus, 6000, "bonus de R$ 6000")
 		_t.call("eq", Profile.get_money(), _horde_money_before + Profile.horde_bonus(100.0, 2), "saldo += Profile.horde_bonus(100, 2) (1x)")
 	_t.call("eq", Profile.get_unlocked_contract_count(&"mato_grosso"), _horde_unlocked_before, "contratos liberados iguais")
 	for i: int in _horde_completed_before.size():

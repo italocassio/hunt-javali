@@ -3,6 +3,23 @@
 O número da versão fica em `config/version` no `project.godot` e aparece na tela inicial e no menu.
 A entrada mais nova fica no topo.
 
+## 0.9.11 — 28/11/2026
+
+**A horda Nível 2 tem chefão.** O Nível 2 passou de 8 para **10 ondas**, e na última entra o **Cachaço rei**: um
+javali duas vezes maior que um javali comum, mais de meia tonelada, que vem direto para cima de você.
+- **Ele é enorme.** Pelo escuro e grisalho, corcova de ombro alta e presas muito maiores que as do cachaço alfa.
+  Quando ele nasce, você ouve o rugido.
+- **Barra de vida própria** no alto da tela enquanto ele estiver vivo, para todos os caçadores da sala.
+- **Aguenta chumbo:** cerca de **4.400 de vida**, umas dez vezes a do cachaço alfa. Nem o rifle .338 o derruba com
+  menos de dez tiros na cabeça.
+- **Não para de investir.** Enxerga a 60 metros, corre atrás de você a 12 m/s e investe sem limite — mas vira
+  devagar, e é por aí que você escapa: contorne em vez de recuar em linha reta.
+- O cão não o segura: ele se solta como o alfa.
+- **Só vem um**, mesmo com a sala cheia, e ele entra na frente da última onda — a escolta de alfa e varas vem atrás.
+- As dez ondas trazem **a mesma quantidade de javalis** espalhada em mais ondas, então cada onda do meio ficou um
+  pouco mais leve e a pressão cresce até o fim. O bônus de vitória do Nível 2 subiu de R$ 5.000 para **R$ 6.000**.
+- O **Nível 1 continua com 8 ondas** e sem chefão. A munição do Nível 2 não mudou.
+
 ## 0.9.10 — 23/11/2026
 
 **Agora dá para ver o que a sua mão está fazendo.** Curar, beber, soltar o drone e jogar a ceva deixaram de ser

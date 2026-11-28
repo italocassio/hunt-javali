@@ -128,6 +128,12 @@ static func palette(type_id: StringName) -> Dictionary:
 				"leg": Color(0.04, 0.035, 0.032), "muzzle": Color(0.06, 0.05, 0.045), "cheek": Color(0.30, 0.27, 0.24),
 				"disc": Color(0.22, 0.17, 0.16), "lid": Color(0.30, 0.24, 0.21), "tip": Color(0.45, 0.41, 0.37), "tip_amount": 0.5,
 				"stripe": Color.BLACK, "stripe_amount": 0.0, "mane": 0.11, "mane_long": true, "tusk": 1.35, "tusk_w": 1.3}
+		Ids.BOSS:
+			# older, darker and greyer than the alpha: frosted bristles, huge tusks, long mane
+			return {"back": Color(0.055, 0.050, 0.047), "belly": Color(0.10, 0.09, 0.082), "dorsal": Color(0.03, 0.028, 0.026),
+				"leg": Color(0.03, 0.028, 0.026), "muzzle": Color(0.05, 0.043, 0.04), "cheek": Color(0.38, 0.36, 0.33),
+				"disc": Color(0.20, 0.15, 0.14), "lid": Color(0.26, 0.20, 0.18), "tip": Color(0.62, 0.60, 0.56), "tip_amount": 0.62,
+				"stripe": Color.BLACK, "stripe_amount": 0.0, "mane": 0.13, "mane_long": true, "tusk": 1.8, "tusk_w": 1.6}
 		_:
 			return {"back": Color(0.20, 0.15, 0.115), "belly": Color(0.28, 0.22, 0.17), "dorsal": Color(0.10, 0.08, 0.065),
 				"leg": Color(0.08, 0.065, 0.055), "muzzle": Color(0.12, 0.095, 0.08), "cheek": Color(0.42, 0.37, 0.31),
@@ -144,6 +150,8 @@ static func tusk_bucket(type_id: StringName, kg: float) -> int:
 			return clampi(int(round(inverse_lerp(90.0, 160.0, kg) * 2.0)), 0, 2)
 		Ids.ALPHA:
 			return clampi(int(round(inverse_lerp(180.0, 260.0, kg) * 2.0)), 0, 2)
+		Ids.BOSS:
+			return clampi(int(round(inverse_lerp(520.0, 640.0, kg) * 2.0)), 0, 2)
 	return 0
 
 
@@ -351,7 +359,7 @@ static func build_part(type_id: StringName, lod: int, part: String, bucket: int)
 static func _trunk(k: BMesh, pal: Dictionary, res: Dictionary, type_id: StringName) -> void:
 	var m: int = res["trunk_m"]
 	var nr: int = res["trunk_r"]
-	var hump: float = 0.015 if type_id == Ids.ALPHA else 0.0
+	var hump: float = 0.03 if type_id == Ids.BOSS else (0.015 if type_id == Ids.ALPHA else 0.0)
 	var rings: Array = []
 	for r in nr:
 		var u: float = float(r) / float(nr - 1)
@@ -682,7 +690,7 @@ static func _far(k: BMesh, pal: Dictionary, res: Dictionary, type_id: StringName
 	var m: int = res["trunk_m"]
 	var nr: int = res["trunk_r"]
 	var rings: Array = []
-	var hump: float = 0.015 if type_id == Ids.ALPHA else 0.0
+	var hump: float = 0.03 if type_id == Ids.BOSS else (0.015 if type_id == Ids.ALPHA else 0.0)
 	for r in nr:
 		var u: float = float(r) / float(nr - 1)
 		var z: float = lerpf(TRUNK_Z0 + 0.02, TRUNK_Z1 - 0.01, u)

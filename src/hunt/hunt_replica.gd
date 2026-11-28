@@ -58,6 +58,7 @@ const COUNTDOWN_WIRE_SCALE: float = 10.0 # EV_HORDE_WAVE countdown u16 in 0.1 s
 const SNAP_FLAG_CROP_ATTACK: int = 1     # H_SNAPSHOT flags b0
 const HUNTER_REVIVED_BYTES: int = 2      # EV_HUNTER_REVIVED body: target_slot u8, by_slot u8
 const AMMO_CRATE_BYTES: int = 3          # EV_AMMO_CRATE body: crate u8, available u8, taker_slot u8
+const BOSS_HP_BYTES: int = 1             # EV_BOSS_HP body: pct u8 (0..100)
 const DEFAULT_INTERP_DELAY_MS: float = 200.0
 const DEFAULT_THERMAL_RANGE_M: float = 150.0
 ## Host-clock estimate: follows the freshest snapshot at once, eases down slowly when packets come late.
@@ -385,6 +386,10 @@ func _apply_record(type: int, inp: StreamPeerBuffer, length: int) -> void:
 				var crate: int = inp.get_u8()
 				var available: bool = inp.get_u8() != 0
 				ammo_crate_received.emit(crate, available, inp.get_u8())
+		NetCodec.EV_BOSS_HP:
+			# Horde boss: pct u8 (0..100), 4 Hz while it lives and 0 once it dies. Straight to the HUD.
+			if length >= BOSS_HP_BYTES:
+				GameEvents.horde_boss_health_changed.emit(float(clampi(inp.get_u8(), 0, 100)))
 
 
 ## EV_HORDE_WAVE: wave u8, wave_count u8, phase u8, countdown u16 (x0.1 s), wave_total u8, killed_before u8.

@@ -303,6 +303,10 @@ func _validate() -> void:
 	for entry: Variant in _raw["boars"].get("types", []):
 		if entry is Dictionary:
 			_require_fields(entry, ["weight_min_kg", "weight_max_kg", "health_per_kg", "value_per_kg", "aggression"], str(entry.get("id", "?")))
+			if entry.has("body_scale_mult"):
+				var bsm: Variant = entry["body_scale_mult"]
+				if not _is_num(bsm) or not is_finite(float(bsm)) or float(bsm) <= 0.5 or float(bsm) > 3.0:
+					_errors.append("Data: boar '%s' body_scale_mult must be a number in (0.5, 3.0]" % entry.get("id", "?"))
 	_require_fields(_raw["net"], ["server_url", "dev_server_url", "max_players", "name_max_chars", "max_frame_bytes"], "net")
 	for needed: String in ["economy", "loadout", "shop", "hunt", "player", "quality_presets", "coop"]:
 		if not _raw["game"].has(needed):

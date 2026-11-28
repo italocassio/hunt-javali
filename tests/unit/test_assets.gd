@@ -11,7 +11,7 @@ const WEAPON_MAX_MATERIALS: int = 4
 const KNIFE_MAX_TRIS: int = 4000
 const KNIFE_MAX_MESHES: int = 3
 const KNIFE_MAX_MATERIALS: int = 3
-const BOAR_TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha"]
+const BOAR_TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha", &"boss"]
 ## Boar LOD contract (docs/arquitetura.md section 7.1): bands by visibility_range at rest (base FOV, no zoom).
 const BOAR_NEAR_END_M: float = 25.0
 const BOAR_MID_END_M: float = 60.0
@@ -238,7 +238,7 @@ func test_boar_visual_contract() -> void:
 						materials[m.get_instance_id()] = true
 			ok(type_materials.size() <= BOAR_MAX_MATERIALS_PER_TYPE, "%s: %d materiais (<= %d)" % [label, type_materials.size(), BOAR_MAX_MATERIALS_PER_TYPE])
 	# Materials are shared between instances: not one per spawned boar.
-	ok(materials.size() <= BOAR_TYPES.size() + 1, "materiais distintos nos 4 tipos: %d (<= 4 + realce)" % materials.size())
+	ok(materials.size() <= BOAR_TYPES.size() + 1, "materiais distintos nos %d tipos: %d (<= tipos + realce)" % [BOAR_TYPES.size(), materials.size()])
 	# Every API call, with plausible and extreme arguments.
 	boar.setup(Ids.ALPHA, 220.0)
 	for speed: float in [0.0, 1.5, 4.0, 5.5, 9.0, 1000.0, -3.0]:
@@ -999,6 +999,39 @@ func test_horde_sounds_exist_and_play() -> void:
 			var channels: float = 2.0 if stream.stereo else 1.0
 			var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
 			ok(seconds > 0.3 and seconds < 3.0, "%s dura %.2f s (esperado ~1 a 1,5 s)" % [id, seconds])
+	await frames(2)
+
+
+func test_boss_roar_sound_exists_and_plays() -> void:
+	## docs/plano_horda_boss.md section 4.4: boar_boss_roar, procedural (SynthWorld.LAZY_IDS, no recorded file yet),
+	## played once by Boar.start() / BoarPuppet._ready() when the type is boss.
+	ok(SynthWorld.LAZY_IDS.has(&"boar_boss_roar"), "boar_boss_roar e sintetizado sob demanda (LAZY_IDS)")
+	ok(Sfx.has_sound(&"boar_boss_roar"), "Sfx.has_sound(boar_boss_roar)")
+	var mark: int = error_mark()
+	Sfx.play_3d(&"boar_boss_roar", Vector3(2.0, 1.0, -4.0), 3.0, 0.9)
+	await frames(3)
+	eq(errors_since(mark).size(), 0, "tocar o rugido do chefao nao gera erros: %s" % str(errors_since(mark)))
+	var live: Variant = (Sfx.get(&"_streams") as Dictionary).get(&"boar_boss_roar")
+	ok(live is AudioStreamWAV or live is AudioStreamMP3, "boar_boss_roar no Sfx: WAV sintetizado ou MP3 gravado")
+	var fb: Node = load("res://assets/audio/sfx_library.gd").new()
+	fb.set(&"sfx_dir", "res://assets/audio/_sem_arquivos/")
+	track(fb)
+	ok(fb.call(&"has_sound", &"boar_boss_roar"), "fallback: has_sound(boar_boss_roar)")
+	var stream: AudioStreamWAV = fb.call(&"_get_stream", &"boar_boss_roar") as AudioStreamWAV
+	ok(stream != null, "fallback: boar_boss_roar sintetizado")
+	if stream != null:
+		var bytes_per_sample: float = 2.0 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1.0
+		var channels: float = 2.0 if stream.stereo else 1.0
+		var seconds: float = float(stream.data.size()) / float(maxi(stream.mix_rate, 1)) / bytes_per_sample / channels
+		ok(seconds > 0.3 and seconds < 4.0, "o rugido dura %.2f s" % seconds)
+		ok(stream.loop_mode != AudioStreamWAV.LOOP_FORWARD, "o rugido nao e loop")
+		var peak: int = 0
+		if stream.format == AudioStreamWAV.FORMAT_16_BITS:
+			var i: int = 0
+			while i + 1 < stream.data.size():
+				peak = maxi(peak, absi(stream.data.decode_s16(i)))
+				i += 2 * 16
+		ok(stream.format != AudioStreamWAV.FORMAT_16_BITS or peak > 500, "o rugido nao e silencio (pico %d)" % peak)
 	await frames(2)
 
 

@@ -18,6 +18,7 @@ const PIGLET: StringName = &"piglet"
 const SOW: StringName = &"sow"
 const BOAR: StringName = &"boar"
 const ALPHA: StringName = &"alpha"
+const BOSS: StringName = &"boss"      ## Horde level 2: the boss of the last wave (docs/plano_horda_boss.md)
 
 # Boar states
 const BS_WANDER: StringName = &"wander"

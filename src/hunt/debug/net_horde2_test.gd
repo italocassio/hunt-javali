@@ -10,6 +10,10 @@ extends Node
 ##            host down -> client stands it up through C_REVIVE; a claim out of radius + tolerance is ignored;
 ##            both down -> DEFEAT_DEATH on both
 ##   bleed    (second pair) the client bleeds out -> hunter_died on both, the hunt goes on
+##   boss     (third pair, docs/plano_horda_boss.md section 4.2 item 5) the waves before the last are cleared with
+##            debug kills on the host, the Cachaco rei of wave 10 is born alive and EV_BOSS_HP crosses the wire:
+##            every pct the host queues is the pct the client re-emits on horde_boss_health_changed, 100 at birth,
+##            falling with the host's damage and a single 0 on the death
 ## Usage: tools/godot.sh --headless --fixed-fps 60 --path . res://src/hunt/debug/net_horde2_test.tscn [-- --only=bleed]
 ## Not part of the game; the qa-tester owns the real tests in tests/ (net_unit --only=net_horde2).
 
@@ -38,6 +42,13 @@ const HEALTH_TOL: float = 0.01
 const HOLD_TOL_S: float = 0.05
 const PUPPET_WAIT_S: float = 30.0
 const WAIT_REAL_FLOOR_S: float = 10.0   # a condition fed by the real-time pump never gives up before this much wall time
+## Boss of the last wave (docs/plano_horda_boss.md sections 3.1 and 4.2 item 5).
+const BOSS_WAVE: int = 10
+const FF_TIME_SCALE: float = 8.0        # fast-forward of the waves before the boss (game clock only)
+const WAVE_CLEAR_S: float = 240.0       # game time budget to clear one fast-forwarded wave
+const BOSS_SPAWN_S: float = 30.0
+const BOSS_BITE: float = 1200.0         # ~27% of the boss health: the fall is visible on the client in one pump
+const BOSS_SCALE_MIN: float = 2.0
 
 var _passed: int = 0
 var _failed: int = 0
@@ -54,6 +65,14 @@ var _revived_events: Array = []        # [target, by] of every EV_HUNTER_REVIVED
 var _downed: Array[int] = []           # hunter_downed slots (both machines share the bus: one emission per machine)
 var _died: Array[int] = []
 var _revived: Array = []                # hunter_revived [target, by]
+## Boss health. Both hunts share this process's GameEvents bus, so the two ends are told apart by _in_apply:
+## _apply_events is the only place where the client's HuntReplica re-emits horde_boss_health_changed.
+var _boss_hp_wire: Array[float] = []    # pct of every EV_BOSS_HP the host queued
+var _boss_hp_client: Array[float] = []  # pct the client re-emitted while applying the host's records
+var _boss_hp_host: Array[float] = []    # pct the host hunt put on its own bus
+var _msg_wire: Array[int] = []          # msg code of every EV_MESSAGE the host queued for everyone
+var _msg_client: Array[String] = []     # text the client showed while applying the host's records
+var _in_apply: bool = false
 
 
 func _ready() -> void:
@@ -62,6 +81,14 @@ func _ready() -> void:
 	GameEvents.hunter_downed.connect(func(s: int) -> void: _downed.append(s))
 	GameEvents.hunter_died.connect(func(s: int) -> void: _died.append(s))
 	GameEvents.hunter_revived.connect(func(s: int, by: int) -> void: _revived.append([s, by]))
+	GameEvents.horde_boss_health_changed.connect(func(pct: float) -> void:
+		if _in_apply:
+			_boss_hp_client.append(pct)
+		else:
+			_boss_hp_host.append(pct))
+	GameEvents.hud_message_requested.connect(func(text: String, _s: float) -> void:
+		if _in_apply:
+			_msg_client.append(text))
 	var only: PackedStringArray = PackedStringArray()
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--only="):
@@ -80,6 +107,11 @@ func _ready() -> void:
 		print("--- bleed")
 		if await _open_pair():
 			await _test_bleed()
+		await _close_pair()
+	if only.is_empty() or only.has("boss"):
+		print("--- boss")
+		if await _open_pair():
+			await _test_boss()
 		await _close_pair()
 	print("RESULT: %d passed, %d failed, 0 skipped" % [_passed, _failed])
 	get_tree().quit(0 if _failed == 0 else 1)
@@ -301,6 +333,113 @@ func _test_bleed() -> void:
 		"damage=%s want=%.1f" % [puppet._charge_damage if puppet != null else -1.0, want])
 
 
+# --- Boss of the last wave over the wire ----------------------------------------------------------
+
+## The host's living boss, or null.
+func _host_boss() -> Boar:
+	for id: int in _host.get_alive_boar_ids():
+		var b: Boar = _host.spawner.get_boar(id)
+		if b != null and b.type_id == Ids.BOSS and b.is_alive():
+			return b
+	return null
+
+
+## Host side: clears waves 1..wave-1 with debug kills and leaves the hunt in the intermission before `wave`.
+## The pump keeps running, so the client follows the whole way.
+func _reach_wave(wave: int) -> bool:
+	Engine.time_scale = FF_TIME_SCALE
+	for w: int in range(1, wave):
+		_host.debug_horde_start_next_wave()
+		await get_tree().process_frame
+		var limit: float = _host.get_elapsed_s() + WAVE_CLEAR_S
+		while _host.get_elapsed_s() < limit and not _host.is_hunt_over() and _host.get_horde_waves_cleared() < w:
+			for id: int in _host.get_alive_boar_ids().duplicate():
+				_host.debug_kill_boar(id)
+			await get_tree().process_frame
+		if _host.is_hunt_over() or _host.get_horde_waves_cleared() < w:
+			Engine.time_scale = 1.0
+			return false
+	Engine.time_scale = 1.0
+	await get_tree().process_frame            # the director puts the next wave in intermission
+	_host.debug_set_crop_health(100.0)
+	return _host.get_horde_wave() == wave and _host.get_horde_phase() == Ids.HP_INTERMISSION
+
+
+func _count_zero(pcts: Array[float]) -> int:
+	var n: int = 0
+	for p: float in pcts:
+		if is_zero_approx(p):
+			n += 1
+	return n
+
+
+func _test_boss() -> void:
+	_park_both()
+	await _wait_pumps(SYNC_PUMPS)
+	var reached: bool = await _reach_wave(BOSS_WAVE)
+	_check("host_reached_wave_10", reached, "wave=%d phase=%s cleared=%d killed=%d/%d over=%s" % [_host.get_horde_wave(),
+		_host.get_horde_phase(), _host.get_horde_waves_cleared(), _host.get_boars_killed(), _host.get_boars_total(),
+		_host.is_hunt_over()])
+	if not reached:
+		return
+	_boss_hp_wire.clear()
+	_boss_hp_client.clear()
+	_boss_hp_host.clear()
+	_msg_wire.clear()
+	_msg_client.clear()
+	_host.debug_horde_start_next_wave()
+	var born: bool = await _wait_until(func() -> bool: return _host_boss() != null, BOSS_SPAWN_S)
+	var boss: Boar = _host_boss()
+	_check("boss_alive_on_the_host", born and boss != null and boss.wave == BOSS_WAVE - 1
+		and boss.body_scale >= BOSS_SCALE_MIN,
+		"wave=%d scale=%.3f kg=%.1f health=%.0f" % [boss.wave if boss != null else -99,
+		boss.body_scale if boss != null else -1.0, boss.weight_kg if boss != null else -1.0,
+		boss.max_health if boss != null else -1.0])
+	if boss == null:
+		return
+	await _wait_pumps(SYNC_PUMPS)
+	_check("ev_boss_hp_leaves_the_host", not _boss_hp_wire.is_empty() and is_equal_approx(_boss_hp_wire[0], 100.0),
+		"records=%d first=%s" % [_boss_hp_wire.size(), str(_boss_hp_wire.slice(0, 3))])
+	_check("client_reemits_the_boss_health", not _boss_hp_client.is_empty() and is_equal_approx(_boss_hp_client[0], 100.0)
+		and _boss_hp_client == _boss_hp_wire,
+		"wire=%d client=%d first=%s" % [_boss_hp_wire.size(), _boss_hp_client.size(), str(_boss_hp_client.slice(0, 3))])
+	_check("host_bar_starts_full_too", not _boss_hp_host.is_empty() and is_equal_approx(_boss_hp_host[0], 100.0),
+		"host=%s" % str(_boss_hp_host.slice(0, 3)))
+	# The entry announcement: code 6 on the wire and the boss text on the client, never the dog's.
+	_check("boss_message_crosses_as_code_6", _msg_wire.has(HuntController.NET_MSG_BOSS)
+		and _msg_client.has(HuntController.MSG_BOSS) and not _msg_client.has(String(Dog.MESSAGES[Dog.NET_MSG_NO_BOAR])),
+		"wire=%s client=%s" % [str(_msg_wire), str(_msg_client)])
+	var puppet: BoarPuppet = _client.debug_replica().get_puppet(boss.boar_id)
+	_check("client_has_a_boss_puppet", puppet != null and puppet.type_id == Ids.BOSS and puppet.body_scale >= BOSS_SCALE_MIN,
+		"puppet=%s scale=%.3f" % [puppet.type_id if puppet != null else &"<null>", puppet.body_scale if puppet != null else -1.0])
+	# Damage on the host (dog damage never passes through boar_hit): the client's bar follows it down.
+	boss.apply_dog_damage(BOSS_BITE)
+	var fell: bool = await _wait_until(func() -> bool:
+		return not _boss_hp_client.is_empty() and _boss_hp_client[_boss_hp_client.size() - 1] < 100.0, 10.0)
+	_check("client_bar_falls_with_the_host", fell and _count_zero(_boss_hp_client) == 0,
+		"last client pct=%.0f host health=%.0f/%.0f" % [_boss_hp_client[_boss_hp_client.size() - 1] if not _boss_hp_client.is_empty()
+		else -1.0, boss.health, boss.max_health])
+	# The death: exactly one 0 on the wire and one on the client, with nothing after it.
+	boss.apply_dog_damage(boss.max_health * 2.0)
+	await _wait_until(func() -> bool: return _count_zero(_boss_hp_client) >= 1, 10.0)
+	await _wait_pumps(SYNC_PUMPS * 2)
+	var zeros_wire: int = _count_zero(_boss_hp_wire)
+	var zeros_client: int = _count_zero(_boss_hp_client)
+	_check("boss_death_is_one_single_zero_on_the_wire", zeros_wire == 1 and zeros_client == 1
+		and not _boss_hp_client.is_empty() and is_zero_approx(_boss_hp_client[_boss_hp_client.size() - 1])
+		and _boss_hp_client == _boss_hp_wire,
+		"wire=%d (zeros %d) client=%d (zeros %d) tail=%s" % [_boss_hp_wire.size(), zeros_wire, _boss_hp_client.size(),
+		zeros_client, str(_boss_hp_client.slice(maxi(_boss_hp_client.size() - 4, 0)))])
+	var rises: Array = []
+	for i: int in range(1, _boss_hp_client.size()):
+		if _boss_hp_client[i] > _boss_hp_client[i - 1]:
+			rises.append([i, _boss_hp_client[i - 1], _boss_hp_client[i]])
+	_check("client_bar_never_rises", rises.is_empty(), str(rises.slice(0, 5)))
+	print("INFO boss na rede: %d registros EV_BOSS_HP (1 byte cada), de %.0f%% a %.0f%%" % [_boss_hp_wire.size(),
+		_boss_hp_wire[0] if not _boss_hp_wire.is_empty() else -1.0,
+		_boss_hp_wire[_boss_hp_wire.size() - 1] if not _boss_hp_wire.is_empty() else -1.0])
+
+
 # --- Pair plumbing (as net_sync_test) -------------------------------------------------------------
 
 func _roster() -> Array[NetPeerInfo]:
@@ -359,6 +498,7 @@ func _open_pair() -> bool:
 
 func _close_pair() -> void:
 	_pump_on = false
+	Engine.time_scale = 1.0
 	if _host != null:
 		_host.queue_free()
 	if _vp != null:
@@ -403,10 +543,18 @@ func _note_events(data: PackedByteArray) -> void:
 			_crate_events.append([body[0], body[1], body[2]])
 		elif r[0] == NetCodec.EV_HUNTER_REVIVED and body.size() >= 2:
 			_revived_events.append([body[0], body[1]])
+		elif r[0] == NetCodec.EV_BOSS_HP and body.size() >= 1:
+			_boss_hp_wire.append(float(body[0]))
+		elif r[0] == NetCodec.EV_MESSAGE and body.size() >= 2:
+			_msg_wire.append(int(body[1]))
 
 
+## The client's side of every record. _in_apply marks the window where a horde_boss_health_changed on the shared
+## bus can only have come from the client's HuntReplica.
 func _apply_events(data: PackedByteArray) -> void:
+	_in_apply = true
 	_for_records(data, func(type: int, i: StreamPeerBuffer, n: int) -> void: _client.net_apply_event(type, i, n))
+	_in_apply = false
 
 
 func _for_records(data: PackedByteArray, fn: Callable) -> void:

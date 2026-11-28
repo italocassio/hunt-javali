@@ -29,6 +29,7 @@ var _kills: Array[KillInfo] = []
 var _hits: int = 0
 var _conns: Array[Array] = []
 var _horde_log: Array[Array] = []   # ["changed", wave, count, phase, countdown] / ["progress", remaining, total] / ["counts", killed, total]
+var _boss_hp: Array[float] = []     # pct of every GameEvents.horde_boss_health_changed
 var _states: Array[Array] = []      # [boar_id, state] of every boar_state_changed
 
 
@@ -132,6 +133,8 @@ func _open(contract_index: int = 0, weapon_id: StringName = &"", mode: StringNam
 	_connect(GameEvents.boar_state_changed, func(id: int, st: StringName) -> void: _states.append([id, st]))
 	_connect(GameEvents.horde_wave_changed, func(w: int, n: int, ph: StringName, cd: float) -> void: _horde_log.append(["changed", w, n, ph, cd]))
 	_connect(GameEvents.horde_wave_progress, func(rem: int, tot: int) -> void: _horde_log.append(["progress", rem, tot]))
+	_boss_hp.clear()
+	_connect(GameEvents.horde_boss_health_changed, func(pct: float) -> void: _boss_hp.append(pct))
 	_connect(GameEvents.boar_killed, func(k: KillInfo) -> void: _kills.append(k))
 	_connect(GameEvents.boar_hit, func(_id: int, _z: StringName, _d: float, _p: Vector3, _s: int) -> void: _hits += 1)
 	var req: HuntRequest = Profile.build_hunt_request(&"mato_grosso", contract_index)
@@ -441,18 +444,19 @@ func _clear_wave_debug(wave: int, timeout_s: float) -> bool:
 	return _hunt.get_horde_waves_cleared() >= wave or _hunt.is_hunt_over()
 
 
-## Solo boar count of one horde wave, straight from data/horde.json.
-func _horde_wave_total(wave_index: int) -> int:
+## Solo boar count of one horde wave of the given level, straight from the RESOLVED level in data/horde.json
+## (level 2 has its own waves: the top-level array is only the level-1 horde).
+func _horde_wave_total(wave_index: int, level: int = 1) -> int:
 	var n: int = 0
-	for g: Variant in Data.get_horde()["waves"][wave_index]["groups"]:
+	for g: Variant in Data.get_horde_level(level)["waves"][wave_index]["groups"]:
 		n += (g["members"] as Array).size()
 	return n
 
 
-func _horde_solo_total() -> int:
+func _horde_solo_total(level: int = 1) -> int:
 	var n: int = 0
-	for i: int in (Data.get_horde()["waves"] as Array).size():
-		n += _horde_wave_total(i)
+	for i: int in (Data.get_horde_level(level)["waves"] as Array).size():
+		n += _horde_wave_total(i, level)
 	return n
 
 
@@ -710,7 +714,7 @@ func _scn_horde2_victory() -> void:
 	var p: PlayerBase = _hunt.get_player()
 	var total: int = _hunt.get_boars_total()
 	_t.call("eq", _hunt.get_horde_level(), 2, "H5: get_horde_level() == 2")
-	_t.call("eq", total, _horde_solo_total(), "H5: boars_total = soma das ondas (os mesmos dados de ondas)")
+	_t.call("eq", total, _horde_solo_total(2), "H5: boars_total = soma das ondas do nivel 2 (%d)" % _horde_solo_total(2))
 	_t.call("ok", not p.has_infinite_reserve(), "H5: reserva contada (nao infinita)")
 	var weapon_id: StringName = p.get_current_weapon_id()
 	var mag_size: int = int(Data.get_weapon(weapon_id).get("mag_size", 0))
@@ -757,18 +761,35 @@ func _scn_horde2_victory() -> void:
 	_t.call("eq", picked.size(), 1, "H5: ammo_picked_up 1x")
 	if picked.size() == 1:
 		_t.call("ok", picked[0] >= expected - reserve_before, "H5: ammo_picked_up(%d) >= o ganho da arma atual" % picked[0])
-	# waves 2..8 with debug kills; the last one with the stock at 87% to price the bonus
+	# waves 2..N with debug kills (N = the level-2 wave count, 10 since the boss); the last one with the stock at 87% to price the bonus
+	var wave_count: int = (cfg["waves"] as Array).size()
+	_t.call("eq", _hunt.get_horde_wave_count(), wave_count, "H5: get_horde_wave_count() = ondas do nivel 2 (%d)" % wave_count)
 	bot.call("park_far")
-	for w: int in range(2, 9):
+	for w: int in range(2, wave_count + 1):
 		if _hunt.is_hunt_over():
 			break
-		if w == 8:
+		if w == wave_count:
 			_hunt.debug_set_crop_health(87.0)
+			_boss_hp.clear()   # before the release: the boss is born within the next frames and its 100 must be kept
 		_hunt.debug_horde_start_next_wave()
 		await get_tree().process_frame
 		await get_tree().process_frame
+		if w == wave_count:
+			# The last wave opens with the Cachaco rei (docs/plano_horda_boss.md 3.1): its bar starts full here, and
+			# the debug kill below has to leave exactly one 0 behind. The 4 Hz rate is checked by horde2_selftest.
+			var boss_born: bool = await _wait_until(func() -> bool: return _hunt.get_alive_boar_ids().size() > 0, 30.0)
+			_t.call("ok", boss_born and _boss_hp.size() >= 1 and is_equal_approx(_boss_hp[0], 100.0),
+				"H5: barra do chefao comeca cheia na onda %d (emissoes=%s)" % [wave_count, str(_boss_hp)])
+			var first: int = _hunt.get_alive_boar_ids()[0] if _hunt.get_alive_boar_ids().size() > 0 else -1
+			_t.call("eq", _hunt.get_boar_type(first), Ids.BOSS, "H5: o primeiro javali da onda %d e o chefao" % wave_count)
 		var cleared: bool = await _clear_wave_debug(w, 200.0)
 		_t.call("ok", cleared, "H5: onda %d vencida (killed %d/%d)" % [w, _hunt.get_boars_killed(), total])
+		if w == wave_count:
+			var zeros: int = 0
+			for pct: float in _boss_hp:
+				if is_zero_approx(pct):
+					zeros += 1
+			_t.call("eq", zeros, 1, "H5: um unico 0 na morte do chefao (emissoes=%s)" % str(_boss_hp))
 	await _sleep(2.0)
 	_t.call("ok", _hunt.is_hunt_over(), "H5: terminou depois da ultima onda")
 	_t.call("eq", _started, 1, "H5: hunt_started 1x")
@@ -778,10 +799,10 @@ func _scn_horde2_victory() -> void:
 	var r: HuntResult = _ended[0]
 	_t.call("eq", r.outcome, HuntResult.Outcome.VICTORY, "H5: VICTORY")
 	_t.call("eq", r.horde_level, 2, "H5: result.horde_level == 2")
-	_t.call("eq", r.horde_waves_cleared, 8, "H5: 8 ondas vencidas")
+	_t.call("eq", r.horde_waves_cleared, wave_count, "H5: %d ondas vencidas" % wave_count)
 	_t.call("eq", r.kills.size(), total, "H5: kills == total")
 	_t.call("eq", r.contract_bonus, Profile.horde_bonus(r.crop_health_pct, 2), "H5: bonus = Profile.horde_bonus(pct, 2)")
-	_t.call("ok", r.contract_bonus > 0 and r.contract_bonus <= 5000, "H5: bonus de defesa em (0, 5000] (%d)" % r.contract_bonus)
+	_t.call("ok", r.contract_bonus > 0 and r.contract_bonus <= int(cfg["victory_bonus_money"]), "H5: bonus de defesa em (0, %d] (%d)" % [int(cfg["victory_bonus_money"]), r.contract_bonus])
 	var differs: bool = false
 	for k: KillInfo in r.kills:
 		_t.call("eq", k.reward_money, Profile.horde_kill_reward(k.type_id, k.weight_kg, k.killing_zone, k.one_shot, 2), "H5: premio do javali %d no nivel 2" % k.boar_id)

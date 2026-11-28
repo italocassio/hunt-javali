@@ -51,8 +51,10 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, xz: Vector2, ya
 	weight_kg = p_weight_kg
 	_hm = hm
 	name = "BoarPuppet_%d" % boar_id
-	body_scale = BoarVisualBase.scale_for_weight(weight_kg)
 	var def: Dictionary = Data.get_horde_boar_type(type_id, horde_level)
+	# body_scale_mult (optional, default 1.0): same scale as the host's Boar, so the zones and the charge
+	# reach match (docs/plano_horda_boss.md section 3.2).
+	body_scale = BoarVisualBase.scale_for_weight(weight_kg) * float(def.get("body_scale_mult", 1.0))
 	_charge_damage = float(def.get("charge_damage", 0.0))
 	_knockback_mps = float(Data.get_game().get("player", {}).get("knockback_mps", _knockback_mps))
 	_zone_mults = Data.get_boar_rules().get("zone_multipliers", {})
@@ -67,6 +69,13 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, xz: Vector2, ya
 	_yaw = yaw
 	_up = _hm.get_normal(xz.x, xz.y) if _hm != null else Vector3.UP
 	_apply_pose()
+
+
+## The boss roars once as it enters the world, on every machine (docs/plano_horda_boss.md section 4.4).
+## Here and not in setup: HuntReplica calls setup before add_child, so global_position is only valid from now on.
+func _ready() -> void:
+	if type_id == Ids.BOSS:
+		Sfx.play_3d(&"boar_boss_roar", global_position, Boar.ROAR_DB, _voice_pitch())
 
 
 func get_xz() -> Vector2:

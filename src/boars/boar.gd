@@ -182,11 +182,14 @@ func setup(p_id: int, p_type_id: StringName, p_weight_kg: float, p_herd: BoarHer
 	herd = p_herd
 	_world = p_world
 	name = "Boar_%d" % boar_id
-	body_scale = BoarVisualBase.scale_for_weight(weight_kg)
-	_radius = BODY_RADIUS_M * body_scale
 	_horde = _world.is_horde()
 	# Horde level N3: boar_overrides of the level over data/boars.json (level 0 in the contract = the plain type).
-	_read_type(Data.get_horde_boar_type(type_id, _world.get_horde_level()))
+	var def: Dictionary = Data.get_horde_boar_type(type_id, _world.get_horde_level())
+	# body_scale_mult (optional, default 1.0): the boss is visibly bigger than its weight alone would make it
+	# (docs/plano_horda_boss.md section 3.2). Body radius, hit zones and snout all follow this scale.
+	body_scale = BoarVisualBase.scale_for_weight(weight_kg) * float(def.get("body_scale_mult", 1.0))
+	_radius = BODY_RADIUS_M * body_scale
+	_read_type(def)
 	_zone_mults = Data.get_boar_rules().get("zone_multipliers", {})
 	var game: Dictionary = Data.get_game()
 	var hunt: Dictionary = game.get("hunt", {})
@@ -212,6 +215,10 @@ func start(pos: Vector2, yaw: float) -> void:
 	_up = _world.heightmap.get_normal(pos.x, pos.y)
 	_apply_basis()
 	_voice_time = _world.rng.randf_range(GRUNT_MIN_S, GRUNT_MAX_S)
+	if type_id == Ids.BOSS:
+		# The boss roars once as it enters the world (docs/plano_horda_boss.md section 4.4). Here and not in
+		# setup: this is the first point where the body is in the tree and already on its spot.
+		Sfx.play_3d(&"boar_boss_roar", global_position, ROAR_DB, _voice_pitch())
 	if _horde:
 		_enter_to_crop()   # H1: straight to the barn, never wanders
 	else:
@@ -1021,7 +1028,8 @@ func _tick_dog_locked(delta: float) -> void:
 
 
 func _dog_time(duration_s: float, alpha_break_free_s: float) -> float:
-	if type_id == Ids.ALPHA and alpha_break_free_s > 0.0:
+	# The boss breaks free like the alpha (docs/plano_horda_boss.md section 4.2 item 2).
+	if (type_id == Ids.ALPHA or type_id == Ids.BOSS) and alpha_break_free_s > 0.0:
 		return minf(duration_s, alpha_break_free_s)
 	return duration_s
 

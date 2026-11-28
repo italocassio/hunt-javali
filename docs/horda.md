@@ -4,6 +4,10 @@ Versão do contrato: **1.0** (jogo **0.5.0**) · complementa `docs/arquitetura.m
 `docs/multiplayer.md`. Onde este documento contradiz os outros dois **no modo horda**, vale este. No modo
 contrato (solo e cooperativo) nada muda: **nenhum código de horda executa com `mode == &"contract"`**.
 
+**Horda 2.2 (jogo 0.9.11): Nível 2 com 10 ondas e o chefão "Cachaço rei".** Os números "8 ondas" deste documento valem para o
+**Nível 1**; o Nível 2 tem o seu próprio array `waves` (§3.3). Chefão: tipo `boss` (§3.3, `arquitetura.md` §9.5), comportamento
+(§6.1), barra (§8), rede (§9.4), mensagem e som (§11.2, §12). Plano e medição: `docs/plano_horda_boss.md`.
+
 Regras de sempre: faça o mínimo, não invente API, relate o que estiver errado. Identificadores em inglês, texto
 do jogador em PT-BR (exatamente como na §12).
 
@@ -19,8 +23,8 @@ do jogador em PT-BR (exatamente como na §12).
   **estoque de milho** 100% → 0%, que ocupa o lugar da saúde da lavoura em todo o caminho de dados
   (`CropManager`, `crop_health_changed`, `crop_under_attack`, `crop u16` do snapshot, `EV_HUNT_END`,
   `EV_FULL_SYNC`, `HuntResult.crop_health_pct`). As lavouras ficam no cenário, sem ser comidas.
-- **Ondas** definidas em `data/horde.json` (8 no seed), cada uma maior que a anterior; a última traz cachaço(s)
-  alfa. Intervalo antes da 1ª onda e entre ondas. Uma onda termina quando todos os javalis dela morrem.
+- **Ondas** definidas em `data/horde.json` (8 no seed do Nível 1; 10 no Nível 2, §3.3), cada uma maior que a anterior; a
+  última traz cachaço(s) alfa e, no Nível 2, o chefão. Intervalo antes da 1ª onda e entre ondas. Uma onda termina quando todos os javalis dela morrem.
 - Javalis nascem nas `SpawnZones` e **correm direto para o celeiro**, comem o milho na borda dele e drenam o
   estoque. Ninguém foge. Fêmeas, machos e alfa investem pelas regras de agressão de hoje.
 - **Vitória:** todas as ondas abatidas (`VICTORY`). **Derrota:** estoque em 0 (`DEFEAT_CROP`) ou todos os
@@ -137,6 +141,22 @@ Totais base por onda: 4, 6, 8, 10, 12, 14, 16, 15 = **85** (solo). Com 4 jogador
 macho 132 kg, vitais, um tiro → `round(132 × 2,5 × 1,25 × 1,5 × 0,35)` = **R$ 217** (`value_per_kg` do macho em `data/boars.json` = 2,5). Bônus com 87% de estoque:
 `round(3000 × 0,87)` = **R$ 2610**.
 
+### 3.3 `waves` por nível e o tipo `boss` (0.9.11)
+
+- `waves` é chave de `HORDE_OVERRIDE_KEYS` (`data_registry.gd`): o array do topo é o do **Nível 1** (**8 ondas**, 128
+  javalis base) e `levels[1].overrides.waves` é o do **Nível 2** (**10 ondas**, 129 base: 6, 8, 10, 12, 13, 14, 15, 16, 17,
+  18). Os dois níveis têm números de ondas diferentes — é contrato. Todo leitor usa o `waves` do nível **resolvido**
+  (`Data.get_horde_level(level)`), e o lobby mostra "8 ondas" ou "10 ondas" conforme o nível.
+- As regras de validação 2–4 de §3.1 rodam por nível resolvido (`_validate_horde_level` revalida o nível inteiro quando
+  `overrides` não está vazio; o erro sai com o rótulo `horde level 2`). Orçamento de ids do Nível 2: Σ ceil(total × 1,9) =
+  **250 de 255**; o do Nível 1 segue com 247. `player_count_mult` não muda entre níveis.
+- A onda 10 (última) abre com `{"members": ["boss"], "spawn_zone": 1, "delay_s": 0.0}`, sozinho e primeiro, e traz também um
+  grupo `["alpha", "boar", "boar"]`: a regra "a última onda contém `alpha`" (§3.1, 3) continua valendo.
+- **Tipo `boss`** ("Cachaço rei", `data/boars.json`, `Ids.BOSS`): só existe no Nível 2, por isso não entra em
+  `boar_overrides`. Campos, números e o novo `body_scale_mult`: `arquitetura.md` §9.5. Recompensa ≈ 1.280 (640 kg × 4,0 ×
+  `kill_reward_mult` 0,5). `BoarSpawner` nunca clona grupo que contenha `alpha` **ou** `boss` (`UNIQUE_TYPES`): com 1–4
+  jogadores o Nível 2 tem **exatamente 1 chefão e 2 alfas**.
+
 ---
 
 ## 4. Contrato em `src/core/` (já aplicado; ninguém mais edita)
@@ -161,6 +181,7 @@ Mudanças aditivas; nada existente mudou de assinatura. Código verbatim nos arq
 | Sinal | Emissor | Ouvintes | Quando |
 |---|---|---|---|
 | `horde_wave_changed(wave, wave_count, phase, countdown_s)` | B `HuntController` (todas as máquinas) | A `Hud`, tests | mudança de fase: (a) início da caçada → `(1, N, HP_INTERMISSION, first_wave_delay_s)`; (b) onda começa → `(w, N, HP_WAVE, 0.0)`; (c) onda `w < N` vencida → `(w + 1, N, HP_INTERMISSION, intermission_s)`. A onda N vencida não emite (a caçada termina em `VICTORY`). No cliente também ao aplicar o `EV_HORDE_WAVE` da reentrada, com o `countdown_s` restante |
+| `horde_boss_health_changed(pct)` (0.9.11) | B `HuntController` (offline e anfitrião; no cliente, `HuntReplica` ao ler `EV_BOSS_HP`, §9.4) | A `Hud` (`BossBar`), tests | só no Nível 2, com o chefão vivo: **100** quando ele nasce; depois a cada 0,25 s (máx. 4 Hz) só se o valor mudou; **um único 0** quando ele morre. O `pct` vem do host (`health / max_health × 100`): o dano do cão (`Boar.apply_dog_damage`) não passa por `boar_hit`, então a HUD não pode somar dano |
 | `horde_wave_progress(remaining, wave_total)` | B `HuntController` | A `Hud`, tests | logo depois de (b), com `remaining = wave_total`; e a cada abate de javali da onda em curso, **depois** do `boar_counts_changed` desse abate |
 
 `wave` é 1-based em sinais, getters e fio. `phase` é sempre `Ids.HP_INTERMISSION` ou `Ids.HP_WAVE`. Nenhum dos
@@ -275,7 +296,8 @@ barramento não mudam. Sem `set_store_mode`, nada muda.
   `horde_waves_cleared = get_horde_waves_cleared()`. `total_money = money_from_kills + contract_bonus` (igual).
   O cliente faz o mesmo com o estoque do `EV_HUNT_END` e as ondas do seu último `EV_HORDE_WAVE` (§9.2).
 - `counts_for_progression = false` sempre. Conta em `hunts_played` (e em `hunts_won` na vitória, D10).
-- Grupo entrando (`_on_group_entered`): em horda só a mensagem do alfa (`MSG_ALPHA`, e `EV_MESSAGE` msg 2).
+- Grupo entrando (`_on_group_entered`): em horda só a mensagem do alfa (`MSG_ALPHA`, e `EV_MESSAGE` msg 2) e, desde a 0.9.11,
+  a do chefão (`MSG_BOSS`, `EV_MESSAGE` msg **6**, §9.4). A checagem do chefão vem antes da de `count == 1`.
 - **Carcaças (D7):** em horda o anfitrião/offline guarda os javalis mortos numa fila; passou de
   `max_carcasses`, o mais antigo recebe `visible = false`. O cliente faz o mesmo com as `BoarPuppet` mortas
   (inclusive as mortas pela repetição do `EV_FULL_SYNC`). Nada é liberado; ids continuam registrados.
@@ -310,6 +332,19 @@ macho investe a ≤ `aggro_radius_m`, ou se foi atingido, até `max_charges` por
 detecta; quem não investe volta ao celeiro. Ferido não foge (H5). Tiro ouvido e ser atingido usam o caminho de
 hoje (`react` → `_decide`), que termina em investida ou em H5. Cão (`bayed`/`held`) não muda. Réplicas, estado
 de rede (`net_state_byte`) e a percepção escalonada não mudam.
+
+### 6.1 O chefão (0.9.11)
+
+Mesma FSM e mesmos desvios H1–H7; o que muda é dado e três pontos de código:
+- Escala: `body_scale = scale_for_weight(peso) × body_scale_mult` (1,15 no `boss`) em `Boar.setup` e `BoarPuppet.setup` ≈ 2,125,
+  raio ≈ 0,744 m. Zonas de acerto, raio de corpo, focinho da investida e altura dos olhos derivam de `body_scale`;
+  `BoarSpawner._spawn_boar` usa `boar.body_scale` (não o peso) para o raio de posicionamento.
+- Cão: `Boar._dog_time` trata `Ids.BOSS` como `Ids.ALPHA` (solta-se no `alpha_break_free_s`).
+- Rugido: `Sfx.play_3d(&"boar_boss_roar", ...)` uma vez em `Boar.start()` e em `BoarPuppet._ready()` quando o tipo é `Ids.BOSS`;
+  **não** no `setup` (o nó ainda está fora da árvore e `global_position` é inválido). Limitação conhecida: o replay do
+  `EV_FULL_SYNC` faz o rugido tocar de novo no cliente que volta.
+- Barra de vida: `HuntController` acompanha o `Boar` com `type_id == Ids.BOSS` (`spawner.boar_added`, só em horda) e emite
+  `horde_boss_health_changed` (§4.1); `_boss_gone()` na morte.
 
 ---
 
@@ -351,6 +386,7 @@ contrato o HUD não muda nada (mesmos textos e nós).
 | Minimapa | não desenha lavouras (`crop_rects = []`); desenha o celeiro em `get_objective_position()` com o ícone `barn` (24 px) ou, sem ícone, quadrado cheio 12 px cor `#F2C12E` |
 | Bússola | marcador do celeiro (mesmo ícone/quadrado, 20 px), sempre visível |
 | Munição | `"%d | ∞"` quando `has_infinite_reserve()`; alerta de pouca munição considera só o pente |
+| Barra do chefão (0.9.11) | `BossBar` (`src/hud/boss_bar.gd`; `set_health_pct(pct)`, `hide_bar()`), topo centralizado logo abaixo do espaço da `WaveBanner`; nome `"CACHAÇO REI"`. Aparece com `horde_boss_health_changed > 0`, esvazia e some 1 s depois do `0`, some na hora em `hunt_ended`. Enquanto visível, a `Hud` desce com um offset único os blocos centrados `ContextMessage`, `DownBanner`, `SpectateBanner`, `SpectateHint`, `DownedLabel`, `DownedHint` e `HintBanner` (`arquitetura.md` §8.4) |
 | Fim | `VICTORY` → `"Celeiro defendido!"`; `DEFEAT_CROP` → `"O celeiro foi devorado!"`; demais como hoje |
 
 O HUD guarda `wave_total` e `remaining` dos sinais; não calcula nada de rede. `WaveLabel` e `WaveBanner` são
@@ -418,6 +454,20 @@ Enviado uma vez por `wave_changed` no anfitrião (2 por onda). O `Net` já despa
   `reliable_window` (64) e do balde do servidor.
 - `PROTOCOL_VERSION` continua **1**; `config/version` sobe para **0.5.0** (coordenação), e salas já exigem
   versão igual. Servidor (`server/`) não muda.
+
+### 9.4 `EV_BOSS_HP` e a mensagem do chefão (0.9.11; B)
+
+`EV_BOSS_HP` (`0x2F`), H→C, pista E, corpo **1 byte**: `pct u8` (0..100). Registro de 4 bytes (3 de cabeçalho + 1).
+O anfitrião envia 100 quando o chefão nasce, depois **a cada 0,25 s (4 Hz) enquanto ele vive, mesmo sem mudança de vida**
+(~16 B/s por cliente), e um registro `0` quando ele morre. `HuntHostSync.queue_boss_health(pct: float) -> void` escreve;
+`HuntReplica` lê (ignora corpo vazio) e emite direto `GameEvents.horde_boss_health_changed(float(pct))`. O `Net` já despacha
+`0x21..0x3F` para `world.net_apply_event`; nada muda nele.
+
+- **`EV_FULL_SYNC` não carrega `EV_BOSS_HP`** (limitação conhecida): a barra do cliente que volta de um rejoin com o chefão vivo
+  depende da repetição (≤ 0,25 s de atraso). Plausível, não exercitado por teste.
+- **`EV_MESSAGE` msg 6 = chefão** (`HuntController.NET_MSG_BOSS = 6`, `MSG_BOSS`, texto na §12). Por que 6 e não 3: os códigos
+  3..5 são do cão (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`, `NET_MSG_RECOVERED`; texto em `Dog.MESSAGES`), então
+  `HuntController.NET_MESSAGES` tem buracos `""` em 3..5 (caem no `Dog.MESSAGES`) e o chefão ficou no primeiro código livre.
 
 ---
 
@@ -505,6 +555,7 @@ Fallback (B): `CornStockVisualBase.create_fallback()` (6 cones amarelos que enco
 |---|---|---|
 | `horde_wave_start` | A (HUD) | berrante/corneta grave e curta, ~1,5 s, anuncia a onda |
 | `horde_wave_clear` | A (HUD) | vinheta curta de alívio, ~1 s, mais leve que `victory_sting` |
+| `boar_boss_roar` (0.9.11) | B (`Boar.start()`, `BoarPuppet._ready()`) | rugido grave do chefão, ~2,4 s, uma vez ao entrar; som lazy de `assets/audio/synth/synth_world.gd`, via `Sfx.play_3d` |
 
 Síntese procedural obrigatória (fallback); MP3 opcional pela regra de `sfx_prompts.json`. `has_sound()` passa a
 ser verdadeiro para os dois.
@@ -524,6 +575,7 @@ minimapa, bússola e o botão de modo do lobby. Fallback: quadrado/texto.
 | HUD | `"Celeiro %d%%"`, `"Javalis no celeiro!"`, `"Onda %d/%d · faltam %d"`, `"Onda %d/%d em %d s"`, `"Onda –"`, `"Defenda o celeiro! A horda chega em %d s"`, `"Onda %d de %d"`, `"Última onda! Onda %d de %d"`, `"Onda %d vencida!"`, `"%d | ∞"`, `"Celeiro defendido!"`, `"O celeiro foi devorado!"` |
 | Resultado | §10.3 |
 | Mensagem do alfa | `"O cachaço alfa entrou na área!"` (a de hoje) |
+| Chefão (0.9.11) | `boss.name` `"Cachaço rei"`; `HuntController.MSG_BOSS` `"O cachaço rei entrou na área!"`; nome na `BossBar` `"CACHAÇO REI"` |
 
 ---
 
@@ -542,8 +594,8 @@ minimapa, bússola e o botão de modo do lobby. Fallback: quadrado/texto.
   Números são do game-systems (`kill_reward_mult`, `victory_bonus_money`).
 - **R4 — Repetição do F8 maior:** até ~7,7 kB numa reentrada (4 mensagens de relay). Dentro dos limites
   medidos; o `coop_probe.py` deve exercitar uma reentrada em horda adiantada (onda ≥ 5).
-- **R5 — Alfa não escala com jogadores:** `scale_groups` não clona grupos com alfa (regra de hoje). Com 4
-  jogadores a última onda continua com 1 alfa. Ajuste é em dados (mais grupos com alfa).
+- **R5 — Alfa não escala com jogadores:** `scale_groups` não clona grupos com alfa (regra de hoje) nem, desde a 0.9.11, com
+  `boss` (`UNIQUE_TYPES`). Com 4 jogadores a última onda continua com 1 alfa (2 no Nível 2) e 1 chefão. Ajuste é em dados.
 - **R6 — Ceva desvia a horda (D8):** pode deixar a defesa fácil demais; se for o caso, é dado
   (`corn_bait.effect`) ou uma regra futura "ceva sem efeito em horda" (Q4).
 

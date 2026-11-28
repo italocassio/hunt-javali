@@ -19,7 +19,10 @@ const JS_DPR_CAP_READ: String = "(window.__huntMaxDpr > 0) ? window.__huntMaxDpr
 const MSG_GROUP: String = "Uma vara saiu da mata!"
 const MSG_LONER: String = "Um javali solitário saiu da mata!"
 const MSG_ALPHA: String = "O cachaço alfa entrou na área!"
+const MSG_BOSS: String = "O cachaço rei entrou na área!"
 const MSG_S: float = 3.0
+## Horde boss: rate of GameEvents.horde_boss_health_changed and of EV_BOSS_HP (4 Hz).
+const BOSS_HP_INTERVAL_S: float = 0.25
 const WAITING_TEXT: String = "Aguardando os outros caçadores…"
 const SNAPSHOT_HEADER_BYTES: int = 10        # t_ms u32, crop u16, killed u8, total u8, flags u8, n_hunters u8
 const SNAPSHOT_BOAR_BYTES: int = 7
@@ -27,11 +30,14 @@ const SNAPSHOT_DOG_BYTES: int = 8
 const CROP_WIRE_SCALE: float = 100.0
 const SNAP_FLAG_CROP_ATTACK: int = 1         # H_SNAPSHOT flags b0: boars at the crop
 ## EV_MESSAGE msg 0..2 (docs/multiplayer.md section 4.5): same texts as the host's group announcements.
-## msg 3..5 are the dog's (Dog.MESSAGES).
-const NET_MESSAGES: Array[String] = [MSG_GROUP, MSG_LONER, MSG_ALPHA]
+## msg 3..5 are the dog's (Dog.MESSAGES) and have no text here (empty slot = not ours, see _on_net_message).
+## Contract note: docs/plano_horda_boss.md section 4.2 item 6 asks for NET_MSG_BOSS = 3, but 3 is already
+## Dog.NET_MSG_NO_BOAR on the wire; the boss takes the first free code, 6.
+const NET_MESSAGES: Array[String] = [MSG_GROUP, MSG_LONER, MSG_ALPHA, "", "", "", MSG_BOSS]
 const NET_MSG_GROUP: int = 0
 const NET_MSG_LONER: int = 1
 const NET_MSG_ALPHA: int = 2
+const NET_MSG_BOSS: int = 6
 const MSG_HOST_ALONE: String = "Conexão perdida: você continua sozinho."
 const DEFAULT_HUNTER_NAME: String = "Caçador %d"
 ## A client's own bait (shown at once) and the host's EV_BAIT for it are the same bait within this distance.
@@ -143,6 +149,11 @@ var _horde_level: int = 0               # 0 outside the horde
 var _player_bounds: Rect2 = Rect2()     # confine.enabled: the farm fence rect, inset
 var _ammo_crates: HordeAmmoCrates = null
 var _downed_slots: Dictionary = {}      # slot -> true once hunter_downed was emitted (cleared when alive again)
+# Horde boss (docs/plano_horda_boss.md section 4.2 item 4), offline and host. The dog's damage
+# (Boar.apply_dog_damage) never passes through boar_hit, so the health the HUD shows is polled here.
+var _boss: Boar = null                  # the living boss of the last wave (null outside it)
+var _boss_hp_timer: float = 0.0
+var _boss_hp_pct: float = -1.0          # last pct put on the bus (-1 = nothing published yet)
 
 # Counters for tests and diagnostics.
 var revives_accepted: int = 0
@@ -429,6 +440,8 @@ func _assemble() -> void:
 	spawner.boar_died.connect(_on_boar_died)
 	spawner.group_entered.connect(_on_group_entered)
 	if is_horde():
+		# The boss bar is fed from here (docs/plano_horda_boss.md section 4.2 item 4).
+		spawner.boar_added.connect(_on_boar_added)
 		# After the controller's boar_died connection (section 5.1, step 5).
 		_director = HordeDirector.new()
 		_director.name = "HordeDirector"
@@ -694,6 +707,8 @@ func _process(delta: float) -> void:
 		if _abandon:
 			_finish(HuntResult.Outcome.ABANDONED)
 		return
+	if _boss != null:
+		_track_boss(delta)
 	if _all_hunters_dead():
 		_finish(HuntResult.Outcome.DEFEAT_DEATH)
 	elif crop != null and crop.get_health_pct() <= 0.0:
@@ -719,6 +734,47 @@ func _track_deaths() -> void:
 		elif not _dead_slots.has(h.slot):
 			_dead_slots[h.slot] = true
 			GameEvents.hunter_died.emit(h.slot)
+
+
+## Horde, offline and host, 4 Hz: the boss health to this machine's HUD (only when it changed) and to every
+## client (EV_BOSS_HP, repeated on purpose: that is also what gives a rejoining client its bar back).
+func _track_boss(delta: float) -> void:
+	if not is_instance_valid(_boss):
+		_boss = null
+		return
+	_boss_hp_timer -= delta
+	if _boss_hp_timer > 0.0:
+		return
+	_boss_hp_timer = BOSS_HP_INTERVAL_S
+	var pct: float = clampf(_boss.health / _boss.max_health * 100.0, 0.0, 100.0) if _boss.max_health > 0.0 else 0.0
+	if not is_equal_approx(pct, _boss_hp_pct):
+		_boss_hp_pct = pct
+		GameEvents.horde_boss_health_changed.emit(pct)
+	if _host_sync != null:
+		_host_sync.queue_boss_health(pct)
+
+
+## Horde, offline and host: a boar entered the world. Only the boss matters here, and its bar starts full.
+func _on_boar_added(boar: Boar) -> void:
+	if boar.type_id != Ids.BOSS:
+		return
+	_boss = boar
+	_boss_hp_timer = BOSS_HP_INTERVAL_S
+	_boss_hp_pct = 100.0
+	GameEvents.horde_boss_health_changed.emit(100.0)
+	if _host_sync != null:
+		_host_sync.queue_boss_health(100.0)
+
+
+## Horde, offline and host: the boss died (or the hunt ended with it alive). Empties the bar once.
+func _boss_gone() -> void:
+	_boss = null
+	if _boss_hp_pct == 0.0:
+		return
+	_boss_hp_pct = 0.0
+	GameEvents.horde_boss_health_changed.emit(0.0)
+	if _host_sync != null:
+		_host_sync.queue_boss_health(0.0)
 
 
 ## Solo: player_died received (contract section 8.8, unchanged). Network host: every hunter still in the
@@ -846,6 +902,8 @@ func _on_boar_died(boar: Boar) -> void:
 	_marks.erase(boar.boar_id)
 	if is_horde():
 		_add_carcass(boar)
+		if boar == _boss:
+			_boss_gone()
 	if _over:
 		return
 	_killed += 1
@@ -959,16 +1017,25 @@ func _on_host_hunt_end(outcome: int, crop_pct: float, killed: int, total: int, e
 func _on_group_entered(leader_type: StringName, count: int) -> void:
 	if _over or _elapsed < 1.0:
 		return
-	if is_horde() and leader_type != Ids.ALPHA:
-		return   # D11: the wave banner replaces the herd announcements; only the alpha's stays
+	if is_horde() and leader_type != Ids.ALPHA and leader_type != Ids.BOSS:
+		return   # D11: the wave banner replaces the herd announcements; only the alpha's and the boss's stay
+	# The boss comes alone (count == 1), so its test goes before the loner's.
 	var text: String = MSG_GROUP
-	if leader_type == Ids.ALPHA:
+	if leader_type == Ids.BOSS:
+		text = MSG_BOSS
+	elif leader_type == Ids.ALPHA:
 		text = MSG_ALPHA
 	elif count == 1:
 		text = MSG_LONER
 	GameEvents.hud_message_requested.emit(text, MSG_S)
 	if _host_sync != null:
-		var msg: int = NET_MSG_ALPHA if text == MSG_ALPHA else (NET_MSG_LONER if text == MSG_LONER else NET_MSG_GROUP)
+		var msg: int = NET_MSG_GROUP
+		if text == MSG_BOSS:
+			msg = NET_MSG_BOSS
+		elif text == MSG_ALPHA:
+			msg = NET_MSG_ALPHA
+		elif text == MSG_LONER:
+			msg = NET_MSG_LONER
 		_host_sync.queue_message(NetCodec.NO_SLOT, msg)
 
 
@@ -976,7 +1043,7 @@ func _on_group_entered(leader_type: StringName, count: int) -> void:
 func _on_net_message(msg: int) -> void:
 	if _over:
 		return
-	if msg >= 0 and msg < NET_MESSAGES.size():
+	if msg >= 0 and msg < NET_MESSAGES.size() and not NET_MESSAGES[msg].is_empty():
 		GameEvents.hud_message_requested.emit(NET_MESSAGES[msg], MSG_S)
 	elif Dog.MESSAGES.has(msg):
 		GameEvents.hud_message_requested.emit(String(Dog.MESSAGES[msg]), MSG_S)

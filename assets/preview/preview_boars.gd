@@ -18,10 +18,10 @@ func _ready() -> void:
 	add_child(ground)
 	var scn: PackedScene = load("res://assets/models/boar/boar_visual.tscn")
 	var defs: Array = [
-		[Ids.PIGLET, 30.0, "idle"], [Ids.SOW, 85.0, "walk"], [Ids.BOAR, 130.0, "scrape"], [Ids.ALPHA, 240.0, "charge"],
+		[Ids.PIGLET, 30.0, "idle"], [Ids.SOW, 85.0, "walk"], [Ids.BOAR, 130.0, "scrape"], [Ids.ALPHA, 240.0, "charge"], [Ids.BOSS, 600.0, "idle"],
 	]
 	if mode == "weights":
-		defs = [[Ids.PIGLET, 25.0, "idle"], [Ids.BOAR, 100.0, "idle"], [Ids.ALPHA, 260.0, "idle"]]
+		defs = [[Ids.PIGLET, 25.0, "idle"], [Ids.BOAR, 100.0, "idle"], [Ids.ALPHA, 260.0, "idle"], [Ids.BOSS, 600.0, "idle"]]
 	if mode == "poses":
 		defs = [[Ids.BOAR, 120.0, "eat"], [Ids.BOAR, 120.0, "alert"], [Ids.BOAR, 120.0, "attack"], [Ids.BOAR, 120.0, "dead"], [Ids.ALPHA, 220.0, "highlight"]]
 	var x: float = -(defs.size() - 1) * 1.1

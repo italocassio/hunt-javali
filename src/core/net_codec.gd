@@ -33,6 +33,7 @@ const EV_FULL_SYNC: int = 0x2B         # header of a rejoin sync, followed by re
 const EV_HORDE_WAVE: int = 0x2C        # horde wave state (docs/horda.md section 9)
 const EV_HUNTER_REVIVED: int = 0x2D    ## Horde level 2: target_slot u8, by_slot u8
 const EV_AMMO_CRATE: int = 0x2E        ## Horde level 2: crate u8, available u8, taker_slot u8 (255 = nobody)
+const EV_BOSS_HP: int = 0x2F           ## Horde level 2: health of the boss of the last wave, pct u8 (0..100)
 # Client -> host
 const C_STATE: int = 0x40              # state lane
 const C_SHOT: int = 0x41

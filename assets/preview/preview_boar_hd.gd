@@ -11,8 +11,8 @@ const Model := preload("res://assets/models/boar/boar_hd_model.gd")
 const HUNTER_SCENE: String = "res://assets/models/hunter/hunter_visual.tscn"
 const MAP_SCENE: String = "res://assets/preview/preview_map.tscn"
 const DEFAULT_SHOTS: String = "types_studio,poses_move,poses_combat,map_scale,lod"
-const TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha"]
-const TYPE_KG: Dictionary = {&"piglet": 30.0, &"sow": 80.0, &"boar": 100.0, &"alpha": 220.0}
+const TYPES: Array[StringName] = [&"piglet", &"sow", &"boar", &"alpha", &"boss"]
+const TYPE_KG: Dictionary = {&"piglet": 30.0, &"sow": 80.0, &"boar": 100.0, &"alpha": 220.0, &"boss": 600.0}
 const HARD_TIMEOUT_S: float = 150.0
 const GAME_FOV: float = 75.0
 const LEG_ZONE_MIN_Y: float = 0.26
@@ -242,10 +242,11 @@ func _run(shots: PackedStringArray) -> void:
 		match shot:
 			"types_studio":
 				cam = _studio()
-				for i in 4:
+				var xs: Array[float] = [-3.6, -2.35, -1.2, 0.2, 2.6]
+				for i in TYPES.size():
 					var t: StringName = TYPES[i]
-					boars.append([_boar(t, TYPE_KG[t], Vector3((float(i) - 1.5) * 1.35, 0.0, 0.0), 122.0), "idle"])
-				_look(cam, Vector3(0.0, 0.42, 0.0), Vector3(0.0, 1.35, 5.3), 36.0)
+					boars.append([_boar(t, TYPE_KG[t], Vector3(xs[i], 0.0, 0.0), 122.0), "idle"])
+				_look(cam, Vector3(-0.3, 0.7, 0.0), Vector3(-0.3, 1.6, 8.6), 36.0)
 			"poses_move":
 				cam = _studio()
 				var poses: Array[String] = ["walk", "gallop", "scrape"]

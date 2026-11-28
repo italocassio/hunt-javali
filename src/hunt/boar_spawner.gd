@@ -12,6 +12,8 @@ const SPAWN_TRIES: int = 12
 const THERMAL_REFRESH_S: float = 0.25
 const DEFAULT_SPAWN_RADIUS_M: float = 8.0
 const DEFAULT_MAX_ALIVE: int = 18
+## Boar types that are never cloned by scale_groups: one per hunt, however many hunters are in the room.
+const UNIQUE_TYPES: Array[StringName] = [Ids.ALPHA, Ids.BOSS]
 
 var _world: HuntController = null
 var _parent: Node3D = null
@@ -77,6 +79,8 @@ func setup(world: HuntController, parent: Node3D, contract: Dictionary, spawn_zo
 ## (groups led by or containing an alpha are skipped), each clone in spawn_zone + 1 + lap and delayed by
 ## max contract delay + coop.extra_group_delay_s x (clone order, from 1); the last clone loses members
 ## from the end (never the leader) so the total lands on the target. Solo / no growth: a deep copy.
+## Horde boss (docs/plano_horda_boss.md R5): a group with an alpha or a boss is never a clone source, so a
+## four-hunter room still faces exactly one boss.
 static func scale_groups(groups: Array, player_count: int, coop: Dictionary) -> Array:
 	var out: Array = groups.duplicate(true)
 	var mults: Array = coop.get("boar_count_mult_by_players", [])
@@ -91,8 +95,9 @@ static func scale_groups(groups: Array, player_count: int, coop: Dictionary) -> 
 		var members: Array = def.get("members", [])
 		base += members.size()
 		max_delay = maxf(max_delay, float(def.get("delay_s", 0.0)))
-		if not members.is_empty() and not members.has(String(Ids.ALPHA)) and not members.has(Ids.ALPHA):
-			sources.append(def)
+		if members.is_empty() or _has_unique_type(members):
+			continue
+		sources.append(def)
 	var target: int = roundi(float(base) * mult)
 	if target <= base or sources.is_empty():
 		return out
@@ -113,6 +118,15 @@ static func scale_groups(groups: Array, player_count: int, coop: Dictionary) -> 
 		count += members.size()
 		order += 1
 	return out
+
+
+## True when the group holds a type that must stay unique in the hunt (alpha, boss). The members come from the
+## JSON (String) or from already converted data (StringName), so both spellings are tested.
+static func _has_unique_type(members: Array) -> bool:
+	for id: StringName in UNIQUE_TYPES:
+		if members.has(String(id)) or members.has(id):
+			return true
+	return false
 
 
 func begin() -> void:
@@ -228,7 +242,8 @@ func _spawn_boar(type_id: StringName, herd: BoarHerd, wave: int = -1) -> void:
 	boar.died.connect(_on_boar_died)
 	_parent.add_child(boar)
 	var pos: Vector2 = herd.anchor
-	var radius: float = BoarVisualBase.scale_for_weight(weight) * Boar.BODY_RADIUS_M
+	# boar.body_scale already carries the type's body_scale_mult (the boss is wider than its weight says).
+	var radius: float = boar.body_scale * Boar.BODY_RADIUS_M
 	for t: int in SPAWN_TRIES:
 		var ang: float = rng.randf_range(0.0, TAU)
 		var p: Vector2 = herd.anchor + Vector2(cos(ang), sin(ang)) * sqrt(rng.randf()) * _spawn_radius

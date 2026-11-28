@@ -30,6 +30,14 @@
      "charge_max_distance_m": 30.0, "recover_s": 1.8,
      "vision_range_m": 45.0, "vision_fov_deg": 140.0, "hearing_mult": 1.2, "alert_time_s": 0.8,
      "crop_drain_pct_per_s": 0.30, "wounded_health_frac": 0.25, "wounded_speed_mult": 0.85,
-     "flee_rest_min_s": 15.0, "flee_rest_max_s": 25.0, "dog_damage_per_s": 25.0}
+     "flee_rest_min_s": 15.0, "flee_rest_max_s": 25.0, "dog_damage_per_s": 25.0},
+    {"id": "boss", "name": "Cachaço rei", "weight_min_kg": 620.0, "weight_max_kg": 640.0, "health_per_kg": 7.0, "value_per_kg": 4.0,
+     "walk_speed_mps": 2.4, "run_speed_mps": 8.0, "charge_speed_mps": 12.0, "turn_speed_deg_s": 140.0,
+     "aggression": "always", "aggro_radius_m": 60.0, "max_charges": 99, "charge_damage": 40.0, "charge_telegraph_s": 0.6,
+     "charge_max_distance_m": 40.0, "recover_s": 1.8,
+     "vision_range_m": 60.0, "vision_fov_deg": 160.0, "hearing_mult": 1.5, "alert_time_s": 0.5,
+     "crop_drain_pct_per_s": 0.35, "wounded_health_frac": 0.20, "wounded_speed_mult": 0.95,
+     "flee_rest_min_s": 10.0, "flee_rest_max_s": 15.0, "dog_damage_per_s": 30.0,
+     "body_scale_mult": 1.15}
   ]
 }

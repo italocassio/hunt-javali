@@ -115,9 +115,9 @@ func _scale_case() -> void:
 	for i: int in range(c0.size(), g4.size()):
 		var g: Dictionary = g4[i]
 		var members: Array = g["members"]
-		clones_ok = clones_ok and not members.is_empty() and not members.has("alpha") \
+		clones_ok = clones_ok and not members.is_empty() and not members.has("alpha") and not members.has("boss") \
 			and float(g["delay_s"]) > max_delay and float(g["delay_s"]) > float((g4[i - 1] as Dictionary)["delay_s"]) - 0.001
-	_check("scale_clones_after_contract_no_alpha", clones_ok and g4.size() > c0.size(), str(g4.slice(c0.size())))
+	_check("scale_clones_after_contract_no_unique", clones_ok and g4.size() > c0.size(), str(g4.slice(c0.size())))
 	var worst: int = 0
 	for map_id: Variant in Data.get_map_ids():
 		for index: int in Data.get_contract_count(StringName(map_id)):
@@ -133,6 +133,18 @@ func _scale_case() -> void:
 	for g: Dictionary in alpha_contract:
 		alphas_base += (g["members"] as Array).count("alpha")
 	_check("scale_never_clones_alpha", alphas == alphas_base, "alphas %d -> %d, total %d" % [alphas_base, alphas, _sum(ga)])
+
+	# The level-2 last wave carries the alpha and the boss (BoarSpawner.UNIQUE_TYPES): neither is ever cloned.
+	var last_wave: Array = ((Data.get_horde_level(2).get("waves", []) as Array).back() as Dictionary).get("groups", [])
+	var gw: Array = BoarSpawner.scale_groups(last_wave, 4, coop)
+	var uniques: int = 0
+	var uniques_base: int = 0
+	for g: Dictionary in gw:
+		uniques += (g["members"] as Array).count("alpha") + (g["members"] as Array).count("boss")
+	for g: Dictionary in last_wave:
+		uniques_base += (g["members"] as Array).count("alpha") + (g["members"] as Array).count("boss")
+	_check("scale_never_clones_boss", uniques_base == 2 and uniques == uniques_base,
+		"unicos %d -> %d, total %d" % [uniques_base, uniques, _sum(gw)])
 
 
 func _sum(groups: Array) -> int:

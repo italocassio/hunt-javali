@@ -20,6 +20,11 @@ GDScript tipado · Renderer **Compatibility** · Web sem threads.
 §14; cada trecho diz a fase. Até a fase fechar, vale o plano; no fecho, a coordenação completa §6.8, §8.4, §8.11, §8.12 e o
 Apêndice A.
 
+**1.9 (jogo 0.9.11): Horda Nível 2 com 10 ondas e o chefão "Cachaço rei".** Plano e medição da luta em
+`docs/plano_horda_boss.md`. Registrado aqui: §5 (`horde_boss_health_changed`), §8.4 (`BossBar`), §8.9 (chefão, cão,
+rugido), §8.12 (clonagem, `EV_BOSS_HP`, `NET_MSG_BOSS`), §9.5 (tipo `boss`, `body_scale_mult`), §9.10 (`waves` por
+nível), §12 (cenas de teste) e o Apêndice A (acréscimos 0.9.11). Comportamento de horda: `docs/horda.md` §3.3, §6.1 e §9.4.
+
 Este documento é a fonte da verdade. Quatro agentes implementam em paralelo sem conversar. Se algo aqui
 estiver errado ou faltando, **faça o mínimo, não invente API, e relate** ao coordenador. Mudanças de
 contrato passam pelo `game-architect`. O detalhe do protocolo de rede do modo cooperativo (formatos de
@@ -456,9 +461,14 @@ Emite-se com `GameEvents.<sinal>.emit(...)`. Regra: quem é dono do fato emite; 
 | `hunter_away_changed(slot: int, away: bool)` | B `HuntController` | A `Hud` | F8: bit `HF_AWAY` de um aliado mudou |
 | `horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)` | B `HuntController` | A `Hud`, tests | só em horda: mudança de fase da onda (`docs/horda.md` §4.1) |
 | `horde_wave_progress(remaining: int, wave_total: int)` | B `HuntController` | A `Hud`, tests | só em horda: início de onda e cada abate dela, depois de `boar_counts_changed` |
+| `horde_boss_health_changed(pct: float)` | B `HuntController` (offline e anfitrião; no cliente, `HuntReplica` reemite o `EV_BOSS_HP`) | A `Hud` (`BossBar`), tests | só em horda nível 2: vida do chefão, 0–100. Emite **100** quando o chefão nasce, depois a cada 0,25 s (máx. 4 Hz) **só se o valor mudou** e **um único 0** quando ele morre. Nunca emitido com `is_horde() == false` |
 
 Em horda, `crop_health_changed`/`crop_under_attack` carregam o **estoque do celeiro** e `boar_counts_changed` continua
 contando a partida inteira (todas as ondas).
+
+`horde_boss_health_changed`: o `pct` vem do **anfitrião** (`health / max_health × 100` do `Boar` com
+`type_id == Ids.BOSS`) e a HUD **não soma dano** por `boar_hit`, porque o dano do cão (`Boar.apply_dog_damage`) não
+passa por `boar_hit`: somar dano na HUD deixaria a barra mais cheia do que o chefão. Detalhe e rede: §8.12.
 
 As dicas das primeiras caçadas (§8.4) **não** têm sinal no barramento: são locais ao Pacote A (sinais do próprio
 `HintDirector`) e não mudam `src/core/`. Em rede cada máquina tem o seu `Profile` e vê só as próprias dicas.
@@ -1792,6 +1802,21 @@ toque estilo PUBG" (posições nas três telas). Teclado, sem mudança:
 - Teclado a 1280×720: legenda das primeiras caçadas termina em y 497 com cão, acima do `WeaponFrame` (≥ 563); a barra de
   vida (x ≤ 840) e a `Quickbar` (x ≤ 780) não alcançam o painel (x ≥ 1008).
 
+**Barra do chefão (horda nível 2, jogo 0.9.11; A).** `BossBar` (`src/hud/boss_bar.gd`, `class_name BossBar extends
+Control`, só leitura: não recebe entrada) é criada e posicionada pela `Hud` e alimentada por
+`GameEvents.horde_boss_health_changed`. API: `set_health_pct(pct: float)`, `hide_bar()`; a `Hud` usa também
+`BossBar.width_for(screen_width_px) -> float` (44% da tela, 320–720 px) e `get_total_height() -> float`. Nome `CACHAÇO REI`
+acima de um trilho de 22 px. Posição: topo centralizado, com o topo na base real do painel do celeiro + `HORDE_BANNER_GAP_PX`
++ `HORDE_BANNER_HEIGHT_PX` (logo abaixo do espaço da `WaveBanner`). `pct > 0` mostra (só em horda e antes do fim);
+`pct == 0` esvazia e esconde `BOSS_HIDE_DELAY_S` (1 s) depois; `hunt_ended` esconde na hora.
+**Comportamento de layout que outro pacote pode quebrar sem saber:** enquanto a barra está visível a `Hud` desce, com
+**um único offset** (`_shift_central_blocks`, vertical em `offset_top`/`offset_bottom`), os blocos centrados do topo
+`ContextMessage`, `DownBanner`, `SpectateBanner`, `SpectateHint`, `DownedLabel`, `DownedHint` e `HintBanner`, de modo que
+o primeiro comece `BOSS_CONTEXT_GAP_PX` (6 px) abaixo da barra (a faixa de contexto, `CONTEXT_TOP_FRAC`, fica dentro da barra
+a 720 px). Esses blocos **têm de continuar posicionados só por âncoras fracionárias com offsets verticais zero** em
+repouso; quem mudar o posicionamento de um deles precisa atualizar `Hud._central_blocks()`. A barra não toca a bússola, o
+painel do celeiro, a `WaveBanner` nem a faixa de contexto.
+
 Resíduos aceitos (documentados para não virarem bug):
 - Teclado 1280×720: uma mensagem de abate muito longa (> ≈ 750 px a 30 px, combinações "Tiro limpo! · Um tiro só!")
   pode encostar no canto superior esquerdo do `WeaponFrame` (y 541–581 da mensagem contra o topo ≈ 563 do painel).
@@ -1906,7 +1931,18 @@ Estados (`Ids`): `wander`, `to_crop`, `eat`, `to_bait`, `alert`, `flee`, `scrape
 - Ferido (`wounded`): velocidades × `wounded_speed_mult`, `set_wounded(true)`; leitão/fêmea feridos fogem.
 - Cão: `bayed` (foxhound): para e encara o cão por `bay_duration_s`; `held` (dogo): imóvel por
   `hold_duration_s`, sofrendo `bite_dps`; alfa se solta após `alpha_break_free_s`. Javalis `provoked`/`always`
-  a ≤ 2,5 m do cão causam `dog_damage_per_s`.
+  a ≤ 2,5 m do cão causam `dog_damage_per_s`. O chefão (`Ids.BOSS`) se solta como o alfa:
+  `Boar._dog_time` trata `BOSS` igual a `ALPHA` (`alpha_break_free_s`).
+- Escala do corpo (0.9.11): `Boar.setup` e `BoarPuppet.setup` calculam `body_scale = BoarVisualBase.scale_for_weight(peso_kg) ×
+  def.get("body_scale_mult", 1.0)`. Zonas de acerto (`Boar.make_hit_zones`), raio de corpo (`BODY_RADIUS_M × body_scale`),
+  focinho da investida (`charge_hits`) e altura dos olhos derivam desse `body_scale`, nunca do peso. Quem precisa do tamanho
+  do javali lê `boar.body_scale` (o `BoarSpawner._spawn_boar` usa-o para o raio de posicionamento). Chefão: escala ≈ 2,125,
+  raio ≈ 0,744 m.
+- Rugido do chefão: `Sfx.play_3d(&"boar_boss_roar", ...)` uma vez em `Boar.start()` (anfitrião/offline) e em
+  `BoarPuppet._ready()` (cliente) quando `type_id == Ids.BOSS`. **Não** no `setup`: ali o nó ainda está fora da árvore e
+  `global_position` é inválido. Som lazy de `assets/audio/synth/synth_world.gd` (§7.8). Limitação conhecida: o replay do
+  `EV_FULL_SYNC` recria o `BoarPuppet` e o rugido toca de novo no cliente que volta, inclusive para chefão já morto
+  (mesmo defeito antigo do replay, que já reproduz ganidos de morte).
 
 ### 8.10 Cão (B)
 Estados (`Ids`): `follow` (a `follow_distance_m` atrás do jogador), `seek` (indo ao javali vivo mais próximo
@@ -1933,7 +1969,7 @@ onde está; dono saiu: `leave()`. `command()` é público: só o cão do slot lo
 `dog_command_requested` e emite `dog_state_changed`, `dog_health_changed` e `dog_command_executed`; o comando
 do cliente vai por `C_DOG_CMD` e o "Pega!" aparece no HUD dele depois da ida e volta (`EV_DOG_CMD`), sem
 predição local. Mensagens de HUD do cão: no barramento se o dono é local, senão `EV_MESSAGE` ao dono (códigos
-3–5, `Dog.NET_MSG_*`/`Dog.MESSAGES`). Marcação: todos emitem `dog_marked_boar` (o anfitrião envia
+3–5, `Dog.NET_MSG_*`/`Dog.MESSAGES`; o 6 é do chefão, §8.12). Marcação: todos emitem `dog_marked_boar` (o anfitrião envia
 `EV_DOG_MARK`). `Boar.apply_dog_damage` credita o abate ao dono do cão. `HuntController`: `get_dogs()`,
 `get_dog_of(slot)`; `has_dog`/`get_dog_*` respondem pelo cão do jogador local. Limitação conhecida (balanceamento
 de vários cães): se dois cães pegam o mesmo javali, o primeiro a soltar libera o javali para os dois.
@@ -2077,7 +2113,8 @@ da máquina do dono. `Router.finish_hunt` e `apply_hunt_result` continuam sendo 
 vez por máquina.
 
 **Escala de javalis** (`BoarSpawner.scale_groups`, função pura): `alvo = round(total_base ×
-coop.boar_count_mult_by_players[n − 1])`. Clona grupos inteiros em ordem (pulando os que têm `alpha`), cada
+coop.boar_count_mult_by_players[n − 1])`. Clona grupos inteiros em ordem (pulando os que têm `alpha` **ou** `boss`: `BoarSpawner.UNIQUE_TYPES`, que garante 1 chefão
+e 2 alfas em 1–4 jogadores no Nível 2), cada
 clone com `spawn_zone + 1 + volta` e `delay_s = maior delay do contrato + coop.extra_group_delay_s × (ordem do
 clone)`; o último clone perde membros do fim (nunca o líder) para fechar no alvo. O teto
 `hunt.max_alive_boars` continua valendo: grupos esperam vaga. Exemplo: primeiro contrato (índice 0, 9 javalis)
@@ -2094,6 +2131,21 @@ a cada snapshot atualiza a saúde e passa pelo mesmo `crop_health_changed` do so
 **Horda (0.5.0).** Tudo acima vale; os acréscimos (modo na sala, `EV_HORDE_WAVE`, repetição de onda no
 `EV_FULL_SYNC`, `CropManager` em modo estoque, ondas no `BoarSpawner`, desvios H1–H7 da FSM, carcaças
 escondidas) estão em `docs/horda.md` §5, §6 e §9.
+
+**Chefão da horda nível 2 (0.9.11).** Detalhe em `docs/horda.md` §9.4.
+- `EV_BOSS_HP = 0x2F`, H→C, pista de eventos, corpo `pct u8` (0..100): **4 bytes por registro** (3 de cabeçalho + 1), 4 por
+  segundo enquanto o chefão vive (~16 B/s por cliente), mais um registro `0` na morte. `HuntHostSync.queue_boss_health(pct:
+  float)` envia (também com 100 no nascimento); `HuntReplica` lê (ignora corpo vazio) e emite
+  `GameEvents.horde_boss_health_changed` direto. O anfitrião envia **a cada 0,25 s mesmo sem mudança de vida** (o sinal local
+  só sai quando o valor muda).
+- `EV_FULL_SYNC` **não** carrega `EV_BOSS_HP`. Limitação conhecida: a barra do cliente que volta de um rejoin depende da
+  repetição a 4 Hz (≤ 0,25 s de atraso); plausível, não exercitado por teste.
+- Aviso de entrada: `HuntController.MSG_BOSS = "O cachaço rei entrou na área!"`, `NET_MSG_BOSS = 6` (`EV_MESSAGE`, msg 6).
+  **Por que 6 e não 3:** os códigos 3..5 de `EV_MESSAGE` são do cão (`Dog.NET_MSG_NO_BOAR`, `NET_MSG_RETREAT`,
+  `NET_MSG_RECOVERED`; texto em `Dog.MESSAGES`). `HuntController.NET_MESSAGES` ficou com buracos vazios (`""`) em 3..5, que
+  caem no `Dog.MESSAGES`, e o chefão ocupa o primeiro código livre. Um 4º item contíguo faria o cliente mostrar o aviso do
+  chefão no lugar de "O cão não farejou nenhum javali por perto.". O teste do líder em `_on_group_entered` deixa passar
+  `ALPHA` e `BOSS` em horda, e a checagem do chefão vem antes da de `count == 1` (o grupo dele tem 1 membro).
 
 ---
 
@@ -2404,6 +2456,15 @@ Peso sorteado: `lerp(min, max, (randf() + randf()) / 2)` (tende ao meio).
 | `vision_range_m`, `vision_fov_deg`, `hearing_mult`, `alert_time_s` | float | |
 | `crop_drain_pct_per_s` | float | % da lavoura por segundo comendo |
 | `wounded_health_frac`, `wounded_speed_mult`, `flee_rest_min_s`, `flee_rest_max_s`, `dog_damage_per_s` | float | |
+| `body_scale_mult` (0.9.11, **opcional**, padrão 1,0) | float em (0,5 … 3,0] | × | multiplica `BoarVisualBase.scale_for_weight(peso)` em `Boar.setup` e `BoarPuppet.setup` (§8.9). Validado por `Data` (`get_load_errors()`); os 4 tipos antigos não o declaram |
+
+Tipo `boss` ("Cachaço rei", 0.9.11): 5º tipo, só aparece na última onda do Nível 2 da horda (`Ids.BOSS`). Peso 620–640 kg,
+`health_per_kg` 7,0 (vida 4.340–4.480), `aggression: "always"`, `aggro_radius_m` 60, `max_charges` 99, `charge_damage` 40,
+`charge_speed_mps` 12, `recover_s` 1,8, `turn_speed_deg_s` 140, `crop_drain_pct_per_s` 0,35, `body_scale_mult` 1,15 (escala ≈
+2,125). Peso ≤ 640 kg por causa do teto de rede de 655 kg (`u16 × 0,01 kg`). `charge_damage` e `recover_s` são os botões
+de ajuste da luta; vida mínima ÷ (dano da arma mais forte × multiplicador de cabeça) ≥ 10 tiros é travado por
+`test_data::test_boss_needs_many_shots_with_the_strongest_weapon`. Números, tabela de tiros e medição:
+`docs/plano_horda_boss.md` §2. Um 5º tipo não muda o protocolo: o tipo viaja como índice `u8` em `Data.get_boar_type_ids()`.
 ```json
 {
   "version": 1,
@@ -2437,7 +2498,15 @@ Peso sorteado: `lerp(min, max, (randf() + randf()) / 2)` (tende ao meio).
      "charge_max_distance_m": 30.0, "recover_s": 1.8,
      "vision_range_m": 45.0, "vision_fov_deg": 140.0, "hearing_mult": 1.2, "alert_time_s": 0.8,
      "crop_drain_pct_per_s": 0.25, "wounded_health_frac": 0.25, "wounded_speed_mult": 0.85,
-     "flee_rest_min_s": 15.0, "flee_rest_max_s": 25.0, "dog_damage_per_s": 25.0}
+     "flee_rest_min_s": 15.0, "flee_rest_max_s": 25.0, "dog_damage_per_s": 25.0},
+    {"id": "boss", "name": "Cachaço rei", "weight_min_kg": 620.0, "weight_max_kg": 640.0, "health_per_kg": 7.0, "value_per_kg": 4.0,
+     "walk_speed_mps": 2.4, "run_speed_mps": 8.0, "charge_speed_mps": 12.0, "turn_speed_deg_s": 140.0,
+     "aggression": "always", "aggro_radius_m": 60.0, "max_charges": 99, "charge_damage": 40.0, "charge_telegraph_s": 0.6,
+     "charge_max_distance_m": 40.0, "recover_s": 1.8,
+     "vision_range_m": 60.0, "vision_fov_deg": 160.0, "hearing_mult": 1.5, "alert_time_s": 0.5,
+     "crop_drain_pct_per_s": 0.35, "wounded_health_frac": 0.20, "wounded_speed_mult": 0.95,
+     "flee_rest_min_s": 10.0, "flee_rest_max_s": 15.0, "dog_damage_per_s": 30.0,
+     "body_scale_mult": 1.15}
   ]
 }
 ```
@@ -2622,7 +2691,12 @@ Modo Horda Javali: mapa e prop do objetivo, intervalos, dreno do estoque (`barn_
 `contract.crop_drain_mult`), anel de comer, velocidade da corrida ao celeiro, teto de carcaças, multiplicador de
 javalis por jogador, prêmio de abate (`kill_reward_mult`), bônus de vitória e as `waves` (cada uma com `groups`
 no formato de grupo da §9.6). Esquema, regras de validação (inclusive o teto de 255 javalis por partida) e
-seed: `docs/horda.md` §3. Dono: game-systems; leitores: B (`HuntController`, `HordeDirector`, `Boar`), systems
+seed: `docs/horda.md` §3. **`waves` por nível (0.9.11):** `waves` é chave de `HORDE_OVERRIDE_KEYS`; o array do topo vale
+para o Nível 1 (**8 ondas**, 128 javalis base) e `levels[1].overrides.waves` é o do Nível 2 (**10 ondas**, 129 base, a última
+com `boss` e `alpha`). Os dois níveis têm números de ondas diferentes, e isso é contrato: lobby, HUD, `HordeDirector` e
+testes leem o `waves` do nível **resolvido** (`Data.get_horde_level(n)`), nunca o do topo. O teto de ids
+(`Σ ceil(total × max(player_count_mult)) ≤ NetCodec.MAX_BOARS_PER_HUNT`) é validado por nível resolvido: Nível 2 usa
+**250 de 255**. Dono: game-systems; leitores: B (`HuntController`, `HordeDirector`, `Boar`), systems
 (`Profile.horde_*`, lobby, resultado), `Net` (`map_id`).
 
 ### 9.11 `data/upgrades.json` e acréscimos de 1.7 (F1 em 0.9.5; F2 em 0.9.6; F3 em 0.9.7; F4 em 0.9.8)
@@ -2903,6 +2977,15 @@ Os sandboxes do A que liam privados do `Hud` passam a ler os novos (HF6-A): `hud
 `get_reserve_text() == "| ∞"` e `get_mag_text()` = pente na horda; "| <reserva>" no contrato), `hud_net_test` e
 `spectator_sandbox` (`_weapon_frame` no lugar de `_bottomright_margin`). `flow_test`, `playthrough` e o
 `mobile_probe.py` não mudam (o probe não lê o painel; roda na publicação porque o layout do toque mudou).
+
+Chefão da horda nível 2 (0.9.11): `tests/boss_fight.tscn` mede a luta (tiros, segundos, investidas, celeiro perdido,
+munição; cerca de 4 min por semente) e **fica fora da cadeia de todo commit** — rode quando mexer em vida do chefão,
+`charge_damage`, `recover_s`, dano de arma, multiplicadores de zona ou munição do Nível 2:
+`tools/godot.sh --headless --fixed-fps 60 --path . res://tests/boss_fight.tscn -- --only=duel_338,duel_3006,wave10 --seed=404`
+(só falha se a onda 10 não for alcançada ou o chefão não morrer). A chave `--only=boss` existe em
+`src/hunt/debug/horde2_selftest.tscn` (1–4 jogadores: 1 chefão e 2 alfas, 10 ondas, 129 base, ≤ 255 ids) e em
+`src/hunt/debug/net_horde2_test.tscn` (`EV_BOSS_HP`, `NET_MSG_BOSS`). Nenhum teste junta um chefão vivo a uma `BossBar`
+real (as cenas de caçada headless não instanciam a `Hud`); o `hud_horde2_test` cobre a barra com o sinal emitido à mão.
 
 Ganchos de produção para o bot (já no contrato): `PlayerBase.bot_*`, `get_ammo_*`, `is_reloading`;
 `HuntWorld.get_alive_boar_ids`, `get_boar_position`, `get_boar_zone_position`, `get_boar_type`,
@@ -3576,6 +3659,24 @@ apêndice) e, em `scene_paths.gd`, logo depois de `prop`:
 static func item_view(item_id: StringName) -> String:
 	return "res://assets/models/items/%s_view.tscn" % item_id
 ```
+
+### Acréscimos 0.9.11 (Horda nível 2: chefão) — já aplicados em `src/core/`
+
+Fonte: `docs/plano_horda_boss.md` §4.1. Aditivos. Os arquivos reais são a referência.
+
+```gdscript
+# ids.gd (bloco "# Boar types", depois de ALPHA)
+const BOSS: StringName = &"boss"      ## Horde level 2: the boss of the last wave
+
+# game_events.gd (bloco "Horde mode", depois de horde_wave_progress; registrado em tests/lib/contract_sigs.gd)
+signal horde_boss_health_changed(pct: float)   # B HuntController -> A Hud; 0..100, 100 on spawn, one 0 on death
+
+# net_codec.gd (depois de EV_AMMO_CRATE)
+const EV_BOSS_HP: int = 0x2F           ## Horde level 2: health of the boss of the last wave, pct u8 (0..100)
+```
+
+Fora de `src/core/`, mas parte do mesmo contrato: `HuntController.MSG_BOSS` (`"O cachaço rei entrou na área!"`) e
+`NET_MSG_BOSS = 6` (§8.12), `BoarSpawner.UNIQUE_TYPES = [ALPHA, BOSS]` e o campo `body_scale_mult` de `data/boars.json` (§9.5).
 
 ### `src/core/game_events.gd`
 ```gdscript

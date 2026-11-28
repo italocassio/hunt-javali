@@ -20,7 +20,7 @@ func test_ids_constants_match_data() -> void:
 			ok(item_ids.has(value), "Ids.%s = %s nao existe em equipment.json" % [cname, value])
 		elif cname.begins_with("D_"):
 			ok(dog_ids.has(value), "Ids.%s = %s nao existe em dogs.json" % [cname, value])
-	for id: StringName in [Ids.PIGLET, Ids.SOW, Ids.BOAR, Ids.ALPHA]:
+	for id: StringName in [Ids.PIGLET, Ids.SOW, Ids.BOAR, Ids.ALPHA, Ids.BOSS]:
 		ok(boar_ids.has(id), "tipo de javali %s ausente em boars.json" % id)
 	# And the other direction: every data id has an Ids constant.
 	var known: Dictionary = {}
@@ -68,6 +68,39 @@ func test_boar_types_sane() -> void:
 	ok(rules.has("zone_multipliers"), "boar_rules.zone_multipliers")
 	for zone: StringName in [Ids.ZONE_HEAD, Ids.ZONE_VITAL, Ids.ZONE_BODY, Ids.ZONE_REAR]:
 		ok((rules.get("zone_multipliers", {}) as Dictionary).has(String(zone)), "zone_multipliers sem %s" % zone)
+
+
+func test_boss_needs_many_shots_with_the_strongest_weapon() -> void:
+	## Locks the game owner's request (docs/plano_horda_boss.md 2 and 2.1): the level-2 boss must never become easy.
+	## With the strongest weapon, a head kill takes >= 10 shots and a body kill 20 to 30. If this fails, someone
+	## softened the fight (boss health, weapon damage or zone multipliers): that is a game-design decision, not a
+	## routine tweak. Confirm with the owner before changing the limits here.
+	var boss: Dictionary = Data.get_boar_type(Ids.BOSS)
+	ok(not boss.is_empty(), "tipo boss existe em boars.json")
+	var min_health: float = float(boss.get("weight_min_kg", 0.0)) * float(boss.get("health_per_kg", 0.0))
+	ok(min_health > 0.0, "vida minima do boss > 0 (%s)" % str(min_health))
+	var best_id: StringName = &""
+	var best_dmg: float = 0.0
+	for id: StringName in Data.get_weapon_ids():
+		var w: Dictionary = Data.get_weapon(id)
+		var per_shot: float = float(w.get("damage", 0.0)) * float(maxi(int(w.get("pellets", 1)), 1))
+		if per_shot > best_dmg:
+			best_dmg = per_shot
+			best_id = id
+	ok(best_dmg > 0.0, "ha uma arma com dano > 0")
+	if best_dmg <= 0.0 or min_health <= 0.0:
+		return
+	var mults: Dictionary = Data.get_boar_rules().get("zone_multipliers", {})
+	var head_mult: float = float(mults.get(String(Ids.ZONE_HEAD), 0.0))
+	var body_mult: float = float(mults.get(String(Ids.ZONE_BODY), 0.0))
+	ok(head_mult > 0.0 and body_mult > 0.0, "multiplicadores de cabeca e corpo > 0")
+	if head_mult <= 0.0 or body_mult <= 0.0:
+		return
+	var head_shots: int = ceili(min_health / (best_dmg * head_mult))
+	var body_shots: int = ceili(min_health / (best_dmg * body_mult))
+	print("INFO boss: vida minima %.0f, arma %s (%.0f/tiro), cabeca %d tiros, corpo %d tiros" % [min_health, best_id, best_dmg, head_shots, body_shots])
+	ok(head_shots >= 10, "chefao amoleceu: cabeca em %d tiros com %s (esperado >= 10). Pedido do dono: a luta do Cachaco rei nao pode ficar facil sem ele saber" % [head_shots, best_id])
+	ok(body_shots >= 20 and body_shots <= 30, "chefao fora da faixa: corpo em %d tiros com %s (esperado 20 a 30). Pedido do dono: a luta do Cachaco rei nao pode ficar facil, nem impossivel, sem ele saber" % [body_shots, best_id])
 
 
 func test_contract_groups_rules() -> void:
@@ -245,7 +278,7 @@ func test_horde_levels_resolve_and_reference_the_data() -> void:
 	eq((l1["boar_overrides"] as Dictionary).size(), 0, "nivel 1: sem sobrescritas de javali")
 	# level 2
 	near(float(l2["kill_reward_mult"]), 0.5, 0.0001, "nivel 2: kill_reward_mult 0,5")
-	eq(int(l2["victory_bonus_money"]), 5000, "nivel 2: bonus 5000")
+	eq(int(l2["victory_bonus_money"]), 6000, "nivel 2: bonus 6000")
 	near(float(l2["to_barn_speed_frac"]), 0.9, 0.0001, "nivel 2: to_barn_speed_frac 0,9 (override)")
 	near(float(h["to_barn_speed_frac"]), 0.8, 0.0001, "topo continua 0,8 (override nao vaza)")
 	ok(not bool(l2["ammo"]["infinite"]), "nivel 2: municao contada")

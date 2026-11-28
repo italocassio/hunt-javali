@@ -51,6 +51,9 @@ signal hunter_revived(slot: int, by_slot: int)      ## A downed hunter was picke
 # Horde mode (docs/horda.md section 4). Only emitted when HuntWorld.is_horde().
 signal horde_wave_changed(wave: int, wave_count: int, phase: StringName, countdown_s: float)   # B HuntController -> A Hud
 signal horde_wave_progress(remaining: int, wave_total: int)                                   # B HuntController -> A Hud
+## Health of the boss of the last wave, 0..100: 100 when it appears, 0 when it dies (docs/plano_horda_boss.md
+## section 4). Host and offline emit it at most at 4 Hz; the client gets it from EV_BOSS_HP. B HuntController -> A Hud
+signal horde_boss_health_changed(pct: float)
 
 # HUD
 signal hud_message_requested(text: String, duration_s: float)
